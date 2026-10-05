@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vehicle Tracker</title>
+<title>FICSIT Monitor</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M14 8 3 14l2-6-2-6z' fill='%23fa9549'/></svg>">
 <style>
   :root {
@@ -11,6 +11,9 @@
     --text: #e6e8eb; --muted: #8c94a1; --accent: #fa9549; --accent-dim: #fa954933;
     --ok: #5fcf80; --warn: #f2c14e; --bad: #ef5f5f; --info: #5fa8ef; --driven: #c39cf7;
     --head1: 34px;
+    --serious: #ec835a; --track: #2f3540;
+    /* chart series (categorical slots 1-4, dark steps validated against --panel for CVD separation) */
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
@@ -135,33 +138,378 @@
   button.b:hover { border-color: var(--accent); }
   button.b.on { border-color: var(--accent); color: var(--accent); }
   button.layer { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-  button.layer i { width: 14px; height: 3px; border-radius: 2px; opacity: .35; }
+  button.layer i { width: 14px; height: 3px; border-radius: 2px; opacity: .35; flex: none; }
   button.layer.on { color: var(--text); border-color: #4a5260; background: var(--panel-3); }
   button.layer.on i { opacity: 1; }
   button.layer .n { color: var(--muted); font-size: 11px; }
-  #map { width: 100%; height: 62vh; min-height: 360px; display: block; border-radius: 8px;
-         border: 1px solid var(--line); background: #0d1013; cursor: grab; }
-  #map.dragging { cursor: grabbing; }
+
   @media (max-width: 700px) { header, main { padding-left: 16px; padding-right: 16px; } .conn { margin-left: 0; } }
+
+  /* ---- tabs ---- */
+  nav.tabs { display: flex; gap: 2px; background: var(--panel-3); border: 1px solid var(--line); border-radius: 8px; padding: 3px; }
+  nav.tabs button { background: none; border: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600;
+                    padding: 5px 14px; border-radius: 6px; cursor: pointer; }
+  nav.tabs button:hover { color: var(--text); }
+  nav.tabs button.on { background: var(--panel-2); color: var(--accent); box-shadow: 0 1px 0 #0006; }
+  @media (max-width: 700px) { nav.tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; } nav.tabs button { padding: 5px 10px; flex: none; } }
+  .stats[hidden], .banner[hidden] { display: none !important; }
+
+  /* ---- shared pieces of the Production / Power tabs ---- */
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
+  .toolbar .right { margin-left: auto; }
+  .f-input.search { width: 280px; max-width: 100%; height: 30px; font-size: 13px; }
+  .f-input.search.sm { width: 220px; height: 26px; margin-left: auto; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chips.wrap { margin-bottom: 8px; }
+  .chips .lbl { font-size: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+          border-radius: 14px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .chip:hover { color: var(--text); border-color: #4a5260; }
+  .chip.on { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
+  .chip .n { color: var(--muted); font-size: 11px; }
+  .chip .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  /* segmented control: a labelled row of joined buttons, one choice per group (radio) */
+  .seg-group { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+  .seg-group.right { margin-left: auto; }
+  .seg-group > span:not(.lbl) { display: block; min-width: 0; max-width: 100%; }
+  .seg-group .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel-2);
+         max-width: 100%; overflow-x: auto; scrollbar-width: none; }   /* narrow screens: swipe sideways inside the control */
+  .seg button { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; border-left: 1px solid var(--line);
+                color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; white-space: nowrap; height: 28px; }
+  .seg button:first-child { border-left: none; }
+  .seg button:hover { color: var(--text); background: var(--panel-3); }
+  .seg button.on { color: var(--text); background: var(--accent-dim); box-shadow: inset 0 -2px 0 var(--accent); }
+  .seg button .n { color: var(--muted); font-size: 11px; }
+  .seg button .sw { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 0; }
+  .tile.warn { border-color: #f2c14e66; }
+  /* clickable tiles: the tile (and any dotted-underlined count in it) filters / sorts or jumps to the details */
+  .tile.click { cursor: pointer; transition: border-color .15s, background .15s; }
+  .tile.click:hover { border-color: #4a5260; background: var(--panel-2); }
+  .tile.on { border-color: var(--accent); background: var(--accent-dim); }
+  .tl { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .tl:hover { color: var(--text); }
+  .tl.on { color: var(--accent); text-decoration-style: solid; }
+  @keyframes flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }
+  .t-label { color: var(--muted); font-size: 12px; }
+  .t-val { font-size: 24px; font-weight: 600; line-height: 1.25; margin: 2px 0; }
+  .t-val small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .t-sub { color: var(--muted); font-size: 12px; }
+  .tile.bad { border-color: #ef5f5f66; }
+  .warn-text { color: var(--warn); } .bad-text { color: var(--bad); }
+  @media (max-width: 600px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .t-val { font-size: 20px; } }
+  .small { font-size: 12px; margin: 8px 0 0; }
+  .banner.bad { background: #ef5f5f1a; border-color: #ef5f5f66; color: var(--bad); margin: 0 0 12px; font-weight: 600; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; min-width: 0; }
+  .card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 10px; }
+  .card-head h2 { margin: 0; font-size: 15px; }
+  .card-head .hint { color: var(--muted); font-size: 12px; }
+  .card-head .b { margin-left: auto; }
+  .card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
+  .cols { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
+  @media (min-width: 1100px) {
+    .cols { grid-template-columns: minmax(0, 1.25fr) minmax(360px, 1fr); align-items: start; }
+    .cols.even { grid-template-columns: 1fr 1fr; }
+    .card.sticky { position: sticky; top: 12px; }
+  }
+  .icon { width: 24px; height: 24px; object-fit: contain; flex: none; vertical-align: middle; }
+  .icon.sm { width: 18px; height: 18px; }
+  .with-icon { display: inline-flex; align-items: center; gap: 8px; }
+  h2.with-icon { display: flex; } h2.with-icon .icon { width: 28px; height: 28px; }
+  .sub { font-size: 11px; }
+  .u { font-size: 11px; }
+
+  /* simple sortable tables */
+  .dtw { max-height: 60vh; background: var(--panel); }
+  .dtw.tall { max-height: 70vh; }
+  /* Production/Power tables reuse the Vehicles header (tr.sort-row, .rz); no filter row under it, so it carries the bottom rule */
+  table.dt tr.sort-row th { border-bottom: 2px solid var(--line); }
+  table.dt.fixed td { overflow: hidden; text-overflow: ellipsis; }
+  table.dt td { padding: 5px 10px; vertical-align: middle; }
+  table.dt tr.sel { background: var(--accent-dim); }
+  /* rows related to the clicked item: blue edge = makes it, orange = uses it; the rest fade */
+  table.dt tr.rel-make td:first-child { box-shadow: inset 4px 0 0 var(--s1); }
+  table.dt tr.rel-use td:first-child { box-shadow: inset 4px 0 0 var(--s2); }
+  table.dt tbody.focus tr:not(.rel-make):not(.rel-use) { opacity: .45; }
+  .focus-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 8px; }
+  .focus-bar:empty { display: none; }
+  .focus-bar .key { width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid; display: inline-block; }
+  .focus-bar .key.make { border-color: var(--s1); } .focus-bar .key.use { border-color: var(--s2); margin-left: 6px; }
+  .focus-bar .b { margin-left: auto; }
+  .f-multi.pick { width: auto; min-width: 150px; max-width: 220px; }
+  .popover label .icon.sm { margin: -2px 0; }
+  table.dt tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  table.dt .io { white-space: nowrap; line-height: 1.5; }
+  table.dt .io .icon.sm { margin: 0 2px 0 4px; }
+
+  /* table + map side by side (map below on narrow screens) */
+  .split { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .map-side .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  @media (min-width: 1200px) {
+    .split { grid-template-columns: minmax(0, 1.8fr) minmax(360px, 1fr); align-items: start; }
+    .map-side { position: sticky; top: 12px; }
+  }
+  .mv-head { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .mv-head .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mv-head .btns.right { margin-left: auto; }
+  .mv-box { position: relative; }
+  .mv-box canvas { width: 100%; height: 62vh; min-height: 320px; display: block; border-radius: 8px; border: 1px solid var(--line);
+                   background: #0d1013; cursor: grab; }
+  .mv-box canvas.dragging { cursor: grabbing; }
+  .mv-hint { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: var(--muted); background: rgba(13,16,19,.75);
+             padding: 2px 7px; border-radius: 4px; pointer-events: none; }
+  .mapview.short .mv-box canvas { height: 44vh; }
+  .f-multi.mv-layers { width: auto; min-width: 130px; height: 28px; }
+  .mv-menu { z-index: 40; min-width: 220px; }
+  .mv-menu .mv-sw { width: 16px; display: inline-flex; justify-content: center; }
+  .mv-menu .mv-sw i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+  .mv-menu .mv-sw .icon.sm, .mv-menu .mv-sw .vimg { width: 18px; height: 18px; margin: 0; }
+  .mv-menu .pop-list { max-height: 60vh; }
+  .mv-menu .pop-group { cursor: pointer; user-select: none; }
+  /* the exploration map's header keeps one height whether or not something is picked (no map resize on click) */
+  .g-map > .card-head { min-height: 30px; align-items: center; flex-wrap: nowrap; }
+  .g-map #pgNodeFilter { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .g-map #pgNodeFilter .b { padding: 2px 8px; font-size: 11px; margin-left: 4px; }
+  .mv-menu .pop-group:hover { color: var(--accent); }
+  .mv-menu .pop-foot { gap: 8px; }
+
+  /* production: items | machines on top, item details | map below; on desktop it all fits one screen */
+  .pgrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 14px; }
+  .pgrid > .pcol { min-width: 0; }
+  .tiles.compact { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .tiles.compact .tile { padding: 6px 12px; }
+  .tiles.compact .t-val { font-size: 18px; margin: 0; }
+  .tiles.compact .t-sub { line-height: 1.35; }
+  .tiles.compact .t-sub .fill { width: 40px; }
+  .detail-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .p-detail .kv { margin-top: 4px; }
+  @media (max-width: 700px) { .detail-lists { grid-template-columns: 1fr; } }
+  /* power: chart + battery + breakdowns on the left, generators + map on the right */
+  .break-cols { display: grid; grid-template-columns: 1fr; gap: 0 18px; }
+  @media (min-width: 900px) { .break-cols { grid-template-columns: 1fr 1fr; } }
+  .flash { animation: flash 1.6s ease-out; }
+  /* desktop: tabs marked .onescreen fit the window; each panel scrolls inside itself */
+  @media (min-width: 1200px) and (hover: hover) and (pointer: fine) {
+    .tab.onescreen:not([hidden]) { display: flex; flex-direction: column; height: calc(100vh - var(--hdr, 58px)); padding-bottom: 12px; }
+    .onescreen .toolbar { margin-bottom: 8px; }
+    .onescreen .banner.bad { flex: none; }
+    .onescreen .pgrid { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 12px; }
+    .onescreen .pcol { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+    .onescreen .pcol > .card { margin: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 10px 12px; }
+    .onescreen .card-head { margin-bottom: 6px; }
+    .onescreen .table-wrap { flex: 1; min-height: 0; max-height: none; }
+    .onescreen .mapview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .onescreen .mv-box { flex: 1; min-height: 0; }
+    .onescreen .mv-box canvas { height: 100%; min-height: 0; }
+    .onescreen .lc.lc-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .onescreen .lc.lc-fill .lc-box { flex: 1; min-height: 0; }
+    .onescreen .lc.lc-fill .lc-box svg { position: absolute; top: 0; left: 0; }
+    #tab-production .f-input.search { width: 210px; }
+    #tab-production .pgrid { grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); }
+    #tab-production .p-items { flex: 1; } #tab-production .p-mach { flex: 1.15; }
+    #tab-production .p-map { flex: 2.3; } #tab-production .p-detail { flex: 1; overflow-y: auto; }
+    #tab-production .detail-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+    #tab-production .detail-lists { grid-template-columns: 1fr; }
+    #tab-power .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); }
+    #tab-power .w-chart { flex: 1.3; } #tab-power .w-batt { flex: 0 0 132px; } #tab-power .w-break { flex: 1; overflow-y: auto; }
+    #tab-power .w-map { flex: 1.9; } #tab-power .w-gens { flex: 1; }   /* big map on top, generators table under it */
+    .onescreen .card-body { flex: 1; min-height: 0; overflow-y: auto; }
+    #tab-progression .pgrid { grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 1.35fr); }
+    #tab-progression .g-elev, #tab-progression .g-hub { flex: 0 0 auto; }   /* only as tall as their content */
+    #tab-progression .g-other { flex: 1; }
+    #tab-progression .g-tiers { flex: 1.15; } #tab-progression .g-world { flex: 1; }
+    #tab-progression .g-map { flex: 1; }
+    #tab-progression .tiers { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+    #tab-progression .kv { grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); }
+    /* bar rows in narrow scrolling panels: no fixed value-column width, room for the scrollbar */
+    .onescreen .card-body .hb { grid-template-columns: minmax(120px, 42%) minmax(40px, 1fr) auto; gap: 8px; }
+    .onescreen .card-body .hb-val { min-width: 0; padding-right: 4px; }
+  }
+
+
+  /* expand-to-full-screen button and state */
+  .has-xp { position: relative; }
+  .xp-btn { position: absolute; top: 8px; right: 8px; z-index: 4; width: 26px; height: 26px; display: grid; place-items: center;
+            background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; opacity: .75; }
+  .xp-btn:hover { color: var(--accent); border-color: var(--accent); opacity: 1; }
+  .card.has-xp > .card-head, .map-col.has-xp > .map-head { padding-right: 34px; }
+  .card.has-xp > .mapview .mv-head { padding-right: 34px; }
+  .vt-table > .xp-btn { top: 4px; right: 14px; }   /* over the table's header row, clear of the scrollbar */
+  body.xp-open { overflow: hidden; }
+  body.xp-open::before { content: ""; position: fixed; inset: 0; background: rgba(8, 10, 13, .72); z-index: 14; }
+  .xp-on { position: fixed !important; inset: 14px; z-index: 15; margin: 0 !important; display: flex !important; flex-direction: column;
+           overflow: hidden; background: var(--panel); border: 1px solid #4a5260; border-radius: 10px; padding: 12px 14px;
+           box-shadow: 0 20px 60px #000c; max-height: none !important; height: auto !important; }
+  .xp-on .xp-btn { opacity: 1; color: var(--accent); border-color: var(--accent); }
+  .xp-on .card-body, .xp-on .hbars, .xp-on #pDetailBody { overflow-y: auto; }
+  .xp-on .card-body { flex: 1; min-height: 0; }
+  .xp-on .table-wrap { flex: 1; min-height: 0; max-height: none !important; }
+  .xp-on .mapview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .xp-on .mv-box { flex: 1; min-height: 0; }
+  .xp-on .mv-box canvas { height: 100% !important; min-height: 0; }
+  .xp-on .lc.lc-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .xp-on .lc.lc-fill .lc-box { flex: 1; min-height: 0; }
+  .xp-on .lc.lc-fill .lc-box svg { position: absolute; top: 0; left: 0; }
+  .xp-on.p-detail .detail-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; flex: 1; min-height: 0; }
+  .xp-on.p-detail #pChart { display: flex; flex-direction: column; min-height: 0; }
+  .xp-on .tiers { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .p-detail:not(.xp-on) .lc .lc-box { height: 150px; flex: none; }   /* item chart: fixed height unless expanded */
+
+  /* overview */
+  .ov-session { margin: -2px 0 12px; font-size: 14px; }
+  .attn-list { display: flex; flex-direction: column; gap: 4px; }
+  a.attn { display: flex; align-items: baseline; gap: 10px; padding: 7px 10px; border-radius: 6px; text-decoration: none; color: var(--text);
+           background: var(--panel-3); border-left: 3px solid var(--muted); font-size: 13px; }
+  a.attn:hover { background: var(--panel-2); }
+  a.attn .ai { width: 16px; text-align: center; flex: none; }
+  a.attn .go { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  a.attn.bad { border-left-color: var(--bad); } a.attn.bad .ai { color: var(--bad); }
+  a.attn.warn { border-left-color: var(--warn); } a.attn.warn .ai { color: var(--warn); }
+  a.attn.ok { border-left-color: var(--ok); } a.attn.ok .ai { color: var(--ok); }
+  a.attn.info { border-left-color: var(--info); } a.attn.info .ai { color: var(--info); }
+  .ov-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 14px; }
+  a.card.link { display: block; color: inherit; text-decoration: none; }
+  a.card.link:hover { border-color: #4a5260; }
+  a.card.link:hover .card-head .hint { color: var(--accent); }
+  .big { font-size: 24px; font-weight: 600; line-height: 1.3; }
+  .big small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .t-sub + .t-sub { margin-top: 3px; }
+  .mini-list { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .mini-list b { color: var(--text); font-weight: 600; margin-left: 2px; }
+  #ovChart { margin-top: 8px; }
+  /* overview cards: richer content */
+  .ov-card h3 { margin: 10px 0 4px; }
+  .ov-card h3 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .stack { display: flex; gap: 2px; height: 10px; margin: 8px 0 4px; }
+  .stack i { display: block; min-width: 3px; border-radius: 2px; }
+  .stack-key { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--muted); }
+  .stack-key i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .kvrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 2px 0; font-size: 13px; min-width: 0; }
+  .kvrow > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kvrow b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .vtypes { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .vt { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+  .vt .vimg { width: 26px; height: 26px; margin: -3px 0; }
+  .vt-st { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+  .part { display: grid; grid-template-columns: minmax(0, 1fr) 70px auto; align-items: center; gap: 8px; font-size: 13px; padding: 1px 0; }
+  .part .fill { width: 64px; margin: 0; }
+  .part > span:last-child { font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; min-width: 74px; }
+  .figs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .figs > div { display: flex; flex-direction: column; font-size: 12px; min-width: 0; }
+  .figs b { font-size: 14px; font-weight: 600; white-space: nowrap; }
+
+  /* progression */
+  .lead { margin: 10px 0 8px; }
+  .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .step { display: flex; flex-direction: column; padding: 6px 8px; border-radius: 6px; background: var(--panel-3); border-top: 3px solid var(--line); font-size: 12px; min-width: 0; }
+  .step b { font-size: 15px; } .step span { overflow: hidden; text-overflow: ellipsis; }
+  .step.done { border-top-color: var(--ok); } .step.done b { color: var(--ok); }
+  .step.cur { border-top-color: var(--accent); background: var(--accent-dim); } .step.cur b { color: var(--accent); }
+  .cost-row { display: grid; grid-template-columns: minmax(170px, 1.2fr) 70px minmax(150px, 1.3fr); align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .cost-row .fill { width: 64px; }
+  .cost-meta { font-variant-numeric: tabular-nums; }
+  .tiers { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+  .tier { background: var(--panel-3); border-radius: 6px; padding: 8px 10px; }
+  .tier.locked { opacity: .5; }
+  .tier-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .tier-head .fill { width: 80px; margin: 0; }
+  .ms { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ms .m { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+  .ms .m.got { color: var(--ok); border-color: #5fcf8044; background: #5fcf8012; }
+  .hb[data-node] { cursor: pointer; border-radius: 4px; }
+  .hb.on { background: var(--accent-dim); }
+  @media (max-width: 600px) { .steps { grid-template-columns: repeat(3, 1fr); } .cost-row { grid-template-columns: 1fr auto; } .cost-row .cost-meta { grid-column: 1 / -1; } }
+
+  /* item detail */
+  .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 10px 0 4px; }
+  .kv > div { display: flex; flex-direction: column; font-size: 12px; }
+  .kv b { font-size: 17px; font-weight: 600; }
+  .glist .g { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .glist .g-name { flex: 1; min-width: 0; }
+  .glist .g-val { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  /* line chart */
+  .lc-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .lc-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .lc-legend i { width: 16px; height: 2px; border-radius: 1px; display: inline-block; }
+  .lc-legend i.dash { -webkit-mask: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 8px); mask: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 8px); }
+  .lc-box { position: relative; }
+  .lc-box svg { display: block; overflow: visible; touch-action: pan-y; }
+  .lc-grid line { stroke: #2a2f38; stroke-width: 1; }
+  .lc-grid line.base { stroke: #3b424e; }
+  .lc-grid text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .lc-empty { fill: var(--muted); font-size: 13px; }
+  .lc-cross { stroke: #8c94a1; stroke-width: 1; }
+  .lc-dot { stroke: var(--panel); stroke-width: 2; }
+  .lc-tip { position: absolute; top: 4px; display: none; pointer-events: none; z-index: 5; background: var(--panel-2); border: 1px solid var(--line);
+            border-radius: 7px; padding: 6px 10px; font-size: 12px; box-shadow: 0 8px 24px #0009; white-space: nowrap; }
+  .lc-tip-head { color: var(--muted); margin-bottom: 3px; }
+  .lc-tip div:not(.lc-tip-head) { display: flex; align-items: center; gap: 7px; line-height: 1.6; }
+  .lc-tip i { width: 12px; height: 2px; display: inline-block; }
+  .lc-tip b { font-variant-numeric: tabular-nums; min-width: 60px; }
+
+  /* horizontal bars */
+  .hbars { display: flex; flex-direction: column; gap: 2px; }
+  .hb { display: grid; grid-template-columns: minmax(150px, 38%) 1fr auto; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; }
+  .hb:hover { background: #ffffff08; }
+  .hb-label { min-width: 0; overflow: hidden; }
+  .hb-track { position: relative; height: 12px; }
+  .hb-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; min-width: 2px; }
+  .hb-val { white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; min-width: 110px; }
+  @media (max-width: 600px) { .hb { grid-template-columns: 1fr auto; } .hb-track { grid-column: 1 / -1; grid-row: 2; } }
   /* desktop (wide screen + mouse): map sits to the right of the table; phones/tablets keep it below */
   @media (min-width: 1200px) and (hover: hover) and (pointer: fine) {
-    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 38%); gap: 18px; align-items: start; }
+    #tab-vehicles { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 38%); gap: 18px; align-items: start; }
+    #tab-vehicles[hidden] { display: none; }
     .table-wrap { max-height: calc(100vh - 110px); }
     .map-col { position: sticky; top: 12px; }
     .map-col .map-head { margin-top: 0; }
-    #map { height: calc(100vh - 150px); }
+    #vehMap .mv-box canvas { height: calc(100vh - 240px); }
+    /* Vehicles and Overview fill the window height too (table / map stretch to the bottom) */
+    #tab-vehicles:not([hidden]) { height: calc(100vh - var(--hdr, 58px)); grid-template-rows: minmax(0, 1fr); align-items: stretch; padding-bottom: 12px; }
+    #tab-vehicles .vt-table { display: flex; flex-direction: column; min-height: 0; }
+    #tab-vehicles .table-wrap { flex: 1; min-height: 0; max-height: none; }
+    #tab-vehicles .map-col { position: relative; top: auto; display: flex; flex-direction: column; min-height: 0; }
+    #tab-overview:not([hidden]) { display: flex; flex-direction: column; height: calc(100vh - var(--hdr, 58px)); padding-bottom: 12px; }
+    #tab-overview .ov-cols { flex: 1; min-height: 0; align-items: stretch; }
+    #tab-overview .ov-left { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    #tab-overview .ov-left > .card { margin: 0; flex: 0 1 auto; max-height: 34%; display: flex; flex-direction: column; min-height: 0; }
+    #tab-overview .attn-list { overflow-y: auto; min-height: 0; }
+    /* the four summary cards share the rest of the height as a 2 x 2 grid */
+    #tab-overview .ov-cards { flex: 1; min-height: 0; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    #tab-overview .ov-card { margin: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    #tab-overview .ov-body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 8px; }   /* room for the scrollbar */
+    #tab-overview #ovChart { flex: 1; min-height: 60px; }
+    #tab-overview #ovChart.lc-fill { display: flex; flex-direction: column; }
+    #tab-overview #ovChart .lc-box { flex: 1; min-height: 0; }
+    #tab-overview #ovChart .lc-box svg { position: absolute; top: 0; left: 0; }
+    #tab-overview .ov-world { position: relative; top: auto; display: flex; flex-direction: column; min-height: 0; margin: 0; }
+    #vehMap, #ovMap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    #vehMap .mv-box, #ovMap .mv-box { flex: 1; min-height: 0; }
+    #vehMap .mv-box canvas, #ovMap .mv-box canvas { height: 100%; min-height: 0; }
   }
 </style>
 </head>
 <body>
 <header>
-  <h1><span>FICSIT</span> Vehicle Tracker</h1>
-  <div class="stats" id="stats"></div>
+  <h1><span>FICSIT</span> Monitor</h1>
+  <nav class="tabs" id="tabs">
+    <button data-tab="overview">Overview</button><button data-tab="vehicles">Vehicles</button><button data-tab="production">Production</button><button data-tab="power">Power</button><button data-tab="progression">Progression</button>
+  </nav>
+  <div class="stats" id="statsOv" data-for="overview" hidden></div>
+  <div class="stats" id="stats" data-for="vehicles"></div>
+  <div class="stats" id="statsProd" data-for="production" hidden></div>
+  <div class="stats" id="statsPower" data-for="power" hidden></div>
+  <div class="stats" id="statsProg" data-for="progression" hidden></div>
   <div class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
 </header>
 
 <div class="banner" id="banner"></div>
-<main>
+<main id="tab-vehicles" class="tab">
+  <div class="vt-table">
   <div class="table-wrap" id="tableWrap">
     <table id="table">
       <colgroup id="colgroup"></colgroup>
@@ -172,23 +520,14 @@
       <tbody id="tbody"></tbody>
     </table>
   </div>
+  </div>
   <div class="popover" id="popover"></div>
   <div class="cargo-pop" id="cargoPop"></div>
 
   <div class="map-col">
   <div class="map-head">
     <h2>Live map</h2>
-    <div class="btns">
-      <button class="b layer" data-layer="vehPaths"><i style="background:#f0f4fa"></i>Vehicle paths</button>
-      <button class="b layer" data-layer="cartPaths"><i style="background:#ff8a1f"></i>Cart paths</button>
-      <button class="b layer" data-layer="rails"><i style="background:#c39cf7"></i>Train tracks</button>
-      <button class="b layer" data-layer="droneRoutes"><i style="background:repeating-linear-gradient(90deg,#f06292 0 3px,transparent 3px 5px)"></i>Drone routes</button>
-      <button class="b layer" data-layer="stations"><i style="background:linear-gradient(90deg,#f2c14e 33%,#2ec4b6 33% 66%,#f06292 66%);border-radius:2px"></i>Stations</button>
-      <button class="b" id="btnFit">Fit vehicles</button>
-      <button class="b" id="btnWorld">Whole map</button>
-    </div>
     <div class="map-info">
-      <span class="hint">scroll to zoom · drag to pan · click a row to follow</span>
       <div class="legend">
         <span><i style="background:#5fcf80"></i>moving</span><span><i style="background:#5fa8ef"></i>docking</span>
         <span><i style="background:#c5cad3"></i>stopped</span><span><i style="background:#c39cf7"></i>driven</span>
@@ -199,10 +538,16 @@
       </div>
     </div>
   </div>
-  <canvas id="map"></canvas>
+  <div id="vehMap"></div>
   </div>
 </main>
+<main id="tab-overview" class="tab" hidden></main>
+<main id="tab-production" class="tab onescreen" hidden></main>
+<main id="tab-power" class="tab onescreen" hidden></main>
+<main id="tab-progression" class="tab onescreen" hidden></main>
 
+<script src="/js/charts.js"></script>
+<script src="/js/map.js"></script>
 <script>
 "use strict";
 // ---- config ---------------------------------------------------------------
@@ -242,10 +587,7 @@ const history = new Map();  // id -> recent world positions [{t,x,y,z}]
 let hoverId = null, followId = null;
 let sort = { key: "type", dir: 1 };   // type never changes, and ties fall back to vehicle ID, so rows stay put
 let hasSpeed = false;       // patched FRM reports autopilot speed (LocationSource field present)
-const layers = (() => {   // map layer toggles, remembered per browser
-  const d = { vehPaths: true, cartPaths: true, rails: true, droneRoutes: true, stations: true };
-  try { return { ...d, ...JSON.parse(localStorage.getItem("vt.layers") || "{}") }; } catch { return d; }
-})();
+const layers = new Proxy({}, { get: (_, k) => vmap.isOn(k) });   // map layer toggles (state lives in the shared map)
 
 const MULTI_KEYS = ["type", "status", "next", "route", "near", "cargo"];
 const DEFAULT_FILTERS = { id: "", type: [], status: [], next: [], route: [], routeMode: "any", cargo: [], cargoMode: "any", fill: "", near: [], auto: "", driver: "" };
@@ -304,12 +646,17 @@ function fromWheeled(c) {
   };
 }
 
+// FRM's self-driving / path error codes -> words ("SDLE_StationUnreachable" -> "Station unreachable")
+const trainErr = code => !code || /_NoError$/.test(code) ? "" :
+  code.replace(/^[A-Z]+_/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().replace(/^./, c => c.toUpperCase());
 function fromTrain(t) {
   const id = t.ID || "Train_" + t.Name;
+  // a self-driving train can be stuck with an autopilot / pathing error (no route, station unreachable, no power…)
+  const autoErr = t.Status === "Self-Driving" ? trainErr(t.SelfDriving) || trainErr(t.Path) : "";
   const dist = travelled(id, t.location);
   const speed = typeof t.ForwardSpeed === "number" ? Math.abs(t.ForwardSpeed) : null;
   const isMoving = (speed !== null && speed > 1) || dist > MOVE_MIN_CM;
-  const status = t.Derailed || t.Status === "Derailed" ? "error"
+  const status = t.Derailed || t.Status === "Derailed" || autoErr ? "error"
                : t.Status === "Manual Driving" ? "driven"
                : t.Docking && t.Docking !== "TDS_None" ? "docking"
                : isMoving ? "moving" : "stopped";
@@ -319,7 +666,7 @@ function fromTrain(t) {
   const cars = t.Vehicles || [];
   const locos = cars.filter(c => /Locomotive/i.test(c.ClassName)).length;
   return {
-    id, type: "Train", name: t.Name, status, error: t.Derailed ? "Derailed" : t.Status, speed,
+    id, type: "Train", name: t.Name, status, error: t.Derailed ? "Derailed" : autoErr || t.Status, speed,
     consist: cars.length ? `${locos} loco${locos === 1 ? "" : "s"}+${cars.length - locos} car${cars.length - locos === 1 ? "" : "s"}` : "",
     route: stops, nextStop: stops.find(s => s.next)?.name || t.TrainStation || "",
     autopilot: t.Status === "Self-Driving", driver: t.Status === "Manual Driving" ? "(manual)" : "",
@@ -379,7 +726,7 @@ const uniq = arr => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCom
 // every item in the game (items.json, extracted from the game's CommunityResources/Docs/en-US.json);
 // items not on any vehicle right now are dimmed but still selectable
 let gameItems = [];
-fetch("/items.json").then(r => r.json()).then(j => { gameItems = j; fluidSet = fluidNames(); if (popKey === "cargo") renderPopover(); }).catch(() => {});
+const itemsReady = fetch("/items.json").then(r => r.json()).then(j => { gameItems = j; fluidSet = fluidNames(); if (popKey === "cargo") renderPopover(); }).catch(() => {});
 function cargoOptions() {
   const onboard = new Set(vehicles.flatMap(v => v.items.map(i => i.name)));
   const known = new Map(gameItems.map(i => [i.name, i.kind]));
@@ -502,11 +849,13 @@ const autoWidths = {};      // measured defaults for columns the user hasn't siz
 let layoutPending = true, justResized = false;
 const MAX_AUTO_W = 320, MIN_W = 48;
 
+let resizingKey = null;   // column whose edge is being dragged (spare width goes elsewhere meanwhile)
 function applyWidths() {
   const cs = cols();
-  $("colgroup").innerHTML = cs.map(c => `<col data-col="${c.key}" style="width:${userWidths[c.key] || autoWidths[c.key] || 100}px">`).join("");
-  const total = cs.reduce((a, c) => a + (userWidths[c.key] || autoWidths[c.key] || 100), 0);
-  $("table").style.width = Math.max(total, $("tableWrap").clientWidth - 2) + "px";
+  const ws = settleWidths(cs.map(c => userWidths[c.key] || autoWidths[c.key] || 100), $("tableWrap").clientWidth - 2,
+                          cs.findIndex(c => c.key === resizingKey));
+  $("colgroup").innerHTML = cs.map((c, i) => `<col data-col="${c.key}" style="width:${ws[i]}px">`).join("");
+  $("table").style.width = ws.reduce((a, b) => a + b, 0) + "px";
   $("table").classList.add("fixed");
 }
 
@@ -555,11 +904,11 @@ $("sortRow").addEventListener("mousedown", e => {
   e.preventDefault(); e.stopPropagation(); closePopover();
   const key = h.dataset.rz, col = $("colgroup").querySelector(`col[data-col="${key}"]`);
   const startX = e.clientX, startW = col.getBoundingClientRect().width || parseFloat(col.style.width);
-  h.classList.add("dragging"); document.body.classList.add("resizing");
+  resizingKey = key; h.classList.add("dragging"); document.body.classList.add("resizing");
   const move = ev => { userWidths[key] = Math.max(MIN_W, Math.round(startW + ev.clientX - startX)); applyWidths(); };
   const up = () => {
     removeEventListener("mousemove", move); removeEventListener("mouseup", up);
-    h.classList.remove("dragging"); document.body.classList.remove("resizing");
+    h.classList.remove("dragging"); document.body.classList.remove("resizing"); resizingKey = null; applyWidths();
     try { localStorage.setItem("vt.widths", JSON.stringify(userWidths)); } catch {}
     justResized = true; setTimeout(() => justResized = false, 0);   // swallow the click that follows
   };
@@ -569,11 +918,12 @@ $("sortRow").addEventListener("dblclick", e => { const h = e.target.closest(".rz
 
 // window resize (or crossing the desktop/mobile breakpoint): refit the columns to the new table width
 let lastWrapW = 0;
-addEventListener("resize", () => {
+new ResizeObserver(() => {
   const w = $("tableWrap").clientWidth;
+  if (!w) return;   // hidden tab
   if (Math.abs(w - lastWrapW) > 40) { lastWrapW = w; layoutPending = true; layoutColumns(); }
   else if ($("table").classList.contains("fixed")) applyWidths();
-});
+}).observe($("tableWrap"));
 
 function renderFilterControls() {
   for (const c of cols()) {
@@ -782,7 +1132,7 @@ function renderStats() {
     `<span class="stat" style="color:var(--ok)"><b>${counts.moving}</b>moving</span>` +
     `<span class="stat" style="color:var(--info)"><b>${counts.docking}</b>docking</span>` +
     `<span class="stat muted"><b>${counts.stopped}</b>stopped</span>` +
-    (counts.error ? `<span class="stat" style="color:var(--bad)"><b>${counts.error}</b>errors</span>` : "") +
+    (counts.error ? `<span class="stat" style="color:var(--bad)"><b>${counts.error}</b>${counts.error === 1 ? "error" : "errors"}</span>` : "") +
     `<span class="stat"><b>${vehicles.filter(v => v.items.length).length}</b>loaded</span>`;
 }
 
@@ -796,6 +1146,7 @@ async function getJSON(ep) {
 
 let fitted = false;
 async function poll() {
+  if (activeTab !== "vehicles") return;
   try {
     const [wheeled, trains, drones, ports] = await Promise.all([getJSON("getVehicles"), getJSON("getTrains").catch(() => []),
       getJSON("getDrone").catch(() => []), getJSON("getDroneStation").catch(() => null)]);
@@ -844,34 +1195,39 @@ function droneLinks() {
   return links;
 }
 
-function renderLayerButtons() {
-  const counts = { vehPaths: paths.filter(p => !p.cart).length, cartPaths: paths.filter(p => p.cart).length,
-                   rails: rails.length, droneRoutes: droneLinks().length,
-                   stations: truckStations.length + trainStations.length + dronePorts.length };
-  for (const b of document.querySelectorAll("button.layer")) {
-    const k = b.dataset.layer;
-    b.classList.toggle("on", layers[k]);
-    let n = b.querySelector(".n"); if (!n) { n = document.createElement("span"); n.className = "n"; b.appendChild(n); }
-    n.textContent = counts[k];
-    b.title = `${layers[k] ? "Hide" : "Show"} ${b.textContent.replace(/\d+$/, "").trim().toLowerCase()} (${counts[k]} segments/stations)`;
-  }
-}
-document.querySelector(".map-head .btns").addEventListener("click", e => {
-  const b = e.target.closest("button.layer"); if (!b) return;
-  layers[b.dataset.layer] = !layers[b.dataset.layer];
-  try { localStorage.setItem("vt.layers", JSON.stringify(layers)); } catch {}
-  renderLayerButtons();
-});
+function renderLayerButtons() { vmap.renderButtons(); }
 
 // ---- map ------------------------------------------------------------------------
-const canvas = $("map"), ctx = canvas.getContext("2d");
 const mapImg = new Image(); mapImg.src = "/map.avif";
-let view = { s: 0.1, ox: 0, oy: 0 };   // screen = img * s + o  (CSS px)
+// the shared map component (js/map.js) does pan/zoom/layers/coordinates; this tab adds its drawing via draw()
+// vehicles drawn on the map: the table's filters, minus vehicle types switched off in the map's Layers dropdown
+const onMap = () => visible().filter(v => layers["v:" + v.type]);
+// transport network layers, drawn by drawNetwork() on the Vehicles and Overview maps
+const networkLayers = () => [
+  { key: "vehPaths", group: "Transport", label: "Vehicle paths", swatch: "background:#f0f4fa", count: () => paths.filter(p => !p.cart).length },
+  { key: "cartPaths", group: "Transport", label: "Cart paths", swatch: "background:#ff8a1f", count: () => paths.filter(p => p.cart).length },
+  { key: "rails", group: "Transport", label: "Train tracks", swatch: "background:#c39cf7", count: () => rails.length },
+  { key: "droneRoutes", group: "Transport", label: "Drone routes", swatch: "background:repeating-linear-gradient(90deg,#f06292 0 3px,transparent 3px 5px)", count: () => droneLinks().length },
+  { key: "truckStations", group: "Stations", label: "Truck stations", swatch: "background:#f2c14e;width:9px;height:9px;border-radius:2px", count: () => truckStations.length },
+  { key: "trainStations", group: "Stations", label: "Train stations", swatch: "background:#2ec4b6;width:9px;height:9px;border-radius:2px", count: () => trainStations.length },
+  { key: "dronePorts", group: "Stations", label: "Drone ports", swatch: "background:#f06292;width:9px;height:9px;border-radius:2px", count: () => dronePorts.length },
+];
+const vmap = new MapView($("vehMap"), {
+  storeKey: "vt.layers", animate: true, dim: 0.35, fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
+  layerMenu: true, players: true,
+  // a layer per vehicle type (picture + count), then the transport network; players are added by MapView
+  layers: [...Object.keys(TYPES).map(t => ({ key: "v:" + t, group: "Vehicles", label: t, swatchHtml: typeImg(t),
+            count: () => vehicles.filter(v => v.type === t).length })), ...networkLayers()],
+  draw: (c, now) => draw(now),
+  fitTo: () => { const vs = onMap(); return (vs.length ? vs : vehicles).map(v => worldToImg(v.loc.x, v.loc.y)); },
+  onPan: () => { if (followId) { followId = null; renderTable(); } },
+});
+const canvas = vmap.canvas, ctx = vmap.ctx, view = vmap.view;   // screen = img * s + o  (CSS px)
 
 function worldToImg(x, y) {
   return { x: (x - WORLD.x0) / (WORLD.x1 - WORLD.x0) * IMG, y: (y - WORLD.y0) / (WORLD.y1 - WORLD.y0) * IMG };
 }
-const toScreen = p => ({ x: p.x * view.s + view.ox, y: p.y * view.s + view.oy });
+const toScreen = p => vmap.toScreen(p);
 
 function interp(m, now) {
   const t = Math.min(1, (now - m.t0) / POLL_MS);
@@ -879,25 +1235,10 @@ function interp(m, now) {
   return { x: m.fx + (m.tx - m.fx) * t, y: m.fy + (m.ty - m.fy) * t, rot: m.frot + d * t };
 }
 
-function resize() {
-  const r = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
-  canvas.width = r.width * dpr; canvas.height = r.height * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-addEventListener("resize", resize);
-
-function fitBox(pts, pad = 60) {
-  if (!pts.length) return;
-  const r = canvas.getBoundingClientRect();
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
-  const w = Math.max(x1 - x0, 40), h = Math.max(y1 - y0, 40);
-  view.s = Math.min((r.width - pad * 2) / w, (r.height - pad * 2) / h, 3);
-  view.ox = r.width / 2 - (x0 + x1) / 2 * view.s;
-  view.oy = r.height / 2 - (y0 + y1) / 2 * view.s;
-}
-function fitVehicles() { const vs = visible(); fitBox((vs.length ? vs : vehicles).map(v => worldToImg(v.loc.x, v.loc.y))); }
-function fitWorld() { fitBox([{ x: 0, y: 0 }, { x: IMG, y: IMG }], 10); }
+const resize = () => vmap.resize();
+const fitBox = (pts, pad = 60) => vmap.fitBox(pts, pad);
+function fitVehicles() { vmap.fit(); }
+function fitWorld() { vmap.fitWorld(); }
 function centerOn(id, zoom) {
   const m = motion.get(id); if (!m) return;
   const r = canvas.getBoundingClientRect(), p = interp(m, performance.now());
@@ -905,26 +1246,11 @@ function centerOn(id, zoom) {
   view.ox = r.width / 2 - p.x * view.s; view.oy = r.height / 2 - p.y * view.s;
 }
 
-let drag = null;
-canvas.addEventListener("mousedown", e => { drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy }; canvas.classList.add("dragging"); });
-addEventListener("mouseup", () => { drag = null; canvas.classList.remove("dragging"); });
-addEventListener("mousemove", e => {
-  if (!drag) return;
-  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  if (Math.abs(dx) + Math.abs(dy) > 3 && followId) { followId = null; renderTable(); }
-  view.ox = drag.ox + dx; view.oy = drag.oy + dy;
-});
-canvas.addEventListener("wheel", e => {
-  e.preventDefault();
-  const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-  const s = Math.min(8, Math.max(0.04, view.s * Math.exp(-e.deltaY * 0.0015)));
-  view.ox = mx - (mx - view.ox) * (s / view.s); view.oy = my - (my - view.oy) * (s / view.s); view.s = s;
-}, { passive: false });
 canvas.addEventListener("mousemove", e => {   // hovering a marker highlights its row
-  if (drag) return;
+  if (vmap.dragging) return;
   const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, now = performance.now();
   let best = null, bd = 14;
-  for (const v of visible()) {
+  for (const v of onMap()) {
     const m = motion.get(v.id); if (!m) continue;
     const p = toScreen(interp(m, now)), d = Math.hypot(p.x - mx, p.y - my);
     if (d < bd) { bd = d; best = v.id; }
@@ -935,11 +1261,12 @@ canvas.addEventListener("mousemove", e => {   // hovering a marker highlights it
   const st = stationAt(mx, my);
   if (st) showPopAt(stationPopHtml(st), e.clientX, e.clientY); else hideCargoPop();
 });
-canvas.addEventListener("mouseleave", () => { setHover(null); mouseWorld = null; hideCargoPop(); });
+canvas.addEventListener("mouseleave", () => { setHover(null); hideCargoPop(); });
 
 // ---- station contents popup on the map ---------------------------------------------
 function stationAt(mx, my) {
-  const groups = [["drone", dronePorts], ["truck", truckStations], ["train", trainStations]];
+  // only station types that are shown on the map
+  const groups = [["drone", dronePorts, "dronePorts"], ["truck", truckStations, "truckStations"], ["train", trainStations, "trainStations"]].filter(g => layers[g[2]]);
   let best = null, bd = 11;
   for (const [kind, list] of groups) for (const s of list) {
     const p = toScreen(worldToImg(s.location.x, s.location.y)), d = Math.hypot(p.x - mx, p.y - my);
@@ -976,30 +1303,9 @@ function showPopAt(html, x, y) {
   cargoPop.style.top = (y + 18 + r.height > innerHeight ? Math.max(8, y - r.height - 10) : y + 18) + "px";
 }
 
-// world coordinates under the cursor (shown bottom-right of the map)
-let mouseWorld = null;
-canvas.addEventListener("mousemove", e => {
-  const r = canvas.getBoundingClientRect();
-  const ix = (e.clientX - r.left - view.ox) / view.s, iy = (e.clientY - r.top - view.oy) / view.s;
-  mouseWorld = { x: WORLD.x0 + ix / IMG * (WORLD.x1 - WORLD.x0), y: WORLD.y0 + iy / IMG * (WORLD.y1 - WORLD.y0) };
-});
-function drawCoords() {
-  if (!mouseWorld) return;
-  const r = canvas.getBoundingClientRect();
-  const fmt = n => Math.round(n / 100).toLocaleString();
-  const text = `X ${fmt(mouseWorld.x)} m   Y ${fmt(mouseWorld.y)} m`;
-  ctx.font = "600 13px Consolas, 'Segoe UI', monospace"; ctx.textBaseline = "middle";
-  const w = ctx.measureText(text).width, bx = r.width - w - 26, by = r.height - 36;
-  ctx.fillStyle = "rgba(13,16,19,.85)"; ctx.fillRect(bx, by, w + 16, 26);
-  ctx.strokeStyle = "rgba(250,149,73,.6)"; ctx.lineWidth = 1; ctx.strokeRect(bx + .5, by + .5, w + 15, 25);
-  ctx.fillStyle = "#fff"; ctx.fillText(text, bx + 8, by + 13);
-}
-
-$("btnFit").onclick = () => { followId = null; fitVehicles(); renderTable(); };
-$("btnWorld").onclick = () => { followId = null; fitWorld(); renderTable(); };
 
 // icons/lines shrink as you zoom out (full size from ~0.8 zoom up, never below 40%)
-const iconScale = () => Math.max(0.4, Math.min(1, Math.sqrt(view.s / 0.8)));
+const iconScale = (mv = vmap) => Math.max(0.4, Math.min(1, Math.sqrt(mv.view.s / 0.8)));
 
 function drawMarker(v, p, rot, isF) {
   const t = TYPES[v.type] || TYPES["Factory Cart"], size = isF ? t.size + 4 : t.size * iconScale();
@@ -1014,14 +1320,14 @@ function drawMarker(v, p, rot, isF) {
   ctx.fill(); ctx.stroke(); ctx.restore();
 }
 
-function drawStation(s, color, label, dim) {
-  const p = toScreen(worldToImg(s.location.x, s.location.y)), r = canvas.getBoundingClientRect();
+function drawStation(mv, s, color, label, dim) {
+  const ctx = mv.ctx, p = mv.toScreen(worldToImg(s.location.x, s.location.y)), r = mv.canvas.getBoundingClientRect();
   if (p.x < -50 || p.y < -50 || p.x > r.width + 50 || p.y > r.height + 50) return;
   ctx.globalAlpha = dim ? 0.3 : 1;
-  const h = 5 * iconScale();
+  const h = 5 * iconScale(mv);
   ctx.fillStyle = color; ctx.strokeStyle = "#0d1013"; ctx.lineWidth = h > 3 ? 2 : 1;
   ctx.beginPath(); ctx.rect(p.x - h, p.y - h, h * 2, h * 2); ctx.fill(); ctx.stroke();
-  if (view.s > 0.2 && !dim) {
+  if (mv.view.s > 0.2 && !dim) {
     const w = ctx.measureText(s.Name).width, box = { x: p.x + h + 4, y: p.y - 8, w: w + 8, h: 16 };
     if (claimLabel(box)) {   // skip names that would overlap ones already drawn this frame
       ctx.fillStyle = "rgba(13,16,19,.75)"; ctx.fillRect(box.x, box.y, box.w, box.h);
@@ -1063,66 +1369,62 @@ const stopsFor = v => v.rail ? { list: trainStations, color: STATION_COLOR.train
                     : v.air ? { list: dronePorts, color: STATION_COLOR.drone }
                     : { list: truckStations, color: STATION_COLOR.truck };
 
-function draw(now) {
-  const r = canvas.getBoundingClientRect();
-  ctx.clearRect(0, 0, r.width, r.height);
+// Roads, cart paths, train tracks, drone routes and stations, on any map (Vehicles and Overview).
+// on(key) says which layers are shown. focus (Vehicles only): stops = station names to leave out because they're
+// drawn highlighted, drone = a drone is focused (other routes fade), link(l) = that drone's own route.
+function drawNetwork(mv, on, focus = {}) {
+  const ctx = mv.ctx, view = mv.view;
   placedLabels = [];
-  if (followId && !drag) centerOn(followId, false);
-
-  if (mapImg.complete && mapImg.naturalWidth) {
-    ctx.imageSmoothingEnabled = view.s < 1;
-    ctx.drawImage(mapImg, view.ox, view.oy, IMG * view.s, IMG * view.s);
-    ctx.fillStyle = "rgba(10,12,16,.35)"; ctx.fillRect(0, 0, r.width, r.height);
-  }
-
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   const stroke = (pts, color, width) => {
     if (pts.length < 2) return;
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
-    pts.forEach((q, i) => { const s = toScreen(worldToImg(q.x, q.y)); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
+    pts.forEach((q, i) => { const s = mv.toScreen(worldToImg(q.x, q.y)); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
     ctx.stroke();
   };
   const w = Math.max(1, Math.min(4, 3 * view.s));
   // paths drawn like roads: dark casing underneath, bright opaque line on top
-  const k = iconScale(), pw = Math.max(1.2, Math.min(5, 3.5 * view.s)), casing = pw + 3 * k;
+  const k = iconScale(mv), pw = Math.max(1.2, Math.min(5, 3.5 * view.s)), casing = pw + 3 * k;
   // all casings first, then all lines, so segment joins don't show dark seams
-  const shown = paths.filter(p => p.cart ? layers.cartPaths : layers.vehPaths);
+  const shown = paths.filter(p => p.cart ? on("cartPaths") : on("vehPaths"));
   for (const p of shown) stroke(p.pts, "rgba(10,12,16,.85)", casing);
   for (const p of shown) stroke(p.pts, p.cart ? PATH_COLOR.cart : PATH_COLOR.vehicle, pw);
-  if (layers.rails) {   // two-tone so track reads differently from roads; casings first to avoid seams
+  if (on("rails")) {   // two-tone so track reads differently from roads; casings first to avoid seams
     for (const r of rails) stroke(r.pts, "rgba(13,16,19,.8)", w + 3 * k);
     for (const r of rails) stroke(r.pts, "rgba(195,156,247,.85)", Math.max(1, w - 0.5));
   }
+  const isLink = focus.link || (() => false);
+  if (on("droneRoutes") || focus.drone) {
+    ctx.setLineDash([8 * k, 6 * k]);
+    for (const l of droneLinks()) {
+      if (isLink(l)) continue;
+      if (on("droneRoutes")) stroke(l, focus.drone ? "rgba(240,98,146,.2)" : "rgba(240,98,146,.75)", Math.max(1, w * k));
+    }
+    ctx.setLineDash([]);
+    for (const l of droneLinks()) if (isLink(l)) {
+      stroke(l, "rgba(13,16,19,.85)", Math.max(4, w + 4));
+      stroke(l, "#f06292", Math.max(2.5, w + 1));
+    }
+  }
+  ctx.font = "11px Segoe UI, sans-serif"; ctx.textBaseline = "middle";
+  const fade = !!focus.stops, skip = s => focus.stops && focus.stops.has(s.Name);
+  // each station type is its own layer; label priority when names collide: train, then truck, then drone
+  if (on("trainStations")) for (const s of trainStations) if (!skip(s)) drawStation(mv, s, STATION_COLOR.train, "#b5efe8", fade);
+  if (on("truckStations")) for (const s of truckStations) if (!skip(s)) drawStation(mv, s, STATION_COLOR.truck, "#f7e2a8", fade);
+  if (on("dronePorts")) for (const s of dronePorts) if (!skip(s)) drawStation(mv, s, STATION_COLOR.drone, "#f8c6d8", fade);
+}
 
+// called by the shared map each frame, after it has drawn the map image
+function draw(now) {
+  if (followId && !vmap.dragging && !vmap.anim) centerOn(followId, false);   // let a glide finish first
   // focused vehicle (hovered row/marker or followed): its stops stand out, other stations fade;
   // for drones the link between their two ports is drawn solid too
   const focusV = (hoverId || followId) && vehicles.find(v => v.id === (hoverId || followId));
   const focusStops = focusV && focusV.route && focusV.route.length ? new Set(focusV.route.map(w => w.name)) : null;
   const focusDrone = focusV && focusV.type === "Drone" ? focusV : null;
   const focusPorts = focusDrone ? focusStops : null;
-  const isFocusLink = l => focusPorts && focusPorts.size === 2 && l.names.every(n => focusPorts.has(n));
-
-  if (layers.droneRoutes || focusDrone) {
-    ctx.setLineDash([8 * k, 6 * k]);
-    for (const l of droneLinks()) {
-      if (isFocusLink(l)) continue;
-      if (layers.droneRoutes) stroke(l, focusDrone ? "rgba(240,98,146,.2)" : "rgba(240,98,146,.75)", Math.max(1, w * k));
-    }
-    ctx.setLineDash([]);
-    for (const l of droneLinks()) if (isFocusLink(l)) {
-      stroke(l, "rgba(13,16,19,.85)", Math.max(4, w + 4));
-      stroke(l, "#f06292", Math.max(2.5, w + 1));
-    }
-  }
-
-  if (layers.stations) {
-    ctx.font = "11px Segoe UI, sans-serif"; ctx.textBaseline = "middle";
-    const fade = !!focusStops, skip = s => focusStops && focusStops.has(s.Name);
-    // label priority when names collide: train stations, then truck stations, then drone ports
-    for (const s of trainStations) if (!skip(s)) drawStation(s, STATION_COLOR.train, "#b5efe8", fade);
-    for (const s of truckStations) if (!skip(s)) drawStation(s, STATION_COLOR.truck, "#f7e2a8", fade);
-    for (const s of dronePorts) if (!skip(s)) drawStation(s, STATION_COLOR.drone, "#f8c6d8", fade);
-  }
+  drawNetwork(vmap, k => layers[k], { stops: focusStops, drone: !!focusDrone,
+    link: l => focusPorts && focusPorts.size === 2 && l.names.every(n => focusPorts.has(n)) });
 
   if (focusStops) {   // stops drawn even if the Stations layer is off; dotted guide from vehicle to its next stop
     const { list, color } = stopsFor(focusV);
@@ -1141,7 +1443,7 @@ function draw(now) {
     });
   }
 
-  const vs = visible(), focus = hoverId || followId;
+  const vs = onMap(), focus = hoverId || followId;
   vs.sort((a, b) => (a.id === focus) - (b.id === focus));   // focused one on top
   for (const v of vs) {
     const m = motion.get(v.id); if (!m) continue;
@@ -1166,9 +1468,85 @@ function draw(now) {
     }
     ctx.globalAlpha = 1;
   }
-  drawCoords();
-  requestAnimationFrame(draw);
 }
+
+// ---- cut-off text ------------------------------------------------------------------
+// Any text shortened with "…" (table cells and headers, bar labels, tiles, phase names) shows in full on hover.
+// The Vehicles table and the Production machine rows have their own richer hover popups, so they're skipped.
+const CLIPPABLE = "table.dt td, table.dt th, tr.sort-row th, .hb-label, .t-sub, .t-label, .step span, .glist .g-name, .lc-legend span";
+document.addEventListener("mousemove", e => {
+  if (e.target.closest("#tbody, #pMachines tbody, canvas, .popover, .cargo-pop")) return;
+  const el = e.target.closest(CLIPPABLE);
+  const clipped = el && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1);
+  if (clipped && el.textContent.trim()) {
+    cargoPop.innerHTML = `<div class="row"><span>${esc(el.textContent.replace(/\s+/g, " ").trim())}</span></div>`;
+    cargoPop.dataset.clip = "1"; showPopAt(cargoPop.innerHTML, e.clientX, e.clientY);
+  } else if (cargoPop.dataset.clip) { cargoPop.dataset.clip = ""; hideCargoPop(); }
+});
+
+// ---- expand any panel to full screen ------------------------------------------------
+// Every panel (cards, the Vehicles table and map) gets a button in its top-right corner that makes it fill the
+// window over a dimmed page; the same button (or Esc) puts it back. Maps, charts and tables follow the new size.
+const XP_ICON = { open: '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
+                  close: '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>' };
+function addExpanders() {
+  for (const el of document.querySelectorAll("main.tab .card, .vt-table, .map-col")) {
+    if (el.querySelector(":scope > .xp-btn")) continue;
+    el.classList.add("has-xp");
+    const b = document.createElement("button");
+    b.className = "xp-btn"; b.type = "button"; b.title = "Expand to full screen"; b.innerHTML = XP_ICON.open;
+    el.prepend(b);
+  }
+}
+function setExpanded(el) {
+  const cur = document.querySelector(".xp-on");
+  if (cur) { cur.classList.remove("xp-on"); const b = cur.querySelector(":scope > .xp-btn"); b.innerHTML = XP_ICON.open; b.title = "Expand to full screen"; }
+  document.body.classList.toggle("xp-open", !!el && el !== cur);
+  if (!el || el === cur) return;
+  el.classList.add("xp-on");
+  const b = el.querySelector(":scope > .xp-btn"); b.innerHTML = XP_ICON.close; b.title = "Back to normal size (Esc)";
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest(".xp-btn"); if (!b) return;
+  e.preventDefault(); e.stopPropagation();   // Overview cards are links: don't navigate
+  setExpanded(b.parentElement);
+}, true);
+addEventListener("keydown", e => { if (e.key === "Escape" && document.querySelector(".xp-on")) setExpanded(null); });
+
+// ---- tabs -----------------------------------------------------------------------
+// #overview / #vehicles / #production / #power / #progression in the URL, so a tab can be bookmarked; the last one is remembered
+const TABS = { overview: "Overview", vehicles: "Vehicles", production: "Production", power: "Power", progression: "Progression" };
+let activeTab = (() => {
+  const h = location.hash.slice(1); if (TABS[h]) return h;
+  try { const t = localStorage.getItem("ft.tab"); return TABS[t] ? t : "overview"; } catch { return "overview"; }
+})();
+function setConn(ok, msg) {
+  $("dot").className = ok ? "dot ok" : "dot bad";
+  $("conn").textContent = ok ? "live · " + new Date().toLocaleTimeString() : "offline: " + msg;
+}
+// header height, for tabs laid out to fit one screen (CSS var --hdr)
+const setHdr = () => document.documentElement.style.setProperty("--hdr", document.querySelector("header").offsetHeight + "px");
+new ResizeObserver(setHdr).observe(document.querySelector("header"));   // stats can wrap the header
+function showTab(tab) {
+  if (!TABS[tab]) tab = "overview";
+  activeTab = tab;
+  try { localStorage.setItem("ft.tab", tab); } catch {}
+  if (location.hash.slice(1) !== tab) window.history.replaceState(null, "", "#" + tab);
+  document.title = `${TABS[tab]} · FICSIT Monitor`;
+  for (const b of $("tabs").children) b.classList.toggle("on", b.dataset.tab === tab);
+  for (const m of document.querySelectorAll("main.tab")) m.hidden = m.id !== "tab-" + tab;
+  for (const s of document.querySelectorAll(".stats[data-for]")) s.hidden = s.dataset.for !== tab;
+  setHdr();
+  $("banner").hidden = tab !== "vehicles";
+  hideCargoPop(); closePopover();
+  const mods = { overview: Overview, production: Production, power: Power, progression: Progression };
+  setExpanded(null);   // leaving a tab closes any full-screen panel
+  for (const [k, m] of Object.entries(mods)) k === tab ? m.show() : m.hide();
+  addExpanders();
+  if (tab === "vehicles") { resize(); poll(); }
+}
+$("tabs").addEventListener("click", e => { const b = e.target.closest("button[data-tab]"); if (b) showTab(b.dataset.tab); });
+addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
 // ---- boot -----------------------------------------------------------------------
 resize(); fitWorld(); renderHead(); renderLayerButtons(); applyRowHeight();
@@ -1181,7 +1559,11 @@ setInterval(async () => {
   if (ts.status === "fulfilled") truckStations = ts.value;
   if (rs.status === "fulfilled") trainStations = rs.value;
 }, 3000);
-requestAnimationFrame(draw);
 </script>
+<script src="/js/production.js"></script>
+<script src="/js/power.js"></script>
+<script src="/js/progression.js"></script>
+<script src="/js/overview.js"></script>
+<script>itemsReady.then(() => showTab(activeTab));</script>
 </body>
 </html>

@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
+
+# power/production history recorded by server.py
+history.json
+history.tmp

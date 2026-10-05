@@ -1,5 +1,8 @@
 """Regenerate items.json (every item in the game, solid or fluid) from the game's own data file.
 
+Each item has its name, kind (solid/fluid), class and, for fuels, "energy": MJ per item (per m³ for fluids),
+which the Production tab uses to work out how fast generators burn their fuel.
+
   python tools/generate_items.py --game-dir "<Satisfactory install folder>"
 
 Reads <game>/CommunityResources/Docs/en-US.json, which ships with the game.
@@ -26,8 +29,12 @@ if __name__ == "__main__":
         for c in group.get("Classes", []):
             name, form = (c.get("mDisplayName") or "").strip(), c.get("mForm", "")
             if name and form != "RF_INVALID":
-                items.setdefault(name, {"name": name, "kind": "fluid" if form in ("RF_LIQUID", "RF_GAS") else "solid",
-                                        "class": c["ClassName"]})
+                fluid = form in ("RF_LIQUID", "RF_GAS")
+                item = {"name": name, "kind": "fluid" if fluid else "solid", "class": c["ClassName"]}
+                energy = float(c.get("mEnergyValue") or 0) * (1000 if fluid else 1)   # docs give fluids per litre
+                if energy > 0:
+                    item["energy"] = round(energy, 3)
+                items.setdefault(name, item)
     out = sorted(items.values(), key=lambda i: i["name"].lower())
     (ROOT / "items.json").write_text(json.dumps(out, ensure_ascii=False, indent=0), encoding="utf-8")
     print(f"items.json: {len(out)} items ({sum(i['kind'] == 'fluid' for i in out)} fluids)")
