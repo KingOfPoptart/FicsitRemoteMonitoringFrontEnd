@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vehicle Tracker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M14 8 3 14l2-6-2-6z' fill='%23fa9549'/></svg>">
+<style>
+  :root {
+    --bg: #14171c; --panel: #1c2027; --panel-2: #232831; --panel-3: #1f242c; --line: #2f3540;
+    --text: #e6e8eb; --muted: #8c94a1; --accent: #fa9549; --accent-dim: #fa954933;
+    --ok: #5fcf80; --warn: #f2c14e; --bad: #ef5f5f; --info: #5fa8ef; --driven: #c39cf7;
+    --head1: 34px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
+           padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+  h1 span { color: var(--accent); }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; }
+  .stat b { font-size: 16px; margin-right: 4px; }
+  .conn { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.bad { background: var(--bad); }
+
+  .banner { margin: 12px 20px 0; padding: 8px 12px; border-radius: 6px; font-size: 13px;
+            background: #f2c14e1a; border: 1px solid #f2c14e55; color: var(--warn); display: none; }
+  main { padding: 12px 20px 20px; }
+
+  /* table with sort row + filter row in the sticky header */
+  .table-wrap { overflow: auto; max-height: 52vh; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+  table.fixed { table-layout: fixed; }
+  th, td { padding: 7px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  /* fixed row height (resizable): text wraps inside the row and is clamped to the lines that fit;
+     cargo stays on one line until its row is clicked open, which lets that row grow */
+  #tbody td { height: var(--row-h, 60px); vertical-align: middle; padding-top: 5px; padding-bottom: 5px; }
+  td .cell { white-space: normal; overflow-wrap: anywhere; overflow: hidden;
+             display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--row-lines, 2); }
+  td.num .cell, td .pill, td .type { white-space: nowrap; }
+  td .pill + .muted { font-size: 12px; }
+  td.cargo .cell { display: block; white-space: nowrap; text-overflow: ellipsis; }
+  td.vid .cell { -webkit-line-clamp: unset; display: block; line-height: 1.3; }
+  td.vid .sub { font-size: 12px; line-height: 15px; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
+  tr.cargo-open td.cargo .cell { white-space: normal; -webkit-line-clamp: unset; }
+  table.measuring td .cell { display: block; white-space: nowrap; }
+  #tbody td:first-child { position: relative; }
+  .rh { position: absolute; left: 0; right: 0; bottom: -4px; height: 8px; cursor: row-resize; z-index: 1; }
+  .rh:hover, .rh.dragging { background: linear-gradient(transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+  body.row-resizing, body.row-resizing * { cursor: row-resize !important; user-select: none !important; }
+  .cargo-pop { position: fixed; z-index: 30; min-width: 180px; max-width: 360px; padding: 6px 4px; border-radius: 8px;
+               background: var(--panel-2); border: 1px solid var(--line); box-shadow: 0 10px 30px #000a;
+               pointer-events: none; display: none; font-size: 13px; }
+  .cargo-pop .row { display: flex; justify-content: space-between; gap: 16px; padding: 3px 9px; }
+  .cargo-pop .row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .cargo-pop .head { padding: 2px 9px 6px; margin-bottom: 3px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  tr.cargo-open td.cargo { color: var(--text); box-shadow: inset 2px 0 0 #fa954980; }
+  tr.sort-row th { overflow: hidden; text-overflow: ellipsis; }
+  .rz { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 3; }
+  .rz::after { content: ""; position: absolute; top: 8px; bottom: 8px; right: 3px; width: 1px; background: var(--line); }
+  .rz:hover::after, .rz.dragging::after { background: var(--accent); width: 2px; right: 2px; }
+  body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+  thead th { position: sticky; background: var(--panel-2); z-index: 2; }
+  tr.sort-row th { top: 0; height: var(--head1); padding-left: 8px; padding-right: 8px; color: var(--muted); font-weight: 600; font-size: 12px;
+                   text-transform: uppercase; letter-spacing: .04em; cursor: pointer; user-select: none; border-bottom: none; }
+  tr.sort-row th:hover { color: var(--text); }
+  tr.sort-row th.sorted { color: var(--text); }
+  th .arrow { color: var(--accent); margin-left: 4px; }
+  tr.filter-row th { top: var(--head1); padding: 4px 6px 7px; background: var(--panel-2); border-bottom: 2px solid var(--line); }
+  tr.filter-row th.active { box-shadow: inset 0 -2px 0 var(--accent); }
+  .f-input, .f-select, .f-multi { width: 100%; min-width: 80px; background: var(--panel-3); color: var(--text);
+          border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; font: inherit; font-size: 12px; height: 26px; }
+  .f-input::placeholder { color: #6b7380; }
+  .f-input:focus, .f-select:focus, .f-multi:focus { outline: none; border-color: var(--accent); }
+  .f-active { border-color: var(--accent); color: var(--accent); }
+  .f-multi { text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .f-multi::after { content: "▾"; color: var(--muted); }
+  .f-clear { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 400; }
+  .f-clear button { background: var(--panel-3); color: var(--text); border: 1px solid var(--line); border-radius: 5px;
+                    padding: 3px 9px; font: inherit; font-size: 12px; cursor: pointer; height: 26px; }
+  .f-clear button:hover:not(:disabled) { border-color: var(--accent); }
+  .f-clear button:disabled { opacity: .4; cursor: default; }
+
+  .popover { position: fixed; z-index: 20; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+             box-shadow: 0 10px 30px #0008; padding: 6px; min-width: 190px; display: none; }
+  .popover.open { display: block; }
+  .popover label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; cursor: pointer; font-size: 13px; }
+  .popover label:hover { background: var(--accent-dim); }
+  .popover label.empty { opacity: .45; }
+  .popover .n { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .popover input { accent-color: var(--accent); }
+  .popover .pop-list { max-height: 300px; overflow-y: auto; }
+  .popover .pop-search { width: 100%; margin: 2px 0 6px; height: 28px; }
+  .popover .pop-group { padding: 8px 8px 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+                        border-top: 1px solid var(--line); margin-top: 4px; }
+  .popover .pop-mode { display: flex; align-items: center; gap: 4px; padding: 2px 8px 6px; font-size: 12px; color: var(--muted);
+                       border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+  .popover .pop-mode label { padding: 2px 4px; font-size: 12px; color: var(--text); gap: 3px; }
+  .popover { max-width: 320px; }
+  .popover .pop-foot { display: flex; justify-content: space-between; border-top: 1px solid var(--line); margin-top: 4px; padding: 6px 4px 2px; }
+  .popover .pop-foot button { background: none; border: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+
+  td.num, th.num { text-align: right; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover, tbody tr.hl { background: var(--accent-dim); }
+  tbody tr.hl td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .route .next { color: var(--accent); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .s-moving { background: #5fcf8022; color: var(--ok); }
+  .s-docking { background: #5fa8ef22; color: var(--info); }
+  .s-stopped { background: #8c94a122; color: var(--muted); }
+  .s-driven { background: #c39cf722; color: var(--driven); }
+  .s-error { background: #ef5f5f22; color: var(--bad); }
+  .type { display: inline-flex; align-items: center; gap: 7px; }
+  .vimg { width: 28px; height: 28px; object-fit: contain; margin: -6px 0; flex: none; }
+  .popover .vimg { width: 24px; height: 24px; margin: -4px 0; }
+  .fill { display: inline-block; width: 40px; height: 6px; background: var(--line); border-radius: 3px;
+          vertical-align: middle; margin-right: 6px; overflow: hidden; }
+  .fill i { display: block; height: 100%; background: var(--accent); }
+
+  .map-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 16px 0 8px; }
+  .map-head h2 { margin: 0; font-size: 15px; }
+  .map-head .hint { color: var(--muted); font-size: 12px; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .map-head .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .map-head .map-info { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: -2px; }
+  button.b { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+             padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  button.b:hover { border-color: var(--accent); }
+  button.b.on { border-color: var(--accent); color: var(--accent); }
+  button.layer { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  button.layer i { width: 14px; height: 3px; border-radius: 2px; opacity: .35; }
+  button.layer.on { color: var(--text); border-color: #4a5260; background: var(--panel-3); }
+  button.layer.on i { opacity: 1; }
+  button.layer .n { color: var(--muted); font-size: 11px; }
+  #map { width: 100%; height: 62vh; min-height: 360px; display: block; border-radius: 8px;
+         border: 1px solid var(--line); background: #0d1013; cursor: grab; }
+  #map.dragging { cursor: grabbing; }
+  @media (max-width: 700px) { header, main { padding-left: 16px; padding-right: 16px; } .conn { margin-left: 0; } }
+  /* desktop (wide screen + mouse): map sits to the right of the table; phones/tablets keep it below */
+  @media (min-width: 1200px) and (hover: hover) and (pointer: fine) {
+    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 38%); gap: 18px; align-items: start; }
+    .table-wrap { max-height: calc(100vh - 110px); }
+    .map-col { position: sticky; top: 12px; }
+    .map-col .map-head { margin-top: 0; }
+    #map { height: calc(100vh - 150px); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>FICSIT</span> Vehicle Tracker</h1>
+  <div class="stats" id="stats"></div>
+  <div class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
+</header>
+
+<div class="banner" id="banner"></div>
+<main>
+  <div class="table-wrap" id="tableWrap">
+    <table id="table">
+      <colgroup id="colgroup"></colgroup>
+      <thead>
+        <tr class="sort-row" id="sortRow"></tr>
+        <tr class="filter-row" id="filterRow"></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="popover" id="popover"></div>
+  <div class="cargo-pop" id="cargoPop"></div>
+
+  <div class="map-col">
+  <div class="map-head">
+    <h2>Live map</h2>
+    <div class="btns">
+      <button class="b layer" data-layer="vehPaths"><i style="background:#f0f4fa"></i>Vehicle paths</button>
+      <button class="b layer" data-layer="cartPaths"><i style="background:#ff8a1f"></i>Cart paths</button>
+      <button class="b layer" data-layer="rails"><i style="background:#c39cf7"></i>Train tracks</button>
+      <button class="b layer" data-layer="droneRoutes"><i style="background:repeating-linear-gradient(90deg,#f06292 0 3px,transparent 3px 5px)"></i>Drone routes</button>
+      <button class="b layer" data-layer="stations"><i style="background:linear-gradient(90deg,#f2c14e 33%,#2ec4b6 33% 66%,#f06292 66%);border-radius:2px"></i>Stations</button>
+      <button class="b" id="btnFit">Fit vehicles</button>
+      <button class="b" id="btnWorld">Whole map</button>
+    </div>
+    <div class="map-info">
+      <span class="hint">scroll to zoom · drag to pan · click a row to follow</span>
+      <div class="legend">
+        <span><i style="background:#5fcf80"></i>moving</span><span><i style="background:#5fa8ef"></i>docking</span>
+        <span><i style="background:#c5cad3"></i>stopped</span><span><i style="background:#c39cf7"></i>driven</span>
+        <span><i style="background:#ef5f5f"></i>error</span>
+        <span><i style="background:#f2c14e;border-radius:2px"></i>truck station</span>
+        <span><i style="background:#2ec4b6;border-radius:2px"></i>train station</span>
+        <span><i style="background:#f06292;border-radius:2px"></i>drone port</span>
+      </div>
+    </div>
+  </div>
+  <canvas id="map"></canvas>
+  </div>
+</main>
+
+<script>
+"use strict";
+// ---- config ---------------------------------------------------------------
+const POLL_MS = 1000;
+// World bounds of the 8192x8192 in-game map image, same as FRM's own map (Unreal cm).
+const WORLD = { x0: -324698.16796875, y0: -375000, x1: 425301.83203125, y1: 375000 };
+const IMG = 8192;
+
+const TYPES = {   // order = filter order; size/shape for map markers; slots = inventory slots (wiki)
+  "Factory Cart": { shape: "arrow", size: 7, slots: 1 },
+  "Tractor":      { shape: "arrow", size: 8, slots: 25 },
+  "Truck":        { shape: "arrow", size: 10, slots: 48 },
+  "Fluid Truck":  { shape: "arrow", size: 10, tankM3: 3200 },
+  "Explorer":     { shape: "arrow", size: 8, slots: 12 },
+  "Cyber Wagon":  { shape: "arrow", size: 8, slots: 1 },
+  "Train":        { shape: "train", size: 9 },
+  "Drone":        { shape: "drone", size: 8, slots: 9 },
+};
+const typeOf = cls =>
+  /Golfcart/i.test(cls) ? "Factory Cart" : /Tractor/i.test(cls) ? "Tractor" :
+  /FluidTruck/i.test(cls) ? "Fluid Truck" : /Truck/i.test(cls) ? "Truck" :
+  /Explorer/i.test(cls) ? "Explorer" : /Cyber|Testa/i.test(cls) ? "Cyber Wagon" : "Factory Cart";   // Cyber Wagon's class is Testa_BP_WB_C
+
+const STATUS = ["moving", "docking", "stopped", "driven", "error"];
+const STATUS_LABEL = { error: "Error", driven: "Driven", moving: "Moving", docking: "Docking", stopped: "Stopped" };
+const STATUS_ORDER = { error: 0, driven: 1, moving: 2, docking: 3, stopped: 4 };
+const STATUS_COLOR = { moving: "#5fcf80", docking: "#5fa8ef", stopped: "#c5cad3", driven: "#c39cf7", error: "#ef5f5f" };
+// station squares use colors no vehicle status uses
+const STATION_COLOR = { truck: "#f2c14e", train: "#2ec4b6", drone: "#f06292" };
+const PATH_COLOR = { vehicle: "rgba(240,244,250,.85)", cart: "#ff8a1f" };
+
+// ---- state ----------------------------------------------------------------
+let vehicles = [];
+let truckStations = [], trainStations = [], dronePorts = [], paths = [], rails = [];
+const motion = new Map();   // id -> {fx,fy,tx,ty,frot,trot,t0}  (image px, canvas angle deg)
+const history = new Map();  // id -> recent world positions [{t,x,y,z}]
+let hoverId = null, followId = null;
+let sort = { key: "type", dir: 1 };   // type never changes, and ties fall back to vehicle ID, so rows stay put
+let hasSpeed = false;       // patched FRM reports autopilot speed (LocationSource field present)
+const layers = (() => {   // map layer toggles, remembered per browser
+  const d = { vehPaths: true, cartPaths: true, rails: true, droneRoutes: true, stations: true };
+  try { return { ...d, ...JSON.parse(localStorage.getItem("vt.layers") || "{}") }; } catch { return d; }
+})();
+
+const MULTI_KEYS = ["type", "status", "next", "route", "near", "cargo"];
+const DEFAULT_FILTERS = { id: "", type: [], status: [], next: [], route: [], routeMode: "any", cargo: [], cargoMode: "any", fill: "", near: [], auto: "", driver: "" };
+const freshFilters = () => ({ ...DEFAULT_FILTERS, ...Object.fromEntries(MULTI_KEYS.map(k => [k, []])) });
+let filters = loadFilters();
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const shortId = id => "#" + String(id).replace(/^.*_/, "").slice(-5);
+const idNum = v => +String(v.id).replace(/^.*_/, "") || 0;
+
+function loadFilters() {
+  try {
+    const f = { ...freshFilters(), ...JSON.parse(localStorage.getItem("vt.filters2") || "{}") };
+    const legacyCargo = { loaded: "__loaded", empty: "__empty" };   // older saves stored single values
+    if (typeof f.cargo === "string") f.cargo = f.cargo ? [legacyCargo[f.cargo] || f.cargo.replace(/^item:/, "")] : [];
+    for (const k of MULTI_KEYS) if (!Array.isArray(f[k])) f[k] = f[k] && typeof f[k] === "string" && k !== "route" ? [f[k]] : [];
+    return f;
+  } catch { return freshFilters(); }
+}
+function saveFilters() { try { localStorage.setItem("vt.filters2", JSON.stringify(filters)); } catch {} }
+
+// ---- normalization ----------------------------------------------------------
+// FRM rotation: 0..360, 0 = north (= Unreal yaw + 90). Canvas angle: 0 = +X (east), clockwise.
+const headingToCanvas = r => (r || 0) - 90;
+
+// "moving" when speed is known; else travelled > 2 m within the last 10 s
+const MOVE_WINDOW_MS = 10000, MOVE_MIN_CM = 200;
+function travelled(id, l) {
+  const now = Date.now(), h = history.get(id) || [];
+  h.push({ t: now, x: l.x, y: l.y, z: l.z });
+  while (h.length && now - h[0].t > MOVE_WINDOW_MS) h.shift();
+  history.set(id, h);
+  return Math.max(...h.map(p => Math.hypot(l.x - p.x, l.y - p.y, l.z - p.z)));
+}
+
+function fromWheeled(c) {
+  const dist = travelled(c.ID, c.location);
+  const speed = "LocationSource" in c ? Math.abs(c.ForwardSpeed) : null;
+  const isMoving = speed !== null ? speed > 1 : dist > MOVE_MIN_CM;
+  const status = c.Driver ? "driven" : (c.AutoPilotStatus && c.AutoPilotStatus !== "None") ? "error"
+               : c.IsCurrentlyDocking ? "docking" : isMoving ? "moving" : "stopped";
+  const inv = (c.Inventory || []).filter(i => i.Amount > 0);
+  const type = typeOf(c.ClassName), tank = TYPES[type].tankM3;
+  // Fluids are usually stored in liters internally; treat amounts that can't fit the tank in m³ as liters
+  const m3 = i => i.Amount > tank || (i.MaxAmount || 0) > 50000 ? i.Amount / 1000 : i.Amount;
+  // Solid cargo: FRM groups items and reports MaxAmount = one stack, so fill = stacks used / slots
+  const stacks = tank ? 0 : inv.reduce((a, i) => a + i.Amount / (i.MaxAmount || i.Amount), 0);
+  return {
+    id: c.ID, type, golden: /Gold/i.test(c.ClassName), name: c.Name, status, error: c.AutoPilotStatus, speed,
+    route: Array.isArray(c.Route) ? c.Route.map(w => ({ name: w.Name, next: w.IsNextStop })) : null,
+    nextStop: c.NextStop || "", autopilot: !!c.Autopilot, driver: c.Driver || "",
+    items: inv.map(i => tank ? { name: i.Name, amount: m3(i), unit: "m³" } : itemOf(i.Name, i.Amount)),
+    fill: Math.min(1, tank ? inv.reduce((a, i) => a + m3(i), 0) / tank : stacks / TYPES[type].slots),
+    loc: c.location, rot: headingToCanvas(c.location.rotation), rail: false,
+  };
+}
+
+function fromTrain(t) {
+  const id = t.ID || "Train_" + t.Name;
+  const dist = travelled(id, t.location);
+  const speed = typeof t.ForwardSpeed === "number" ? Math.abs(t.ForwardSpeed) : null;
+  const isMoving = (speed !== null && speed > 1) || dist > MOVE_MIN_CM;
+  const status = t.Derailed || t.Status === "Derailed" ? "error"
+               : t.Status === "Manual Driving" ? "driven"
+               : t.Docking && t.Docking !== "TDS_None" ? "docking"
+               : isMoving ? "moving" : "stopped";
+  const stops = (t.TimeTable || []).map((s, i) => ({ name: s.StationName, next: i === t.TimeTableIndex }));
+  const grouped = {};
+  for (const car of t.Vehicles || []) for (const i of car.Inventory || []) if (i.Amount > 0) grouped[i.Name] = (grouped[i.Name] || 0) + i.Amount;
+  const cars = t.Vehicles || [];
+  const locos = cars.filter(c => /Locomotive/i.test(c.ClassName)).length;
+  return {
+    id, type: "Train", name: t.Name, status, error: t.Derailed ? "Derailed" : t.Status, speed,
+    consist: cars.length ? `${locos} loco${locos === 1 ? "" : "s"}+${cars.length - locos} car${cars.length - locos === 1 ? "" : "s"}` : "",
+    route: stops, nextStop: stops.find(s => s.next)?.name || t.TrainStation || "",
+    autopilot: t.Status === "Self-Driving", driver: t.Status === "Manual Driving" ? "(manual)" : "",
+    items: Object.entries(grouped).map(([name, amount]) => itemOf(name, amount)),
+    fill: t.MaxPayloadMass ? t.PayloadMass / t.MaxPayloadMass : 0,
+    loc: t.location, rot: headingToCanvas(t.location.rotation), rail: true,
+  };
+}
+
+// Drones: status comes from the home port; cargo needs the patched FRM (Inventory on getDrone)
+// port states while the drone itself isn't flying (speed ~0); a flying drone is always "moving"
+const DRONE_STATUS = { "En Route": "docking", "Taking Off": "docking", "Docking": "docking", "Docked": "stopped",
+                       "Loading": "docking", "Unloading": "docking", "Not Enough Fuel": "error", "Cannot Unload": "error" };
+function fromDrone(d) {
+  const id = d.ID || "Drone_" + d.HomeStation;
+  travelled(id, d.location);
+  const port = dronePorts.find(p => p.Name === d.HomeStation);
+  const portStatus = port?.DroneStatus || "";
+  const speed = typeof d.FlyingSpeed === "number" ? d.FlyingSpeed : null;
+  const flying = speed > 1;
+  let status = DRONE_STATUS[portStatus] === "error" ? "error" : flying ? "moving" : DRONE_STATUS[portStatus] || "stopped";
+  const dest = d.CurrentDestination && d.CurrentDestination !== "No Destination" ? d.CurrentDestination : "";
+  const stops = [d.HomeStation, d.HasPairedStation ? d.PairedStation : null].filter(Boolean);
+  const inv = (d.Inventory || []).filter(i => i.Amount > 0);
+  return {
+    id, type: "Drone", name: d.Name, status, error: portStatus, speed,
+    route: stops.map(s => ({ name: s, next: s === dest })), nextStop: dest,
+    autopilot: true, driver: "",
+    items: inv.map(i => itemOf(i.Name, i.Amount)),
+    fill: Math.min(1, inv.reduce((a, i) => a + i.Amount / (i.MaxAmount || i.Amount), 0) / TYPES.Drone.slots),
+    loc: d.location, rot: headingToCanvas(d.location.rotation), rail: false, air: true,
+  };
+}
+
+// fluids (by the game's item list) are shown in m³
+const fluidNames = () => new Set(gameItems.filter(i => i.kind === "fluid").map(i => i.name));
+let fluidSet = new Set();
+const itemOf = (name, amount) => fluidSet.has(name) ? { name, amount, unit: "m³" } : { name, amount };
+
+function nearestStation(v) {
+  let best = null, bd = Infinity;
+  for (const s of v.rail ? trainStations : v.air ? dronePorts : truckStations) {
+    const d = Math.hypot(s.location.x - v.loc.x, s.location.y - v.loc.y);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best ? { name: best.Name, dist: bd / 100 } : { name: "", dist: Infinity };
+}
+const cargoText = v => v.items.map(i => i.unit ? `${i.name} ${Math.round(i.amount).toLocaleString()} ${i.unit}` : `${i.name} ×${i.amount}`).join(", ");
+const fillBucket = v => v.fill <= 0 ? "empty" : v.fill >= 0.999 ? "full" : "partial";
+
+// ---- columns: sort value, cell, and the filter that lives under the header ----------
+// vehicle images from satisfactory.wiki.gg (downloaded to ./img)
+const TYPE_IMG = { "Factory Cart": "factory-cart", "Tractor": "tractor", "Truck": "truck", "Fluid Truck": "fluid-truck", "Explorer": "explorer",
+                   "Cyber Wagon": "cyber-wagon", "Train": "train", "Drone": "drone" };
+const typeImg = (type, golden) => `<img class="vimg" src="/img/${golden ? "golden-factory-cart" : TYPE_IMG[type] || "factory-cart"}.png" alt="">`;
+const uniq = arr => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+// every item in the game (items.json, extracted from the game's CommunityResources/Docs/en-US.json);
+// items not on any vehicle right now are dimmed but still selectable
+let gameItems = [];
+fetch("/items.json").then(r => r.json()).then(j => { gameItems = j; fluidSet = fluidNames(); if (popKey === "cargo") renderPopover(); }).catch(() => {});
+function cargoOptions() {
+  const onboard = new Set(vehicles.flatMap(v => v.items.map(i => i.name)));
+  const known = new Map(gameItems.map(i => [i.name, i.kind]));
+  for (const n of onboard) if (!known.has(n)) known.set(n, "solid");   // modded items etc.
+  const opt = (name, kind) => ({ value: name, label: esc(name), group: kind === "fluid" ? "Fluids" : "Items", dim: !onboard.has(name) });
+  const all = [...known].map(([n, k]) => opt(n, k)).sort((a, b) => a.value.localeCompare(b.value));
+  return [{ value: "__loaded", label: "Loaded (any cargo)", group: "" }, { value: "__empty", label: "Empty", group: "" },
+          ...all.filter(o => o.group === "Items"), ...all.filter(o => o.group === "Fluids")];
+}
+
+// one station list shared by the Next stop, Route and Nearest station filters
+function stationOptions() {
+  return uniq([...vehicles.flatMap(v => [v.nextStop, ...(v.route || []).map(w => w.name)]),
+               ...truckStations.map(s => s.Name), ...trainStations.map(s => s.Name), ...dronePorts.map(s => s.Name)])
+    .map(s => ({ value: s, label: esc(s) }));
+}
+const textMatch = (hay, q) => q.toLowerCase().split(/\s+/).filter(Boolean).every(t => hay.toLowerCase().includes(t));
+
+const COLS = [
+  { key: "id", label: "Vehicle", val: v => idNum(v),   // by the number shown (#41531)
+    // ID, then custom name, then train makeup, one per line
+    cell: v => [`<b>${esc(shortId(v.id))}</b>`,
+                v.name && !/^(Factory Cart™|Golden Factory Cart™|Tractor|Truck|Fluid Truck|Explorer|Cyber Wagon|Train|Drone)$/.test(v.name) ? `<span class="sub">${esc(v.name)}</span>` : "",
+                v.consist ? `<span class="sub muted">${esc(v.consist)}</span>` : ""].filter(Boolean).join("<br>"),
+    cls: "vid",
+    filter: { kind: "text", placeholder: "#id or name", test: (v, q) => textMatch(shortId(v.id) + " " + v.name, q) } },
+  { key: "type", label: "Type", val: v => v.type,
+    cell: v => `<span class="type" title="${v.golden ? "Golden Factory Cart" : esc(v.type)}">${typeImg(v.type, v.golden)}${esc(v.type)}</span>`,
+    filter: { kind: "multi", all: "All types", options: () => Object.keys(TYPES).map(t => ({ value: t, label: `${typeImg(t)}${t}` })), get: v => v.type } },
+  { key: "status", label: "Status", val: v => STATUS_ORDER[v.status],
+    cell: v => {
+      const at = v.status === "docking" ? nearestStation(v) : null;   // the game already points "next stop" past a station while docking there
+      const where = at && at.name && at.dist < 60 ? ` <span class="muted">at ${esc(at.name)}</span>` : "";
+      return `<span class="pill s-${v.status}" title="${esc(v.error)}">${v.status === "error" ? esc(v.error) : STATUS_LABEL[v.status]}</span>${where}`;
+    },
+    filter: { kind: "multi", all: "All statuses", options: () => STATUS.map(s => ({ value: s, label: `<span style="color:${STATUS_COLOR[s]}">●</span> ${STATUS_LABEL[s]}` })), get: v => v.status } },
+  { key: "speed", label: "km/h", title: "Speed (km/h)", num: true, optional: () => hasSpeed, val: v => v.speed ?? -1,
+    cell: v => v.speed === null ? `<span class="muted">—</span>` : v.speed.toFixed(0) },
+  { key: "next", label: "Next stop", val: v => v.nextStop,
+    cell: v => v.route === null ? `<span class="muted">n/a</span>` : v.nextStop ? `<span style="color:var(--accent)">${esc(v.nextStop)}</span>` : `<span class="muted">—</span>`,
+    filter: { kind: "multi", all: "Any stop", unit: "stations", search: true, options: stationOptions, get: v => v.nextStop } },
+  { key: "route", label: "Route", val: v => (v.route || []).map(w => w.name).join(" "),
+    cell: v => {
+      if (v.route === null) return `<span class="muted" title="Stock FRM reports every route as the placeholder &quot;PathName&quot;">needs patched FRM</span>`;
+      if (!v.route.length) return `<span class="muted">no route</span>`;
+      return `<span class="route">${v.route.map(w => w.next ? `<span class="next">${esc(w.name)}</span>` : esc(w.name)).join(" → ")}</span>`;
+    },
+    filter: { kind: "multi", all: "Any station", unit: "stations", search: true, modes: true, options: stationOptions,
+      getMany: v => (v.route || []).map(w => w.name) } },
+  { key: "cargo", label: "Cargo", cls: "cargo", val: v => cargoText(v), cell: v => esc(cargoText(v)) || `<span class="muted">empty</span>`,
+    filter: { kind: "multi", all: "Any cargo", unit: "selected", search: true, modes: true, modeLabel: "Carrying", searchLabel: "Find item…",
+      options: cargoOptions, getMany: v => [v.items.length ? "__loaded" : "__empty", ...v.items.map(i => i.name)] } },
+  { key: "fill", label: "Fill", num: true, val: v => v.fill,
+    cell: v => `<span class="fill"><i style="width:${(v.fill * 100).toFixed(0)}%"></i></span>${(v.fill * 100).toFixed(0)}%`,
+    filter: { kind: "select", all: "Any", options: () => [{ value: "empty", label: "Empty" }, { value: "partial", label: "Partial" }, { value: "full", label: "Full" }],
+      test: (v, q) => fillBucket(v) === q } },
+  { key: "near", label: "Nearest", title: "Nearest station", val: v => nearestStation(v).name,
+    cell: v => { const n = nearestStation(v); return n.name ? `${esc(n.name)} <span class="muted">${n.dist < 1000 ? n.dist.toFixed(0) + " m" : (n.dist / 1000).toFixed(1) + " km"}</span>` : `<span class="muted">—</span>`; },
+    filter: { kind: "multi", all: "Any station", unit: "stations", search: true, options: stationOptions, get: v => nearestStation(v).name } },
+  { key: "auto", label: "Auto", title: "Autopilot", val: v => v.autopilot ? 1 : 0, cell: v => v.autopilot ? "on" : `<span class="muted">off</span>`,
+    filter: { kind: "select", all: "Any", options: () => [{ value: "on", label: "On" }, { value: "off", label: "Off" }], test: (v, q) => v.autopilot === (q === "on") } },
+  { key: "driver", label: "Driver", val: v => v.driver, cell: v => esc(v.driver) || `<span class="muted">—</span>`,
+    filter: { kind: "select", all: "Any", options: () => [{ value: "__driven", label: "Someone driving" }, { value: "__none", label: "Nobody" },
+      ...uniq(vehicles.map(v => v.driver)).map(d => ({ value: d, label: d, group: "Player" }))],
+      test: (v, q) => q === "__driven" ? !!v.driver : q === "__none" ? !v.driver : v.driver === q } },
+  { key: "x", label: "X m", num: true, val: v => v.loc.x, cell: v => (v.loc.x / 100).toFixed(0) },
+  { key: "y", label: "Y m", num: true, val: v => v.loc.y, cell: v => (v.loc.y / 100).toFixed(0) },
+  { key: "z", label: "Z m", num: true, val: v => v.loc.z, cell: v => (v.loc.z / 100).toFixed(0) },
+];
+const cols = () => COLS.filter(c => !c.optional || c.optional());
+
+// ---- filtering ------------------------------------------------------------------
+const isActive = c => { const f = filters[c.key]; return Array.isArray(f) ? f.length > 0 : !!f; };
+function passes(v, ignoreKey) {
+  for (const c of cols()) {
+    if (!c.filter || c.key === ignoreKey || !isActive(c)) continue;
+    const q = filters[c.key];
+    if (c.filter.kind === "multi") {
+      const vals = c.filter.getMany ? c.filter.getMany(v) : [c.filter.get(v)];
+      const all = c.filter.modes && filters[c.key + "Mode"] === "all";
+      if (!(all ? q.every(x => vals.includes(x)) : q.some(x => vals.includes(x)))) return false;
+    } else if (!c.filter.test(v, q)) return false;
+  }
+  return true;
+}
+const visible = () => vehicles.filter(v => passes(v));
+const anyActive = () => COLS.some(c => c.filter && isActive(c));
+
+// ---- header: sort row + filter row ---------------------------------------------------
+let headSig = "";
+function renderHead() {
+  const cs = cols(), sig = cs.map(c => c.key).join();
+  if (sig !== headSig) {   // (re)build both rows only when the column set changes, so inputs keep focus
+    headSig = sig;
+    $("sortRow").innerHTML = cs.map(c => `<th data-key="${c.key}" class="${c.num ? "num" : ""}"></th>`).join("");
+    const coordStart = cs.findIndex(c => c.key === "x");
+    $("filterRow").innerHTML = cs.map((c, i) => {
+      if (i === coordStart) return `<th colspan="3"><div class="f-clear"><button id="fClear">Clear filters</button><span id="fCount"></span></div></th>`;
+      if (i > coordStart && coordStart >= 0) return "";
+      if (!c.filter) return `<th></th>`;
+      if (c.filter.kind === "text") return `<th data-f="${c.key}"><input class="f-input" type="search" data-f="${c.key}" placeholder="${esc(c.filter.placeholder)}"></th>`;
+      if (c.filter.kind === "select") return `<th data-f="${c.key}"><select class="f-select" data-f="${c.key}"></select></th>`;
+      return `<th data-f="${c.key}"><button class="f-multi" data-f="${c.key}"></button></th>`;
+    }).join("");
+    $("fClear").onclick = () => { filters = freshFilters(); closePopover(); applyFilters(); };
+    layoutPending = true;
+  }
+  for (const th of $("sortRow").children) {
+    const c = COLS.find(x => x.key === th.dataset.key);
+    th.classList.toggle("sorted", sort.key === c.key);
+    th.title = c.title || "";
+    th.innerHTML = `${c.label}${sort.key === c.key ? `<span class="arrow">${sort.dir > 0 ? "▲" : "▼"}</span>` : ""}<span class="rz" data-rz="${c.key}" title="Drag to resize · double-click to fit"></span>`;
+  }
+  renderFilterControls();
+}
+
+// ---- column widths (resizable, remembered) -----------------------------------------
+let userWidths = (() => { try { return JSON.parse(localStorage.getItem("vt.widths") || "{}"); } catch { return {}; } })();
+const autoWidths = {};      // measured defaults for columns the user hasn't sized
+let layoutPending = true, justResized = false;
+const MAX_AUTO_W = 320, MIN_W = 48;
+
+function applyWidths() {
+  const cs = cols();
+  $("colgroup").innerHTML = cs.map(c => `<col data-col="${c.key}" style="width:${userWidths[c.key] || autoWidths[c.key] || 100}px">`).join("");
+  const total = cs.reduce((a, c) => a + (userWidths[c.key] || autoWidths[c.key] || 100), 0);
+  $("table").style.width = Math.max(total, $("tableWrap").clientWidth - 2) + "px";
+  $("table").classList.add("fixed");
+}
+
+// measure natural (unwrapped) widths once real rows exist, cap them, then shrink the text columns
+// so the table fits the panel; finally lock to fixed layout
+// how far each column may shrink when fitting the panel (text columns wrap, so they give up most)
+// (sized so content never clips: "Factory Cart" + image, "100%" + bar, 5-digit coords, "1 loco+2 cars")
+const MIN_COL_W = { route: 88, next: 94, near: 90, cargo: 76, driver: 66, id: 94, type: 130, status: 92,
+                    speed: 66, fill: 100, auto: 60, x: 56, y: 58, z: 44 };
+function layoutColumns() {
+  if (!layoutPending || !vehicles.length) return;
+  layoutPending = false;
+  const t = $("table");
+  t.classList.remove("fixed"); t.classList.add("measuring"); t.style.width = "auto"; $("colgroup").innerHTML = "";
+  for (const th of $("sortRow").children)
+    autoWidths[th.dataset.key] = Math.min(MAX_AUTO_W, Math.max(MIN_W, MIN_COL_W[th.dataset.key] || 0, th.offsetWidth));
+  t.classList.remove("measuring");
+  const keys = cols().map(c => c.key), avail = $("tableWrap").clientWidth - 2;
+  const total = () => keys.reduce((a, k) => a + (userWidths[k] || autoWidths[k]), 0);
+  let over = total() - avail;
+  const shrink = keys.filter(k => k in MIN_COL_W && !userWidths[k]);
+  for (let pass = 0; over > 0 && pass < 4; pass++) {
+    const room = shrink.map(k => Math.max(0, autoWidths[k] - MIN_COL_W[k])), sum = room.reduce((a, b) => a + b, 0);
+    if (!sum) break;
+    shrink.forEach((k, i) => { autoWidths[k] -= Math.round(Math.min(room[i], over * room[i] / sum)); });
+    over = total() - avail;
+  }
+  applyWidths();
+}
+
+function fitColumn(key) {   // double-click: size to the longest cell content
+  const i = cols().findIndex(c => c.key === key); if (i < 0) return;
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:14px 'Segoe UI',system-ui,sans-serif";
+  document.body.appendChild(probe);
+  let w = $("sortRow").children[i].scrollWidth;
+  for (const tr of $("tbody").querySelectorAll("tr[data-id]")) { probe.innerHTML = tr.children[i].innerHTML; w = Math.max(w, probe.offsetWidth + 22); }
+  probe.remove();
+  userWidths[key] = Math.max(MIN_W, Math.ceil(w));
+  try { localStorage.setItem("vt.widths", JSON.stringify(userWidths)); } catch {}
+  applyWidths();
+}
+
+$("sortRow").addEventListener("mousedown", e => {
+  const h = e.target.closest(".rz"); if (!h) return;
+  e.preventDefault(); e.stopPropagation(); closePopover();
+  const key = h.dataset.rz, col = $("colgroup").querySelector(`col[data-col="${key}"]`);
+  const startX = e.clientX, startW = col.getBoundingClientRect().width || parseFloat(col.style.width);
+  h.classList.add("dragging"); document.body.classList.add("resizing");
+  const move = ev => { userWidths[key] = Math.max(MIN_W, Math.round(startW + ev.clientX - startX)); applyWidths(); };
+  const up = () => {
+    removeEventListener("mousemove", move); removeEventListener("mouseup", up);
+    h.classList.remove("dragging"); document.body.classList.remove("resizing");
+    try { localStorage.setItem("vt.widths", JSON.stringify(userWidths)); } catch {}
+    justResized = true; setTimeout(() => justResized = false, 0);   // swallow the click that follows
+  };
+  addEventListener("mousemove", move); addEventListener("mouseup", up);
+});
+$("sortRow").addEventListener("dblclick", e => { const h = e.target.closest(".rz"); if (h) { e.stopPropagation(); fitColumn(h.dataset.rz); } });
+
+// window resize (or crossing the desktop/mobile breakpoint): refit the columns to the new table width
+let lastWrapW = 0;
+addEventListener("resize", () => {
+  const w = $("tableWrap").clientWidth;
+  if (Math.abs(w - lastWrapW) > 40) { lastWrapW = w; layoutPending = true; layoutColumns(); }
+  else if ($("table").classList.contains("fixed")) applyWidths();
+});
+
+function renderFilterControls() {
+  for (const c of cols()) {
+    if (!c.filter) continue;
+    const th = $("filterRow").querySelector(`th[data-f="${c.key}"]`); if (!th) continue;
+    th.classList.toggle("active", isActive(c));
+    const el = th.querySelector("[data-f]");
+    if (c.filter.kind === "text") {
+      if (document.activeElement !== el && el.value !== filters[c.key]) el.value = filters[c.key];
+      el.classList.toggle("f-active", isActive(c));
+    } else if (c.filter.kind === "select") {
+      const opts = c.filter.options(), cur = filters[c.key];
+      if (cur && !opts.some(o => o.value === cur)) opts.push({ value: cur, label: cur.replace(/^item:/, "") + " (none now)" });
+      let html = `<option value="">${c.filter.all}</option>`, group = null;
+      for (const o of opts) {
+        if (o.group !== group) { if (group) html += `</optgroup>`; if (o.group) html += `<optgroup label="${esc(o.group)}">`; group = o.group; }
+        html += `<option value="${esc(o.value)}">${esc(o.label)}</option>`;
+      }
+      if (group) html += `</optgroup>`;
+      if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+      el.value = cur;
+      el.classList.toggle("f-active", isActive(c));
+    } else {
+      const sel = filters[c.key];
+      const one = sel.length === 1 && (c.filter.options().find(o => o.value === sel[0])?.label.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim() || sel[0]);
+      const mode = c.filter.modes && sel.length > 1 ? (filters[c.key + "Mode"] === "all" ? " (all)" : " (any)") : "";
+      el.innerHTML = `<span>${sel.length === 0 ? c.filter.all : sel.length === 1 ? esc(one) : `${sel.length} ${c.filter.unit || "selected"}${mode}`}</span>`;
+      el.title = sel.join(", ");
+      el.classList.toggle("f-active", isActive(c));
+    }
+  }
+  const n = visible().length;
+  $("fCount").textContent = anyActive() ? `${n} of ${vehicles.length}` : `${vehicles.length} shown`;
+  $("fClear").disabled = !anyActive();
+  if (popKey) renderPopover();
+}
+
+$("sortRow").addEventListener("click", e => {
+  const th = e.target.closest("th"); if (!th || justResized || e.target.closest(".rz")) return;
+  const k = th.dataset.key;
+  sort = sort.key === k ? { key: k, dir: -sort.dir } : { key: k, dir: 1 };
+  renderHead(); renderTable();
+});
+$("filterRow").addEventListener("input", e => {
+  const k = e.target.dataset.f; if (!k || e.target.tagName !== "INPUT") return;
+  filters[k] = e.target.value.trim(); applyFilters();
+});
+$("filterRow").addEventListener("change", e => {
+  const k = e.target.dataset.f; if (!k || e.target.tagName !== "SELECT") return;
+  filters[k] = e.target.value; applyFilters();
+});
+$("filterRow").addEventListener("click", e => {
+  const b = e.target.closest(".f-multi"); if (!b) return;
+  popKey === b.dataset.f ? closePopover() : openPopover(b.dataset.f, b);
+});
+
+// multi-select popover (fixed-position so the scrolling table doesn't clip it)
+let popKey = null;
+function openPopover(key, anchor) {
+  popKey = key;
+  const r = anchor.getBoundingClientRect(), p = $("popover");
+  p.style.left = Math.min(r.left, innerWidth - 330) + "px"; p.style.top = r.bottom + 4 + "px";
+  p.classList.add("open"); renderPopover();
+  p.querySelector(".pop-search")?.focus();
+}
+function closePopover() { popKey = null; popSearch = ""; $("popover").dataset.key = ""; $("popover").classList.remove("open"); }
+let popSearch = "";
+function renderPopover() {
+  const c = COLS.find(x => x.key === popKey), counts = {};
+  for (const v of vehicles) if (passes(v, popKey)) {
+    for (const k of new Set(c.filter.getMany ? c.filter.getMany(v) : [c.filter.get(v)])) counts[k] = (counts[k] || 0) + 1;
+  }
+  const p = $("popover"), q = popSearch.toLowerCase();
+  const items = c.filter.options().filter(o => !q || o.label.replace(/<[^>]+>/g, "").toLowerCase().includes(q));
+  let group;
+  const listHtml = items.map(o => {
+    const head = o.group && o.group !== group ? `<div class="pop-group">${esc(o.group)}</div>` : "";
+    group = o.group;
+    const dim = "dim" in o ? o.dim : !counts[o.value];   // explicit dim (cargo: not on any vehicle) or no matches
+    return head + `<label class="${dim ? "empty" : ""}"><input type="checkbox" value="${esc(o.value)}" ${filters[popKey].includes(o.value) ? "checked" : ""}>${o.label}<span class="n">${counts[o.value] || 0}</span></label>`;
+  }).join("") || `<div class="muted" style="padding:6px 8px;font-size:12px">No matches</div>`;
+  if (p.dataset.key !== popKey) {   // build the shell once per open so the search box keeps focus while typing
+    p.dataset.key = popKey;
+    const mode = c.filter.modes ? `<div class="pop-mode">${c.filter.modeLabel || "Route includes"}
+        <label><input type="radio" name="pm" value="any">any</label><label><input type="radio" name="pm" value="all">all</label> selected</div>` : "";
+    p.innerHTML = (c.filter.search ? `<input class="f-input pop-search" type="search" placeholder="${c.filter.searchLabel || "Find station…"}">` : "") + mode +
+      `<div class="pop-list"></div><div class="pop-foot"><button data-act="all">Show all</button><button data-act="close">Done</button></div>`;
+  }
+  p.querySelector(".pop-list").innerHTML = listHtml;
+  const rm = p.querySelector(`input[name="pm"][value="${filters[popKey + "Mode"] || "any"}"]`); if (rm) rm.checked = true;
+}
+$("popover").addEventListener("input", e => {
+  if (!e.target.classList.contains("pop-search")) return;
+  popSearch = e.target.value; renderPopover();
+});
+$("popover").addEventListener("change", e => {
+  if (e.target.name === "pm") { filters[popKey + "Mode"] = e.target.value; applyFilters(); return; }
+  if (e.target.type !== "checkbox") return;
+  const list = filters[popKey], i = list.indexOf(e.target.value);
+  e.target.checked ? i < 0 && list.push(e.target.value) : i >= 0 && list.splice(i, 1);
+  applyFilters();
+});
+$("popover").addEventListener("click", e => {
+  const a = e.target.dataset.act;
+  if (a === "all") { filters[popKey] = []; applyFilters(); }
+  if (a === "close") closePopover();
+});
+document.addEventListener("mousedown", e => { if (popKey && !e.target.closest("#popover, .f-multi")) closePopover(); });
+$("tableWrap").addEventListener("scroll", closePopover);
+addEventListener("resize", closePopover);
+
+function applyFilters() {
+  saveFilters();
+  if (followId && !visible().some(v => v.id === followId)) followId = null;
+  renderFilterControls(); renderTable();
+}
+
+// ---- body -------------------------------------------------------------------------
+function renderTable() {
+  const cs = cols(), col = cs.find(c => c.key === sort.key) || cs[0];
+  const rows = visible().sort((a, b) => {
+    const va = col.val(a), vb = col.val(b);
+    const r = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true });
+    return r * sort.dir || idNum(a) - idNum(b);   // tie-break on the shown vehicle ID (always ascending)
+  });
+  $("tbody").innerHTML = rows.map(v =>
+    `<tr data-id="${esc(v.id)}" class="${v.id === hoverId || v.id === followId ? "hl" : ""}${cargoOpen.has(v.id) ? " cargo-open" : ""}">${cs.map((c, i) =>
+      `<td class="${c.num ? "num" : ""} ${c.cls || ""}"><div class="cell">${c.cell(v)}</div>${i === 0 ? `<span class="rh" title="Drag to resize rows · double-click to reset"></span>` : ""}</td>`).join("")}</tr>`).join("")
+    || `<tr><td colspan="${cs.length}" class="muted">${vehicles.length ? "No vehicles match the filters." : "No vehicles found."}</td></tr>`;
+}
+$("tbody").addEventListener("mouseover", e => { const tr = e.target.closest("tr[data-id]"); setHover(tr ? tr.dataset.id : null); });
+$("tbody").addEventListener("mouseleave", () => setHover(null));
+// ---- row height (fixed, resizable, remembered) -----------------------------------------
+const ROW_H_DEFAULT = 60, ROW_H_MIN = 30, ROW_H_MAX = 220, LINE_H = 19.6;
+let rowH = (() => { try { return +localStorage.getItem("vt.rowh") || ROW_H_DEFAULT; } catch { return ROW_H_DEFAULT; } })();
+function applyRowHeight() {
+  $("table").style.setProperty("--row-h", rowH + "px");
+  $("table").style.setProperty("--row-lines", Math.max(1, Math.floor((rowH - 10) / LINE_H)));
+}
+$("tbody").addEventListener("mousedown", e => {
+  const h = e.target.closest(".rh"); if (!h) return;
+  e.preventDefault(); e.stopPropagation();
+  const startY = e.clientY, startH = rowH;
+  document.body.classList.add("row-resizing");
+  const move = ev => { rowH = Math.round(Math.min(ROW_H_MAX, Math.max(ROW_H_MIN, startH + ev.clientY - startY))); applyRowHeight(); };
+  const up = () => {
+    removeEventListener("mousemove", move); removeEventListener("mouseup", up);
+    document.body.classList.remove("row-resizing");
+    try { localStorage.setItem("vt.rowh", rowH); } catch {}
+    rowResized = true; setTimeout(() => rowResized = false, 0);   // swallow the click that follows
+  };
+  addEventListener("mousemove", move); addEventListener("mouseup", up);
+});
+$("tbody").addEventListener("dblclick", e => {
+  if (!e.target.closest(".rh")) return;
+  rowH = ROW_H_DEFAULT; applyRowHeight(); try { localStorage.removeItem("vt.rowh"); } catch {}
+});
+let rowResized = false;
+
+// hover popups: cargo lists its items (unless the row is clicked open); other cells show full text when clamped
+const cargoPop = $("cargoPop");
+function hideCargoPop() { cargoPop.style.display = "none"; }
+$("tbody").addEventListener("mousemove", e => {
+  if (document.body.classList.contains("row-resizing")) return hideCargoPop();
+  const td = e.target.closest("td"), tr = td && td.closest("tr[data-id]");
+  if (!tr) return hideCargoPop();
+  if (td.classList.contains("cargo")) {
+    const v = !tr.classList.contains("cargo-open") && vehicles.find(x => x.id === tr.dataset.id);
+    if (!v || !v.items.length) return hideCargoPop();
+    cargoPop.innerHTML = `<div class="head">${esc(v.type)} ${esc(shortId(v.id))}${v.consist ? ` (${esc(v.consist)})` : ""} · ${(v.fill * 100).toFixed(0)}% full</div>` +
+      v.items.map(i => `<div class="row"><span>${esc(i.name)}</span><b>${i.unit ? Math.round(i.amount).toLocaleString() + " " + i.unit : "×" + i.amount.toLocaleString()}</b></div>`).join("");
+  } else {
+    const cell = td.querySelector(".cell");
+    if (!cell || (cell.scrollHeight <= cell.clientHeight + 1 && cell.scrollWidth <= cell.clientWidth + 1)) return hideCargoPop();
+    cargoPop.innerHTML = `<div class="row"><span>${esc(cell.textContent.trim())}</span></div>`;
+  }
+  cargoPop.style.display = "block";
+  const r = cargoPop.getBoundingClientRect();
+  cargoPop.style.left = Math.min(e.clientX + 14, innerWidth - r.width - 8) + "px";
+  cargoPop.style.top = (e.clientY + 18 + r.height > innerHeight ? e.clientY - r.height - 10 : e.clientY + 18) + "px";
+});
+$("tbody").addEventListener("mouseleave", hideCargoPop);
+$("tableWrap").addEventListener("scroll", hideCargoPop);
+
+// clicking a row follows it on the map and toggles that row's cargo open/closed (per-row state)
+const cargoOpen = new Set();
+$("tbody").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-id]"); if (!tr || rowResized || e.target.closest(".rh")) return;
+  const id = tr.dataset.id;
+  cargoOpen.has(id) ? cargoOpen.delete(id) : cargoOpen.add(id);
+  followId = followId === id ? null : id;
+  if (followId) centerOn(followId, true);
+  renderTable(); hideCargoPop();
+});
+function setHover(id) {
+  if (id === hoverId) return;
+  hoverId = id;
+  for (const tr of $("tbody").querySelectorAll("tr[data-id]")) tr.classList.toggle("hl", tr.dataset.id === hoverId || tr.dataset.id === followId);
+}
+
+function renderStats() {
+  const counts = Object.fromEntries(STATUS.map(s => [s, 0]));
+  vehicles.forEach(v => counts[v.status]++);
+  $("stats").innerHTML =
+    `<span class="stat"><b>${vehicles.length}</b>vehicles</span>` +
+    `<span class="stat" style="color:var(--ok)"><b>${counts.moving}</b>moving</span>` +
+    `<span class="stat" style="color:var(--info)"><b>${counts.docking}</b>docking</span>` +
+    `<span class="stat muted"><b>${counts.stopped}</b>stopped</span>` +
+    (counts.error ? `<span class="stat" style="color:var(--bad)"><b>${counts.error}</b>errors</span>` : "") +
+    `<span class="stat"><b>${vehicles.filter(v => v.items.length).length}</b>loaded</span>`;
+}
+
+// ---- data ---------------------------------------------------------------------
+async function getJSON(ep) {
+  const r = await fetch("/api/" + ep, { cache: "no-store" });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+let fitted = false;
+async function poll() {
+  try {
+    const [wheeled, trains, drones, ports] = await Promise.all([getJSON("getVehicles"), getJSON("getTrains").catch(() => []),
+      getJSON("getDrone").catch(() => []), getJSON("getDroneStation").catch(() => null)]);
+    if (ports) dronePorts = ports;
+    const next = wheeled.map(fromWheeled).concat(trains.map(fromTrain), drones.map(fromDrone));
+    const now = performance.now();
+    for (const v of next) {
+      const p = worldToImg(v.loc.x, v.loc.y), m = motion.get(v.id);
+      if (!m) motion.set(v.id, { fx: p.x, fy: p.y, tx: p.x, ty: p.y, frot: v.rot, trot: v.rot, t0: now });
+      else { const c = interp(m, now); Object.assign(m, { fx: c.x, fy: c.y, frot: c.rot, tx: p.x, ty: p.y, trot: v.rot, t0: now }); }
+    }
+    const ids = new Set(next.map(v => v.id));
+    for (const id of [...motion.keys()]) if (!ids.has(id)) { motion.delete(id); history.delete(id); }
+    vehicles = next;
+
+    hasSpeed = wheeled.some(c => "LocationSource" in c) || trains.length > 0 || drones.length > 0;
+    const routesSupported = !wheeled.length || wheeled.some(c => Array.isArray(c.Route));
+    $("banner").style.display = routesSupported ? "none" : "block";
+    $("banner").textContent = "Route / Next stop for wheeled vehicles need the patched FRM build — this server runs stock FRM, which reports every route as the placeholder \"PathName\". Trains show their timetable either way.";
+    $("dot").className = "dot ok";
+    $("conn").textContent = "live · " + new Date().toLocaleTimeString();
+    renderStats(); renderHead(); renderTable(); layoutColumns(); renderLayerButtons();
+    if (!fitted && vehicles.length) { fitVehicles(); fitted = true; }
+  } catch (e) {
+    $("dot").className = "dot bad";
+    $("conn").textContent = "offline: " + e.message;
+  }
+}
+async function pollStatic() {
+  const [ts, rs, ps, rl] = await Promise.allSettled([getJSON("getTruckStation"), getJSON("getTrainStation"), getJSON("getVehiclePaths"), getJSON("getTrainRails")]);
+  if (ts.status === "fulfilled") truckStations = ts.value;
+  if (rs.status === "fulfilled") trainStations = rs.value;
+  if (ps.status === "fulfilled") paths = ps.value.map(p => ({ cart: /FactoryCart/i.test(p.ClassName), pts: p.PathPoints || [] }));
+  if (rl.status === "fulfilled") rails = rl.value.map(r => ({ pts: r.SplineData?.length ? r.SplineData : [r.location0, r.location1].filter(Boolean) }));
+  renderLayerButtons();
+}
+
+// drones fly straight between paired ports: one line per pair
+function droneLinks() {
+  const byName = new Map(dronePorts.map(p => [p.Name, p])), seen = new Set(), links = [];
+  for (const p of dronePorts) {
+    const q = byName.get(p.PairedStation); if (!q) continue;
+    const key = [p.Name, q.Name].sort().join("|"); if (seen.has(key)) continue;
+    seen.add(key); links.push(Object.assign([p.location, q.location], { names: [p.Name, q.Name] }));
+  }
+  return links;
+}
+
+function renderLayerButtons() {
+  const counts = { vehPaths: paths.filter(p => !p.cart).length, cartPaths: paths.filter(p => p.cart).length,
+                   rails: rails.length, droneRoutes: droneLinks().length,
+                   stations: truckStations.length + trainStations.length + dronePorts.length };
+  for (const b of document.querySelectorAll("button.layer")) {
+    const k = b.dataset.layer;
+    b.classList.toggle("on", layers[k]);
+    let n = b.querySelector(".n"); if (!n) { n = document.createElement("span"); n.className = "n"; b.appendChild(n); }
+    n.textContent = counts[k];
+    b.title = `${layers[k] ? "Hide" : "Show"} ${b.textContent.replace(/\d+$/, "").trim().toLowerCase()} (${counts[k]} segments/stations)`;
+  }
+}
+document.querySelector(".map-head .btns").addEventListener("click", e => {
+  const b = e.target.closest("button.layer"); if (!b) return;
+  layers[b.dataset.layer] = !layers[b.dataset.layer];
+  try { localStorage.setItem("vt.layers", JSON.stringify(layers)); } catch {}
+  renderLayerButtons();
+});
+
+// ---- map ------------------------------------------------------------------------
+const canvas = $("map"), ctx = canvas.getContext("2d");
+const mapImg = new Image(); mapImg.src = "/map.avif";
+let view = { s: 0.1, ox: 0, oy: 0 };   // screen = img * s + o  (CSS px)
+
+function worldToImg(x, y) {
+  return { x: (x - WORLD.x0) / (WORLD.x1 - WORLD.x0) * IMG, y: (y - WORLD.y0) / (WORLD.y1 - WORLD.y0) * IMG };
+}
+const toScreen = p => ({ x: p.x * view.s + view.ox, y: p.y * view.s + view.oy });
+
+function interp(m, now) {
+  const t = Math.min(1, (now - m.t0) / POLL_MS);
+  const d = ((m.trot - m.frot + 540) % 360) - 180;   // shortest turn
+  return { x: m.fx + (m.tx - m.fx) * t, y: m.fy + (m.ty - m.fy) * t, rot: m.frot + d * t };
+}
+
+function resize() {
+  const r = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener("resize", resize);
+
+function fitBox(pts, pad = 60) {
+  if (!pts.length) return;
+  const r = canvas.getBoundingClientRect();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  const w = Math.max(x1 - x0, 40), h = Math.max(y1 - y0, 40);
+  view.s = Math.min((r.width - pad * 2) / w, (r.height - pad * 2) / h, 3);
+  view.ox = r.width / 2 - (x0 + x1) / 2 * view.s;
+  view.oy = r.height / 2 - (y0 + y1) / 2 * view.s;
+}
+function fitVehicles() { const vs = visible(); fitBox((vs.length ? vs : vehicles).map(v => worldToImg(v.loc.x, v.loc.y))); }
+function fitWorld() { fitBox([{ x: 0, y: 0 }, { x: IMG, y: IMG }], 10); }
+function centerOn(id, zoom) {
+  const m = motion.get(id); if (!m) return;
+  const r = canvas.getBoundingClientRect(), p = interp(m, performance.now());
+  if (zoom && view.s < 0.6) view.s = 0.6;
+  view.ox = r.width / 2 - p.x * view.s; view.oy = r.height / 2 - p.y * view.s;
+}
+
+let drag = null;
+canvas.addEventListener("mousedown", e => { drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy }; canvas.classList.add("dragging"); });
+addEventListener("mouseup", () => { drag = null; canvas.classList.remove("dragging"); });
+addEventListener("mousemove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3 && followId) { followId = null; renderTable(); }
+  view.ox = drag.ox + dx; view.oy = drag.oy + dy;
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const s = Math.min(8, Math.max(0.04, view.s * Math.exp(-e.deltaY * 0.0015)));
+  view.ox = mx - (mx - view.ox) * (s / view.s); view.oy = my - (my - view.oy) * (s / view.s); view.s = s;
+}, { passive: false });
+canvas.addEventListener("mousemove", e => {   // hovering a marker highlights its row
+  if (drag) return;
+  const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, now = performance.now();
+  let best = null, bd = 14;
+  for (const v of visible()) {
+    const m = motion.get(v.id); if (!m) continue;
+    const p = toScreen(interp(m, now)), d = Math.hypot(p.x - mx, p.y - my);
+    if (d < bd) { bd = d; best = v.id; }
+  }
+  setHover(best);
+  if (best) document.querySelector(`tr[data-id="${CSS.escape(best)}"]`)?.scrollIntoView({ block: "nearest" });
+  // a station under the cursor shows what's in it, even when a vehicle is parked on it (that vehicle highlights too)
+  const st = stationAt(mx, my);
+  if (st) showPopAt(stationPopHtml(st), e.clientX, e.clientY); else hideCargoPop();
+});
+canvas.addEventListener("mouseleave", () => { setHover(null); mouseWorld = null; hideCargoPop(); });
+
+// ---- station contents popup on the map ---------------------------------------------
+function stationAt(mx, my) {
+  const groups = [["drone", dronePorts], ["truck", truckStations], ["train", trainStations]];
+  let best = null, bd = 11;
+  for (const [kind, list] of groups) for (const s of list) {
+    const p = toScreen(worldToImg(s.location.x, s.location.y)), d = Math.hypot(p.x - mx, p.y - my);
+    if (d < bd) { bd = d; best = { kind, s }; }
+  }
+  return best;
+}
+const invRows = (inv, empty = "empty") => {
+  const items = (inv || []).filter(i => i.Amount > 0);
+  if (!items.length) return `<div class="row muted"><span>${empty}</span></div>`;
+  return items.map(i => { const it = itemOf(i.Name, i.Amount);
+    return `<div class="row"><span>${esc(i.Name)}</span><b>${it.unit ? Math.round(it.amount).toLocaleString() + " " + it.unit : "×" + it.amount.toLocaleString()}</b></div>`; }).join("");
+};
+const popSection = title => `<div class="head" style="border-top:1px solid var(--line);border-bottom:none;margin:4px 0 0;padding-top:6px">${esc(title)}</div>`;
+function stationPopHtml({ kind, s }) {
+  if (kind === "truck") {
+    const fuel = (s.FuelInventory || []).some(i => i.Amount > 0) ? popSection("Fuel") + invRows(s.FuelInventory) : "";
+    return `<div class="head"><b style="color:${STATION_COLOR.truck}">■</b> ${esc(s.Name)} · Truck station · ${esc(s.LoadMode || "")}</div>` + invRows(s.Inventory) + fuel;
+  }
+  if (kind === "train") {
+    const plats = (s.CargoInventory || []).map((p, i) =>
+      popSection(`Platform ${i + 1} · ${p.Name || "Platform"}${p.LoadingMode ? " · " + p.LoadingMode : ""}${p.DockingStatus ? " · " + p.DockingStatus : ""}`) + invRows(p.Inventory)).join("");
+    return `<div class="head"><b style="color:${STATION_COLOR.train}">■</b> ${esc(s.Name)} · Train station</div>` + (plats || `<div class="row muted"><span>no freight platforms</span></div>`);
+  }
+  const paired = s.PairedStation && s.PairedStation !== "None" ? ` · paired → ${esc(s.PairedStation)}` : " · not paired";
+  return `<div class="head"><b style="color:${STATION_COLOR.drone}">■</b> ${esc(s.Name)} · Drone port · ${esc(s.DroneStatus || "")}${paired}</div>` +
+    popSection("Input (to send)") + invRows(s.InputInventory) + popSection("Output (received)") + invRows(s.OutputInventory) +
+    ((s.FuelInventory || []).some(i => i.Amount > 0) ? popSection("Fuel") + invRows(s.FuelInventory) : "");
+}
+function showPopAt(html, x, y) {
+  cargoPop.innerHTML = html; cargoPop.style.display = "block";
+  const r = cargoPop.getBoundingClientRect();
+  cargoPop.style.left = Math.min(x + 14, innerWidth - r.width - 8) + "px";
+  cargoPop.style.top = (y + 18 + r.height > innerHeight ? Math.max(8, y - r.height - 10) : y + 18) + "px";
+}
+
+// world coordinates under the cursor (shown bottom-right of the map)
+let mouseWorld = null;
+canvas.addEventListener("mousemove", e => {
+  const r = canvas.getBoundingClientRect();
+  const ix = (e.clientX - r.left - view.ox) / view.s, iy = (e.clientY - r.top - view.oy) / view.s;
+  mouseWorld = { x: WORLD.x0 + ix / IMG * (WORLD.x1 - WORLD.x0), y: WORLD.y0 + iy / IMG * (WORLD.y1 - WORLD.y0) };
+});
+function drawCoords() {
+  if (!mouseWorld) return;
+  const r = canvas.getBoundingClientRect();
+  const fmt = n => Math.round(n / 100).toLocaleString();
+  const text = `X ${fmt(mouseWorld.x)} m   Y ${fmt(mouseWorld.y)} m`;
+  ctx.font = "600 13px Consolas, 'Segoe UI', monospace"; ctx.textBaseline = "middle";
+  const w = ctx.measureText(text).width, bx = r.width - w - 26, by = r.height - 36;
+  ctx.fillStyle = "rgba(13,16,19,.85)"; ctx.fillRect(bx, by, w + 16, 26);
+  ctx.strokeStyle = "rgba(250,149,73,.6)"; ctx.lineWidth = 1; ctx.strokeRect(bx + .5, by + .5, w + 15, 25);
+  ctx.fillStyle = "#fff"; ctx.fillText(text, bx + 8, by + 13);
+}
+
+$("btnFit").onclick = () => { followId = null; fitVehicles(); renderTable(); };
+$("btnWorld").onclick = () => { followId = null; fitWorld(); renderTable(); };
+
+// icons/lines shrink as you zoom out (full size from ~0.8 zoom up, never below 40%)
+const iconScale = () => Math.max(0.4, Math.min(1, Math.sqrt(view.s / 0.8)));
+
+function drawMarker(v, p, rot, isF) {
+  const t = TYPES[v.type] || TYPES["Factory Cart"], size = isF ? t.size + 4 : t.size * iconScale();
+  ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(rot * Math.PI / 180);
+  ctx.fillStyle = STATUS_COLOR[v.status]; ctx.strokeStyle = "#0d1013"; ctx.lineWidth = 2;
+  ctx.beginPath();
+  if (t.shape === "train") ctx.roundRect(-size * 1.6, -size * 0.6, size * 3.2, size * 1.2, 3);
+  else if (t.shape === "drone") {   // diamond with a nose so heading still reads
+    ctx.moveTo(size * 1.5, 0); ctx.lineTo(0, size * 0.9); ctx.lineTo(-size * 0.9, 0); ctx.lineTo(0, -size * 0.9); ctx.closePath();
+  }
+  else { ctx.moveTo(size * 1.4, 0); ctx.lineTo(-size, size * 0.85); ctx.lineTo(-size * 0.5, 0); ctx.lineTo(-size, -size * 0.85); ctx.closePath(); }
+  ctx.fill(); ctx.stroke(); ctx.restore();
+}
+
+function drawStation(s, color, label, dim) {
+  const p = toScreen(worldToImg(s.location.x, s.location.y)), r = canvas.getBoundingClientRect();
+  if (p.x < -50 || p.y < -50 || p.x > r.width + 50 || p.y > r.height + 50) return;
+  ctx.globalAlpha = dim ? 0.3 : 1;
+  const h = 5 * iconScale();
+  ctx.fillStyle = color; ctx.strokeStyle = "#0d1013"; ctx.lineWidth = h > 3 ? 2 : 1;
+  ctx.beginPath(); ctx.rect(p.x - h, p.y - h, h * 2, h * 2); ctx.fill(); ctx.stroke();
+  if (view.s > 0.2 && !dim) {
+    const w = ctx.measureText(s.Name).width, box = { x: p.x + h + 4, y: p.y - 8, w: w + 8, h: 16 };
+    if (claimLabel(box)) {   // skip names that would overlap ones already drawn this frame
+      ctx.fillStyle = "rgba(13,16,19,.75)"; ctx.fillRect(box.x, box.y, box.w, box.h);
+      ctx.fillStyle = label; ctx.fillText(s.Name, box.x + 4, p.y);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// per-frame label collision list (reset at the start of each draw)
+let placedLabels = [];
+function claimLabel(b) {
+  for (const o of placedLabels) if (b.x < o.x + o.w + 2 && o.x < b.x + b.w + 2 && b.y < o.y + o.h + 1 && o.y < b.y + b.h + 1) return false;
+  placedLabels.push(b); return true;
+}
+
+// a focused vehicle's stops: pulsing rings + always-on labels (stop number or Home/Paired, "→ next")
+const hexA = (hex, a) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
+function drawStopHighlight(st, color, tag, isNext, now) {
+  const p = toScreen(worldToImg(st.location.x, st.location.y));
+  const pulse = (now % 1400) / 1400;
+  ctx.strokeStyle = hexA(color, 0.9 * (1 - pulse)); ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 12 + pulse * 20, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = color; ctx.lineWidth = isNext ? 3 : 2;
+  ctx.beginPath(); ctx.rect(p.x - 10, p.y - 10, 20, 20); ctx.stroke();
+  ctx.fillStyle = color; ctx.strokeStyle = "#0d1013";
+  ctx.beginPath(); ctx.rect(p.x - 6, p.y - 6, 12, 12); ctx.fill(); ctx.stroke();
+  const text = `${st.Name} · ${tag}${isNext ? " → next" : ""}`;
+  ctx.font = "600 12px Segoe UI, sans-serif"; ctx.textBaseline = "middle";
+  // below-right of the station, so it never collides with the focused vehicle's label (drawn above-right)
+  const w = ctx.measureText(text).width, ly = p.y + 6;
+  ctx.fillStyle = "rgba(13,16,19,.92)"; ctx.fillRect(p.x + 14, ly, w + 12, 20);
+  ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(p.x + 14.5, ly + .5, w + 11, 19);
+  ctx.fillStyle = "#fff"; ctx.fillText(text, p.x + 20, ly + 10);
+}
+
+// station list + color for a vehicle's kind of stops
+const stopsFor = v => v.rail ? { list: trainStations, color: STATION_COLOR.train }
+                    : v.air ? { list: dronePorts, color: STATION_COLOR.drone }
+                    : { list: truckStations, color: STATION_COLOR.truck };
+
+function draw(now) {
+  const r = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, r.width, r.height);
+  placedLabels = [];
+  if (followId && !drag) centerOn(followId, false);
+
+  if (mapImg.complete && mapImg.naturalWidth) {
+    ctx.imageSmoothingEnabled = view.s < 1;
+    ctx.drawImage(mapImg, view.ox, view.oy, IMG * view.s, IMG * view.s);
+    ctx.fillStyle = "rgba(10,12,16,.35)"; ctx.fillRect(0, 0, r.width, r.height);
+  }
+
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const stroke = (pts, color, width) => {
+    if (pts.length < 2) return;
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    pts.forEach((q, i) => { const s = toScreen(worldToImg(q.x, q.y)); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
+    ctx.stroke();
+  };
+  const w = Math.max(1, Math.min(4, 3 * view.s));
+  // paths drawn like roads: dark casing underneath, bright opaque line on top
+  const k = iconScale(), pw = Math.max(1.2, Math.min(5, 3.5 * view.s)), casing = pw + 3 * k;
+  // all casings first, then all lines, so segment joins don't show dark seams
+  const shown = paths.filter(p => p.cart ? layers.cartPaths : layers.vehPaths);
+  for (const p of shown) stroke(p.pts, "rgba(10,12,16,.85)", casing);
+  for (const p of shown) stroke(p.pts, p.cart ? PATH_COLOR.cart : PATH_COLOR.vehicle, pw);
+  if (layers.rails) {   // two-tone so track reads differently from roads; casings first to avoid seams
+    for (const r of rails) stroke(r.pts, "rgba(13,16,19,.8)", w + 3 * k);
+    for (const r of rails) stroke(r.pts, "rgba(195,156,247,.85)", Math.max(1, w - 0.5));
+  }
+
+  // focused vehicle (hovered row/marker or followed): its stops stand out, other stations fade;
+  // for drones the link between their two ports is drawn solid too
+  const focusV = (hoverId || followId) && vehicles.find(v => v.id === (hoverId || followId));
+  const focusStops = focusV && focusV.route && focusV.route.length ? new Set(focusV.route.map(w => w.name)) : null;
+  const focusDrone = focusV && focusV.type === "Drone" ? focusV : null;
+  const focusPorts = focusDrone ? focusStops : null;
+  const isFocusLink = l => focusPorts && focusPorts.size === 2 && l.names.every(n => focusPorts.has(n));
+
+  if (layers.droneRoutes || focusDrone) {
+    ctx.setLineDash([8 * k, 6 * k]);
+    for (const l of droneLinks()) {
+      if (isFocusLink(l)) continue;
+      if (layers.droneRoutes) stroke(l, focusDrone ? "rgba(240,98,146,.2)" : "rgba(240,98,146,.75)", Math.max(1, w * k));
+    }
+    ctx.setLineDash([]);
+    for (const l of droneLinks()) if (isFocusLink(l)) {
+      stroke(l, "rgba(13,16,19,.85)", Math.max(4, w + 4));
+      stroke(l, "#f06292", Math.max(2.5, w + 1));
+    }
+  }
+
+  if (layers.stations) {
+    ctx.font = "11px Segoe UI, sans-serif"; ctx.textBaseline = "middle";
+    const fade = !!focusStops, skip = s => focusStops && focusStops.has(s.Name);
+    // label priority when names collide: train stations, then truck stations, then drone ports
+    for (const s of trainStations) if (!skip(s)) drawStation(s, STATION_COLOR.train, "#b5efe8", fade);
+    for (const s of truckStations) if (!skip(s)) drawStation(s, STATION_COLOR.truck, "#f7e2a8", fade);
+    for (const s of dronePorts) if (!skip(s)) drawStation(s, STATION_COLOR.drone, "#f8c6d8", fade);
+  }
+
+  if (focusStops) {   // stops drawn even if the Stations layer is off; dotted guide from vehicle to its next stop
+    const { list, color } = stopsFor(focusV);
+    const m = motion.get(focusV.id), vp = m && toScreen(interp(m, now));
+    const next = list.find(s => s.Name === focusV.nextStop);
+    if (vp && next) {
+      const q = toScreen(worldToImg(next.location.x, next.location.y));
+      ctx.setLineDash([2, 5]); ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(vp.x, vp.y); ctx.lineTo(q.x, q.y); ctx.stroke(); ctx.setLineDash([]);
+    }
+    const n = focusV.route.length;
+    focusV.route.forEach((w, i) => {
+      const st = list.find(s => s.Name === w.name); if (!st) return;
+      const tag = focusDrone ? (i === 0 ? "Home" : "Paired") : `Stop ${i + 1}/${n}`;
+      drawStopHighlight(st, color, tag, w.name === focusV.nextStop, now);
+    });
+  }
+
+  const vs = visible(), focus = hoverId || followId;
+  vs.sort((a, b) => (a.id === focus) - (b.id === focus));   // focused one on top
+  for (const v of vs) {
+    const m = motion.get(v.id); if (!m) continue;
+    const c = interp(m, now), p = toScreen(c), isF = v.id === focus;
+    ctx.globalAlpha = focus && !isF ? 0.35 : 1;
+    if (isF) {
+      const pulse = (now % 1200) / 1200;
+      ctx.strokeStyle = `rgba(250,149,73,${1 - pulse})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 14 + pulse * 22, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#fa9549";
+      ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.stroke();
+    }
+    drawMarker(v, p, c.rot, isF);
+    if (isF) {
+      const cg = cargoText(v);
+      const label = `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.speed ? ` ${v.speed.toFixed(0)} km/h` : ""}${v.nextStop ? " → " + v.nextStop : ""}${cg ? " · " + cg : ""}`;
+      ctx.font = "600 12px Segoe UI, sans-serif"; ctx.textBaseline = "middle";
+      const w = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(13,16,19,.9)"; ctx.fillRect(p.x + 20, p.y - 28, w + 12, 20);
+      ctx.strokeStyle = "#fa9549"; ctx.lineWidth = 1; ctx.strokeRect(p.x + 20, p.y - 28, w + 12, 20);
+      ctx.fillStyle = "#fff"; ctx.fillText(label, p.x + 26, p.y - 18);
+    }
+    ctx.globalAlpha = 1;
+  }
+  drawCoords();
+  requestAnimationFrame(draw);
+}
+
+// ---- boot -----------------------------------------------------------------------
+resize(); fitWorld(); renderHead(); renderLayerButtons(); applyRowHeight();
+pollStatic().then(poll);
+setInterval(poll, POLL_MS);
+setInterval(pollStatic, 60000);
+// station contents change constantly; refresh them faster than paths/rails
+setInterval(async () => {
+  const [ts, rs] = await Promise.allSettled([getJSON("getTruckStation"), getJSON("getTrainStation")]);
+  if (ts.status === "fulfilled") truckStations = ts.value;
+  if (rs.status === "fulfilled") trainStations = rs.value;
+}, 3000);
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

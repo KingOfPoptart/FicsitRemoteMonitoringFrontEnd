@@ -1,0 +1,977 @@
+[
+{
+"name": "Adaptive Control Unit",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_5_C"
+},
+{
+"name": "AI Expansion Server",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_12_C"
+},
+{
+"name": "AI Limiter",
+"kind": "solid",
+"class": "Desc_CircuitBoardHighSpeed_C"
+},
+{
+"name": "Alclad Aluminum Sheet",
+"kind": "solid",
+"class": "Desc_AluminumPlate_C"
+},
+{
+"name": "Alien DNA Capsule",
+"kind": "solid",
+"class": "Desc_AlienDNACapsule_C"
+},
+{
+"name": "Alien Power Matrix",
+"kind": "solid",
+"class": "Desc_AlienPowerFuel_C"
+},
+{
+"name": "Alien Protein",
+"kind": "solid",
+"class": "Desc_AlienProtein_C"
+},
+{
+"name": "Alumina Solution",
+"kind": "fluid",
+"class": "Desc_AluminaSolution_C"
+},
+{
+"name": "Aluminum Casing",
+"kind": "solid",
+"class": "Desc_AluminumCasing_C"
+},
+{
+"name": "Aluminum Ingot",
+"kind": "solid",
+"class": "Desc_AluminumIngot_C"
+},
+{
+"name": "Aluminum Scrap",
+"kind": "solid",
+"class": "Desc_AluminumScrap_C"
+},
+{
+"name": "Assembly Director System",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_7_C"
+},
+{
+"name": "Automated Wiring",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_3_C"
+},
+{
+"name": "Bacon Agaric",
+"kind": "solid",
+"class": "Desc_Shroom_C"
+},
+{
+"name": "Ballistic Warp Drive",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_11_C"
+},
+{
+"name": "Battery",
+"kind": "solid",
+"class": "Desc_Battery_C"
+},
+{
+"name": "Bauxite",
+"kind": "solid",
+"class": "Desc_OreBauxite_C"
+},
+{
+"name": "Beryl Nut",
+"kind": "solid",
+"class": "Desc_Nut_C"
+},
+{
+"name": "Biochemical Sculptor",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_10_C"
+},
+{
+"name": "Biomass",
+"kind": "solid",
+"class": "Desc_GenericBiomass_C"
+},
+{
+"name": "Black Powder",
+"kind": "solid",
+"class": "Desc_Gunpowder_C"
+},
+{
+"name": "Blade Runners",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorJumpingStilts_C"
+},
+{
+"name": "Blue FICSMAS Ornament",
+"kind": "solid",
+"class": "Desc_XmasBall2_C"
+},
+{
+"name": "Blue Power Slug",
+"kind": "solid",
+"class": "Desc_Crystal_C"
+},
+{
+"name": "Cable",
+"kind": "solid",
+"class": "Desc_Cable_C"
+},
+{
+"name": "Candy Cane",
+"kind": "solid",
+"class": "Desc_CandyCane_C"
+},
+{
+"name": "Candy Cane Basher",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorCandyCane_C"
+},
+{
+"name": "Caterium Ingot",
+"kind": "solid",
+"class": "Desc_GoldIngot_C"
+},
+{
+"name": "Caterium Ore",
+"kind": "solid",
+"class": "Desc_OreGold_C"
+},
+{
+"name": "Chainsaw",
+"kind": "solid",
+"class": "Desc_Chainsaw_C"
+},
+{
+"name": "Circuit Board",
+"kind": "solid",
+"class": "Desc_CircuitBoard_C"
+},
+{
+"name": "Cluster Nobelisk",
+"kind": "solid",
+"class": "Desc_NobeliskCluster_C"
+},
+{
+"name": "Coal",
+"kind": "solid",
+"class": "Desc_Coal_C"
+},
+{
+"name": "Compacted Coal",
+"kind": "solid",
+"class": "Desc_CompactedCoal_C"
+},
+{
+"name": "Computer",
+"kind": "solid",
+"class": "Desc_Computer_C"
+},
+{
+"name": "Concrete",
+"kind": "solid",
+"class": "Desc_Cement_C"
+},
+{
+"name": "Cooling System",
+"kind": "solid",
+"class": "Desc_CoolingSystem_C"
+},
+{
+"name": "Copper FICSMAS Ornament",
+"kind": "solid",
+"class": "Desc_XmasBall3_C"
+},
+{
+"name": "Copper Ingot",
+"kind": "solid",
+"class": "Desc_CopperIngot_C"
+},
+{
+"name": "Copper Ore",
+"kind": "solid",
+"class": "Desc_OreCopper_C"
+},
+{
+"name": "Copper Powder",
+"kind": "solid",
+"class": "Desc_CopperDust_C"
+},
+{
+"name": "Copper Sheet",
+"kind": "solid",
+"class": "Desc_CopperSheet_C"
+},
+{
+"name": "Crude Oil",
+"kind": "fluid",
+"class": "Desc_LiquidOil_C"
+},
+{
+"name": "Crystal Oscillator",
+"kind": "solid",
+"class": "Desc_CrystalOscillator_C"
+},
+{
+"name": "Dark Matter Crystal",
+"kind": "solid",
+"class": "Desc_DarkMatter_C"
+},
+{
+"name": "Dark Matter Residue",
+"kind": "fluid",
+"class": "Desc_DarkEnergy_C"
+},
+{
+"name": "Diamonds",
+"kind": "solid",
+"class": "Desc_Diamond_C"
+},
+{
+"name": "Dissolved Silica",
+"kind": "fluid",
+"class": "Desc_DissolvedSilica_C"
+},
+{
+"name": "Electromagnetic Control Rod",
+"kind": "solid",
+"class": "Desc_ElectromagneticControlRod_C"
+},
+{
+"name": "Empty Canister",
+"kind": "solid",
+"class": "Desc_FluidCanister_C"
+},
+{
+"name": "Empty Fluid Tank",
+"kind": "solid",
+"class": "Desc_GasTank_C"
+},
+{
+"name": "Encased Industrial Beam",
+"kind": "solid",
+"class": "Desc_SteelPlateReinforced_C"
+},
+{
+"name": "Encased Plutonium Cell",
+"kind": "solid",
+"class": "Desc_PlutoniumCell_C"
+},
+{
+"name": "Encased Uranium Cell",
+"kind": "solid",
+"class": "Desc_UraniumCell_C"
+},
+{
+"name": "Excited Photonic Matter",
+"kind": "fluid",
+"class": "Desc_QuantumEnergy_C"
+},
+{
+"name": "Explosive Rebar",
+"kind": "solid",
+"class": "Desc_Rebar_Explosive_C"
+},
+{
+"name": "Fabric",
+"kind": "solid",
+"class": "Desc_Fabric_C"
+},
+{
+"name": "Factory Cart™",
+"kind": "solid",
+"class": "Desc_GolfCart_C"
+},
+{
+"name": "Fancy Fireworks",
+"kind": "solid",
+"class": "Desc_Fireworks_Projectile_02_C"
+},
+{
+"name": "Ficsite Ingot",
+"kind": "solid",
+"class": "Desc_FicsiteIngot_C"
+},
+{
+"name": "Ficsite Trigon",
+"kind": "solid",
+"class": "Desc_FicsiteMesh_C"
+},
+{
+"name": "FICSMAS Actual Snow",
+"kind": "solid",
+"class": "Desc_Snow_C"
+},
+{
+"name": "FICSMAS Bow",
+"kind": "solid",
+"class": "Desc_XmasBow_C"
+},
+{
+"name": "FICSMAS Data Cartridge Day 1",
+"kind": "solid",
+"class": "Desc_XmasDataCartridge1_C"
+},
+{
+"name": "FICSMAS Data Cartridge Day 14",
+"kind": "solid",
+"class": "Desc_XmasDataCartridge4_C"
+},
+{
+"name": "FICSMAS Data Cartridge Day 4",
+"kind": "solid",
+"class": "Desc_XmasDataCartridge2_C"
+},
+{
+"name": "FICSMAS Data Cartridge Day 8",
+"kind": "solid",
+"class": "Desc_XmasDataCartridge3_C"
+},
+{
+"name": "FICSMAS Gift",
+"kind": "solid",
+"class": "Desc_Gift_C"
+},
+{
+"name": "FICSMAS Ornament Bundle",
+"kind": "solid",
+"class": "Desc_XmasBallCluster_C"
+},
+{
+"name": "FICSMAS Tree Branch",
+"kind": "solid",
+"class": "Desc_XmasBranch_C"
+},
+{
+"name": "FICSMAS Wonder Star",
+"kind": "solid",
+"class": "Desc_XmasStar_C"
+},
+{
+"name": "FICSMAS Wreath",
+"kind": "solid",
+"class": "Desc_XmasWreath_C"
+},
+{
+"name": "Ficsonium",
+"kind": "solid",
+"class": "Desc_Ficsonium_C"
+},
+{
+"name": "Ficsonium Fuel Rod",
+"kind": "solid",
+"class": "Desc_FicsoniumFuelRod_C"
+},
+{
+"name": "Fuel",
+"kind": "fluid",
+"class": "Desc_LiquidFuel_C"
+},
+{
+"name": "Fused Modular Frame",
+"kind": "solid",
+"class": "Desc_ModularFrameFused_C"
+},
+{
+"name": "Gas Filter",
+"kind": "solid",
+"class": "Desc_Filter_C"
+},
+{
+"name": "Gas Mask",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorGasmask_C"
+},
+{
+"name": "Gas Nobelisk",
+"kind": "solid",
+"class": "Desc_NobeliskGas_C"
+},
+{
+"name": "Golden Factory Cart™",
+"kind": "solid",
+"class": "Desc_GolfCartGold_C"
+},
+{
+"name": "Hatcher Remains",
+"kind": "solid",
+"class": "Desc_HatcherParts_C"
+},
+{
+"name": "Hazmat Suit",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorHazmatSuit_C"
+},
+{
+"name": "Heat Sink",
+"kind": "solid",
+"class": "Desc_AluminumPlateReinforced_C"
+},
+{
+"name": "Heavy Modular Frame",
+"kind": "solid",
+"class": "Desc_ModularFrameHeavy_C"
+},
+{
+"name": "Heavy Oil Residue",
+"kind": "fluid",
+"class": "Desc_HeavyOilResidue_C"
+},
+{
+"name": "High-Speed Connector",
+"kind": "solid",
+"class": "Desc_HighSpeedConnector_C"
+},
+{
+"name": "Hog Remains",
+"kind": "solid",
+"class": "Desc_HogParts_C"
+},
+{
+"name": "Homing Rifle Ammo",
+"kind": "solid",
+"class": "Desc_CartridgeSmartProjectile_C"
+},
+{
+"name": "Hoverpack",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorHoverPack_C"
+},
+{
+"name": "Iodine-Infused Filter",
+"kind": "solid",
+"class": "Desc_HazmatFilter_C"
+},
+{
+"name": "Ionized Fuel",
+"kind": "fluid",
+"class": "Desc_IonizedFuel_C"
+},
+{
+"name": "Iron FICSMAS Ornament",
+"kind": "solid",
+"class": "Desc_XmasBall4_C"
+},
+{
+"name": "Iron Ingot",
+"kind": "solid",
+"class": "Desc_IronIngot_C"
+},
+{
+"name": "Iron Ore",
+"kind": "solid",
+"class": "Desc_OreIron_C"
+},
+{
+"name": "Iron Plate",
+"kind": "solid",
+"class": "Desc_IronPlate_C"
+},
+{
+"name": "Iron Rebar",
+"kind": "solid",
+"class": "Desc_SpikedRebar_C"
+},
+{
+"name": "Iron Rod",
+"kind": "solid",
+"class": "Desc_IronRod_C"
+},
+{
+"name": "Jetpack",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorJetPack_C"
+},
+{
+"name": "Leaves",
+"kind": "solid",
+"class": "Desc_Leaves_C"
+},
+{
+"name": "Limestone",
+"kind": "solid",
+"class": "Desc_Stone_C"
+},
+{
+"name": "Liquid Biofuel",
+"kind": "fluid",
+"class": "Desc_LiquidBiofuel_C"
+},
+{
+"name": "Magnetic Field Generator",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_6_C"
+},
+{
+"name": "Medicinal Inhaler",
+"kind": "solid",
+"class": "Desc_Medkit_C"
+},
+{
+"name": "Mercer Sphere",
+"kind": "solid",
+"class": "Desc_WAT2_C"
+},
+{
+"name": "Modular Engine",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_4_C"
+},
+{
+"name": "Modular Frame",
+"kind": "solid",
+"class": "Desc_ModularFrame_C"
+},
+{
+"name": "Motor",
+"kind": "solid",
+"class": "Desc_Motor_C"
+},
+{
+"name": "Mycelia",
+"kind": "solid",
+"class": "Desc_Mycelia_C"
+},
+{
+"name": "Neural-Quantum Processor",
+"kind": "solid",
+"class": "Desc_TemporalProcessor_C"
+},
+{
+"name": "Nitric Acid",
+"kind": "fluid",
+"class": "Desc_NitricAcid_C"
+},
+{
+"name": "Nitrogen Gas",
+"kind": "fluid",
+"class": "Desc_NitrogenGas_C"
+},
+{
+"name": "Nobelisk",
+"kind": "solid",
+"class": "Desc_NobeliskExplosive_C"
+},
+{
+"name": "Nobelisk Detonator",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorNobeliskDetonator_C"
+},
+{
+"name": "Non-Fissile Uranium",
+"kind": "solid",
+"class": "Desc_NonFissibleUranium_C"
+},
+{
+"name": "Nuclear Pasta",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_9_C"
+},
+{
+"name": "Nuke Nobelisk",
+"kind": "solid",
+"class": "Desc_NobeliskNuke_C"
+},
+{
+"name": "Object Scanner",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorObjectScanner_C"
+},
+{
+"name": "Packaged Alumina Solution",
+"kind": "solid",
+"class": "Desc_PackagedAlumina_C"
+},
+{
+"name": "Packaged Fuel",
+"kind": "solid",
+"class": "Desc_Fuel_C"
+},
+{
+"name": "Packaged Heavy Oil Residue",
+"kind": "solid",
+"class": "Desc_PackagedOilResidue_C"
+},
+{
+"name": "Packaged Ionized Fuel",
+"kind": "solid",
+"class": "Desc_PackagedIonizedFuel_C"
+},
+{
+"name": "Packaged Liquid Biofuel",
+"kind": "solid",
+"class": "Desc_PackagedBiofuel_C"
+},
+{
+"name": "Packaged Nitric Acid",
+"kind": "solid",
+"class": "Desc_PackagedNitricAcid_C"
+},
+{
+"name": "Packaged Nitrogen Gas",
+"kind": "solid",
+"class": "Desc_PackagedNitrogenGas_C"
+},
+{
+"name": "Packaged Oil",
+"kind": "solid",
+"class": "Desc_PackagedOil_C"
+},
+{
+"name": "Packaged Rocket Fuel",
+"kind": "solid",
+"class": "Desc_PackagedRocketFuel_C"
+},
+{
+"name": "Packaged Sulfuric Acid",
+"kind": "solid",
+"class": "Desc_PackagedSulfuricAcid_C"
+},
+{
+"name": "Packaged Turbofuel",
+"kind": "solid",
+"class": "Desc_TurboFuel_C"
+},
+{
+"name": "Packaged Water",
+"kind": "solid",
+"class": "Desc_PackagedWater_C"
+},
+{
+"name": "Paleberry",
+"kind": "solid",
+"class": "Desc_Berry_C"
+},
+{
+"name": "Parachute",
+"kind": "solid",
+"class": "Desc_Parachute_C"
+},
+{
+"name": "Petroleum Coke",
+"kind": "solid",
+"class": "Desc_PetroleumCoke_C"
+},
+{
+"name": "Plastic",
+"kind": "solid",
+"class": "Desc_Plastic_C"
+},
+{
+"name": "Plutonium Fuel Rod",
+"kind": "solid",
+"class": "Desc_PlutoniumFuelRod_C"
+},
+{
+"name": "Plutonium Pellet",
+"kind": "solid",
+"class": "Desc_PlutoniumPellet_C"
+},
+{
+"name": "Plutonium Waste",
+"kind": "solid",
+"class": "Desc_PlutoniumWaste_C"
+},
+{
+"name": "Polymer Resin",
+"kind": "solid",
+"class": "Desc_PolymerResin_C"
+},
+{
+"name": "Portable Miner",
+"kind": "solid",
+"class": "BP_ItemDescriptorPortableMiner_C"
+},
+{
+"name": "Power Shard",
+"kind": "solid",
+"class": "Desc_CrystalShard_C"
+},
+{
+"name": "Pressure Conversion Cube",
+"kind": "solid",
+"class": "Desc_PressureConversionCube_C"
+},
+{
+"name": "Pulse Nobelisk",
+"kind": "solid",
+"class": "Desc_NobeliskShockwave_C"
+},
+{
+"name": "Purple Power Slug",
+"kind": "solid",
+"class": "Desc_Crystal_mk3_C"
+},
+{
+"name": "Quartz Crystal",
+"kind": "solid",
+"class": "Desc_QuartzCrystal_C"
+},
+{
+"name": "Quickwire",
+"kind": "solid",
+"class": "Desc_HighSpeedWire_C"
+},
+{
+"name": "Radio Control Unit",
+"kind": "solid",
+"class": "Desc_ModularFrameLightweight_C"
+},
+{
+"name": "Raw Quartz",
+"kind": "solid",
+"class": "Desc_RawQuartz_C"
+},
+{
+"name": "Reanimated SAM",
+"kind": "solid",
+"class": "Desc_SAMIngot_C"
+},
+{
+"name": "Rebar Gun",
+"kind": "solid",
+"class": "Desc_RebarGunProjectile_C"
+},
+{
+"name": "Red FICSMAS Ornament",
+"kind": "solid",
+"class": "Desc_XmasBall1_C"
+},
+{
+"name": "Reinforced Iron Plate",
+"kind": "solid",
+"class": "Desc_IronPlateReinforced_C"
+},
+{
+"name": "Rifle",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorRifle_C"
+},
+{
+"name": "Rifle Ammo",
+"kind": "solid",
+"class": "Desc_CartridgeStandard_C"
+},
+{
+"name": "Rocket Fuel",
+"kind": "fluid",
+"class": "Desc_RocketFuel_C"
+},
+{
+"name": "Rotor",
+"kind": "solid",
+"class": "Desc_Rotor_C"
+},
+{
+"name": "Rubber",
+"kind": "solid",
+"class": "Desc_Rubber_C"
+},
+{
+"name": "SAM",
+"kind": "solid",
+"class": "Desc_SAM_C"
+},
+{
+"name": "SAM Fluctuator",
+"kind": "solid",
+"class": "Desc_SAMFluctuator_C"
+},
+{
+"name": "Screws",
+"kind": "solid",
+"class": "Desc_IronScrew_C"
+},
+{
+"name": "Shatter Rebar",
+"kind": "solid",
+"class": "Desc_Rebar_Spreadshot_C"
+},
+{
+"name": "Silica",
+"kind": "solid",
+"class": "Desc_Silica_C"
+},
+{
+"name": "Singularity Cell",
+"kind": "solid",
+"class": "Desc_SingularityCell_C"
+},
+{
+"name": "Smart Plating",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_1_C"
+},
+{
+"name": "Smokeless Powder",
+"kind": "solid",
+"class": "Desc_GunpowderMK2_C"
+},
+{
+"name": "Snowball",
+"kind": "solid",
+"class": "Desc_SnowballProjectile_C"
+},
+{
+"name": "Solid Biofuel",
+"kind": "solid",
+"class": "Desc_Biofuel_C"
+},
+{
+"name": "Somersloop",
+"kind": "solid",
+"class": "Desc_WAT1_C"
+},
+{
+"name": "Sparkly Fireworks",
+"kind": "solid",
+"class": "Desc_Fireworks_Projectile_03_C"
+},
+{
+"name": "Spitter Remains",
+"kind": "solid",
+"class": "Desc_SpitterParts_C"
+},
+{
+"name": "Stator",
+"kind": "solid",
+"class": "Desc_Stator_C"
+},
+{
+"name": "Steel Beam",
+"kind": "solid",
+"class": "Desc_SteelPlate_C"
+},
+{
+"name": "Steel Ingot",
+"kind": "solid",
+"class": "Desc_SteelIngot_C"
+},
+{
+"name": "Steel Pipe",
+"kind": "solid",
+"class": "Desc_SteelPipe_C"
+},
+{
+"name": "Stinger Remains",
+"kind": "solid",
+"class": "Desc_StingerParts_C"
+},
+{
+"name": "Stun Rebar",
+"kind": "solid",
+"class": "Desc_Rebar_Stunshot_C"
+},
+{
+"name": "Sulfur",
+"kind": "solid",
+"class": "Desc_Sulfur_C"
+},
+{
+"name": "Sulfuric Acid",
+"kind": "fluid",
+"class": "Desc_SulfuricAcid_C"
+},
+{
+"name": "Supercomputer",
+"kind": "solid",
+"class": "Desc_ComputerSuper_C"
+},
+{
+"name": "Superposition Oscillator",
+"kind": "solid",
+"class": "Desc_QuantumOscillator_C"
+},
+{
+"name": "Sweet Fireworks",
+"kind": "solid",
+"class": "Desc_Fireworks_Projectile_01_C"
+},
+{
+"name": "Thermal Propulsion Rocket",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_8_C"
+},
+{
+"name": "Time Crystal",
+"kind": "solid",
+"class": "Desc_TimeCrystal_C"
+},
+{
+"name": "Turbo Motor",
+"kind": "solid",
+"class": "Desc_MotorLightweight_C"
+},
+{
+"name": "Turbo Rifle Ammo",
+"kind": "solid",
+"class": "Desc_CartridgeChaos_C"
+},
+{
+"name": "Turbofuel",
+"kind": "fluid",
+"class": "Desc_LiquidTurboFuel_C"
+},
+{
+"name": "Uranium",
+"kind": "solid",
+"class": "Desc_OreUranium_C"
+},
+{
+"name": "Uranium Fuel Rod",
+"kind": "solid",
+"class": "Desc_NuclearFuelRod_C"
+},
+{
+"name": "Uranium Waste",
+"kind": "solid",
+"class": "Desc_NuclearWaste_C"
+},
+{
+"name": "Versatile Framework",
+"kind": "solid",
+"class": "Desc_SpaceElevatorPart_2_C"
+},
+{
+"name": "Water",
+"kind": "fluid",
+"class": "Desc_Water_C"
+},
+{
+"name": "Wire",
+"kind": "solid",
+"class": "Desc_Wire_C"
+},
+{
+"name": "Wood",
+"kind": "solid",
+"class": "Desc_Wood_C"
+},
+{
+"name": "Xeno-Basher",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorStunSpear_C"
+},
+{
+"name": "Xeno-Zapper",
+"kind": "solid",
+"class": "BP_EquipmentDescriptorShockShank_C"
+},
+{
+"name": "Yellow Power Slug",
+"kind": "solid",
+"class": "Desc_Crystal_mk2_C"
+},
+{
+"name": "Zipline",
+"kind": "solid",
+"class": "BP_EqDescZipLine_C"
+}
+]

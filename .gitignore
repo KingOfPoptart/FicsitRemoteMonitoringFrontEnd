@@ -1,0 +1,8 @@
+# Game art fetched locally by tools/fetch_assets.py - not redistributed
+map.avif
+img/
+
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
