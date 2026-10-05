@@ -41,11 +41,12 @@ const Players = {
 // tier (Mk.1-Mk.2) and draws the segments the filter keeps (all, production lines, power lines). One shared fetch
 // of /logistics (the server works out the networks). opts.highlight() -> network id draws that network on top.
 const BELT_COLOR = { 1: "#4d6a85", 2: "#5d89b3", 3: "#6fa6dc", 4: "#8fc0f1", 5: "#b6d6f7", 6: "#dfecfb" };   // faster = brighter
-const PIPE_COLOR = { 1: "#3d9a7c", 2: "#7fe0bf" };
+const PIPE_COLOR = { 1: "#5cc97e", 2: "#a9f0bd" };   // drawn as hollow tubes, belts as solid lines
 const logisticsLayers = keep => [
   ...[1, 2, 3, 4, 5, 6].map(t => ({ key: "belt" + t, group: "Belts", label: `Mk.${t} belts`, swatch: `background:${BELT_COLOR[t]}`,
     count: () => Logistics.belts.filter(b => b.t === t && keep(b)).length })),
-  ...[1, 2].map(t => ({ key: "pipe" + t, group: "Pipes", label: `Mk.${t} pipes`, swatch: `background:${PIPE_COLOR[t]};height:4px`,
+  ...[1, 2].map(t => ({ key: "pipe" + t, group: "Pipes", label: `Mk.${t} pipes`,
+    swatch: `background:linear-gradient(${PIPE_COLOR[t]} 0 30%, #0d1013 30% 70%, ${PIPE_COLOR[t]} 70%);height:6px`,
     count: () => Logistics.pipes.filter(b => b.t === t && keep(b)).length })),
 ];
 const Logistics = {
@@ -67,11 +68,14 @@ function drawLogistics(mv, keep, hi, hover) {
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   const path = segs => { for (const b of segs) { const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y)));
     ip.forEach((q, i) => { const s = mv.toScreen(q); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); }); } };
-  for (const [kind, list, colors, width] of [["pipe", Logistics.pipes, PIPE_COLOR, w * 1.4], ["belt", Logistics.belts, BELT_COLOR, w]]) {
+  for (const [kind, list, colors, width] of [["pipe", Logistics.pipes, PIPE_COLOR, w * 2.2], ["belt", Logistics.belts, BELT_COLOR, w]]) {
     for (const t of Object.keys(colors)) {
       if (!mv.isOn(kind + t)) continue;
-      ctx.globalAlpha = hi ? 0.35 : 0.9; ctx.strokeStyle = colors[t]; ctx.lineWidth = width; ctx.beginPath();
-      path(list.filter(b => b.t === +t && keep(b))); ctx.stroke();
+      const segs = list.filter(b => b.t === +t && keep(b));
+      ctx.globalAlpha = hi ? 0.35 : 0.95; ctx.strokeStyle = colors[t]; ctx.lineWidth = width; ctx.beginPath(); path(segs); ctx.stroke();
+      if (kind === "pipe") {   // hollow tube: a dark core down the middle
+        ctx.globalAlpha = hi ? 0.35 : 0.85; ctx.strokeStyle = "#0d1013"; ctx.lineWidth = Math.max(0.8, width * 0.38); ctx.beginPath(); path(segs); ctx.stroke();
+      }
     }
   }
   const outline = (id, color) => {   // a whole network: dark casing + coloured line on top
@@ -84,8 +88,11 @@ function drawLogistics(mv, keep, hi, hover) {
   ctx.globalAlpha = 1;
 }
 
-const netTooltip = n => !n ? "" :
-  `<div class="head">${n.kind === "belt" ? "Belt" : "Pipe"} network · ${n.p && n.w ? "production + power" : n.p ? "production" : n.w ? "power" : "other"} · ${n.len >= 1000 ? (n.len / 1000).toFixed(1) + " km" : n.len + " m"}</div>` +
+// tooltip for a belt / pipe: the piece itself, then its whole network
+const netTooltip = (n, seg) => !n ? "" :
+  `<div class="head"><b style="color:#fff">Mk.${seg ? seg.t : "?"} ${n.kind === "belt" ? "conveyor belt" : "pipeline"}</b>` +
+  ` · ${n.kind === "belt" ? `${({ 1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200 })[seg?.t] || "?"} items/min` : `${({ 1: 300, 2: 600 })[seg?.t] || "?"} m³/min`}<br>` +
+  `part of a ${n.kind} network · ${n.p && n.w ? "production + power" : n.p ? "production" : n.w ? "power" : "other"} · ${n.len >= 1000 ? (n.len / 1000).toFixed(1) + " km" : n.len + " m"}</div>` +
   (Object.entries(n.touches).slice(0, 5).map(([k, c]) => `<div class="row"><span>${esc(k)}</span><b>×${c}</b></div>`).join("") || `<div class="row muted"><span>connects to nothing found</span></div>`) +
   `<div class="row muted"><span>${n.segs} pieces · bottleneck ${n.cap ? n.cap + (n.kind === "pipe" ? " m³" : "") + "/min" : "–"}${n.open ? ` · ${n.open} open ends` : ""}</span></div>`;
 
@@ -156,12 +163,15 @@ class MapView {
       this.mouseWorld = { x: WORLD.x0 + ix / IMG * (WORLD.x1 - WORLD.x0), y: WORLD.y0 + iy / IMG * (WORLD.y1 - WORLD.y0) };
       this.draw();
       if (drag) return;
-      const p = this.nearest(e.clientX - r.left, e.clientY - r.top);
+      // what's under the cursor: a marker if the cursor is right on it (or it's nearer than a belt/pipe), else the line
+      let p = this.nearest(e.clientX - r.left, e.clientY - r.top);
+      const hit = opts.logistics ? this.nearestSegment(ix, iy) : null;
+      if (p && hit && p._d > 6 && hit.d < p._d) p = null;
+      const seg = !p && hit ? hit.seg : null, netId = seg ? seg.n : null;
       if ((p && p.id) !== this.hoverId) { this.hoverId = p ? p.id : null; opts.onHover && opts.onHover(p); this.draw(); }
-      const seg = !p && opts.logistics ? this.nearestSegment(ix, iy) : null, netId = seg ? seg.n : null;
       if (netId !== this.hoverNet) { this.hoverNet = netId; opts.onNetHover && opts.onNetHover(netId); this.draw(); }
       const tip = p ? (p.layer === "players" || !opts.tooltip ? p.label && `<div class="row"><span>${esc(p.label)}</span></div>` : opts.tooltip(p))
-                    : seg && netTooltip(Logistics.byId?.get(netId));
+                    : seg && netTooltip(Logistics.byId?.get(netId), seg);
       if (tip) showPopAt(tip, e.clientX, e.clientY); else hideCargoPop();
       this.canvas.style.cursor = p || seg ? "pointer" : "";
     });
@@ -200,7 +210,7 @@ class MapView {
         if (d < bd) { bd = d; best = b; }
       }
     }
-    return best;
+    return best && { seg: best, d: bd * this.view.s };   // distance in screen px
   }
   // what "Fit" frames: visible points, not counting top layers (players), who arrive first and are always in one spot
   framePoints() { return this.layers.filter(l => l.on && !l.top).flatMap(l => this.points[l.key] || []); }
@@ -328,6 +338,7 @@ class MapView {
       const s = this.toScreen(p.ip), d = Math.hypot(s.x - mx, s.y - my);
       if (d < bd) { bd = d; best = p; }
     }
+    if (best) best._d = bd;
     return best;
   }
   draw() {

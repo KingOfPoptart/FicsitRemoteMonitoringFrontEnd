@@ -358,7 +358,7 @@ const Production = (() => {
       layers: [...GAME_BUILDINGS, "Other"].map(b => ({ key: "b:" + b, group: "Machines", label: b, color: "var(--ok)", size: 4, swatchHtml: b === "Other" ? "" : icon(b, "icon sm") })),
       hint: "markers follow the filters · click a machine row to find it",
       tooltip: p => { const m = machines.find(x => x.id === p.id); return m ? machinePop(m) : ""; },
-      onHover: p => { hl(p && p.id); if (p) $("pMachines").querySelector(`tr[data-mid="${CSS.escape(p.id)}"]`)?.scrollIntoView({ block: "nearest" }); },
+      onHover: p => { hl(p && p.id); if (p) scrollRowIntoView($("pMachines").querySelector(`tr[data-mid="${CSS.escape(p.id)}"]`)); },
     });
 
     $("pSearch").addEventListener("input", e => { ui.q = e.target.value; saveUi(); render(); });

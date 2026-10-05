@@ -30,6 +30,16 @@ const segControl = (group, opts, isOn) => `<div class="seg" role="radiogroup">${
   `<button role="radio" aria-checked="${isOn(o)}" class="${isOn(o) ? "on" : ""}" data-g="${group}" data-v="${esc(o.v)}"${o.title ? ` title="${esc(o.title)}"` : ""}>` +
   `${o.dot ? `<i class="sw" style="background:${o.dot}"></i>` : ""}${o.label}${o.n != null ? ` <span class="n">${typeof o.n === "number" ? fmtNum(o.n) : o.n}</span>` : ""}</button>`).join("")}</div>`;
 
+// Bring a table row into view inside its scrolling box, centred. (scrollIntoView "nearest" can leave the row
+// hidden under the table's sticky header when it scrolls up.) Only scrolls if the row isn't already clearly visible.
+function scrollRowIntoView(tr) {
+  const box = tr && tr.closest(".table-wrap"); if (!box) return;
+  const head = box.querySelector("thead")?.offsetHeight || 0;
+  const top = tr.offsetTop, bottom = top + tr.offsetHeight;
+  if (top >= box.scrollTop + head && bottom <= box.scrollTop + box.clientHeight) return;
+  box.scrollTop = Math.max(0, top - head - (box.clientHeight - head - tr.offsetHeight) / 2);
+}
+
 const SVGNS = "http://www.w3.org/2000/svg";
 const svgEl = (tag, attrs = {}, parent) => {
   const e = document.createElementNS(SVGNS, tag);

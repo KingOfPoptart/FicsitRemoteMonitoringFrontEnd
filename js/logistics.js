@@ -29,7 +29,7 @@ const LogisticsTab = (() => {
     picked = id && picked !== id ? id : null;
     render();
     const n = picked && net(picked);
-    if (fromMap) { if (n) $("lgNets").querySelector(`tr[data-net="${CSS.escape(n.id)}"]`)?.scrollIntoView({ block: "nearest" }); return; }
+    if (fromMap) { if (n) scrollRowIntoView($("lgNets").querySelector(`tr[data-net="${CSS.escape(n.id)}"]`)); return; }
     if (n) map.fitBox([worldToImg(n.box[0], n.box[1]), worldToImg(n.box[2], n.box[3])], 60, true); else map.fit();
   }
 
@@ -106,7 +106,7 @@ const LogisticsTab = (() => {
       onNetHover: id => {   // map hover -> the network's row lights up and scrolls into view
         for (const tr of $("lgNets").querySelectorAll("tr.hl")) tr.classList.remove("hl");
         const tr = id && $("lgNets").querySelector(`tr[data-net="${CSS.escape(id)}"]`);
-        if (tr) { tr.classList.add("hl"); tr.scrollIntoView({ block: "nearest" }); }
+        if (tr) { tr.classList.add("hl"); scrollRowIntoView(tr); }
       },
       // Fit frames the networks the table shows
       fitTo: () => Logistics.networks.filter(n => passes(n)).flatMap(n => [worldToImg(n.box[0], n.box[1]), worldToImg(n.box[2], n.box[3])]),

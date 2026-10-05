@@ -1270,7 +1270,7 @@ canvas.addEventListener("mousemove", e => {   // hovering a marker highlights it
     if (d < bd) { bd = d; best = v.id; }
   }
   setHover(best);
-  if (best) document.querySelector(`tr[data-id="${CSS.escape(best)}"]`)?.scrollIntoView({ block: "nearest" });
+  if (best) scrollRowIntoView(document.querySelector(`tr[data-id="${CSS.escape(best)}"]`));
   // a station under the cursor shows what's in it, even when a vehicle is parked on it (that vehicle highlights too)
   const st = stationAt(mx, my);
   if (st) showPopAt(stationPopHtml(st), e.clientX, e.clientY); else hideCargoPop();

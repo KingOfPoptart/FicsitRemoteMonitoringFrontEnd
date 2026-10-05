@@ -213,7 +213,7 @@ const Power = (() => {
         { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, on: false },
       ],
       tooltip: p => `<div class="row"><span>${esc(p.label)}</span></div>`, hint: "click a generator row to find it",
-      onHover: p => { hl(p && p.id); if (p) $("wGens").querySelector(`tr[data-gid="${CSS.escape(p.id)}"]`)?.scrollIntoView({ block: "nearest" }); },
+      onHover: p => { hl(p && p.id); if (p) scrollRowIntoView($("wGens").querySelector(`tr[data-gid="${CSS.escape(p.id)}"]`)); },
     });
     $("wGens").addEventListener("click", e => {
       const tr = e.target.closest("tr[data-gid]"); if (!tr) return;
