@@ -37,34 +37,46 @@ const Players = {
   },
 };
 
-// Conveyor belts on any map: MapView({ belts: b => bool }) adds a layer per tier (Mk.1-Mk.6) and draws the belts
-// the filter keeps (all, production lines, power lines). One shared fetch of /belts (server works out networks).
+// Belts and pipes on any map: MapView({ logistics: seg => bool }) adds a layer per belt tier (Mk.1-Mk.6) and pipe
+// tier (Mk.1-Mk.2) and draws the segments the filter keeps (all, production lines, power lines). One shared fetch
+// of /logistics (the server works out the networks). opts.highlight() -> network id draws that network on top.
 const BELT_COLOR = { 1: "#4d6a85", 2: "#5d89b3", 3: "#6fa6dc", 4: "#8fc0f1", 5: "#b6d6f7", 6: "#dfecfb" };   // faster = brighter
-const beltLayers = keep => [1, 2, 3, 4, 5, 6].map(t => ({ key: "belt" + t, group: "Belts", label: `Mk.${t} belts`,
-  swatch: `background:${BELT_COLOR[t]}`, count: () => Belts.list.filter(b => b.t === t && keep(b)).length }));
-const Belts = {
-  list: [], maps: new Set(), timer: null,
-  attach(mv) {
-    this.maps.add(mv);
-    if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 60000); }
-  },
+const PIPE_COLOR = { 1: "#3d9a7c", 2: "#7fe0bf" };
+const logisticsLayers = keep => [
+  ...[1, 2, 3, 4, 5, 6].map(t => ({ key: "belt" + t, group: "Belts", label: `Mk.${t} belts`, swatch: `background:${BELT_COLOR[t]}`,
+    count: () => Logistics.belts.filter(b => b.t === t && keep(b)).length })),
+  ...[1, 2].map(t => ({ key: "pipe" + t, group: "Pipes", label: `Mk.${t} pipes`, swatch: `background:${PIPE_COLOR[t]};height:4px`,
+    count: () => Logistics.pipes.filter(b => b.t === t && keep(b)).length })),
+];
+const Logistics = {
+  belts: [], pipes: [], networks: [], counts: {}, maps: new Set(), listeners: new Set(), timer: null,
+  attach(mv) { this.maps.add(mv); this.start(); },
+  start() { if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 60000); } },
   async poll() {
-    try { const r = await fetch("/belts", { cache: "no-store" }); if (!r.ok) throw 0; this.list = (await r.json()).belts; }
-    catch { if (!this.list.length) setTimeout(() => this.poll(), 5000); return; }   // server still working them out
+    try {
+      const r = await fetch("/logistics", { cache: "no-store" }); if (!r.ok) throw 0;
+      Object.assign(this, await r.json());
+    } catch { if (!this.belts.length) setTimeout(() => this.poll(), 5000); return; }   // server still working it out
     for (const mv of this.maps) { mv.renderButtons(); mv.draw(); }
+    for (const f of this.listeners) f();
   },
 };
-function drawBelts(mv, keep) {
+function drawLogistics(mv, keep, hi) {
   const ctx = mv.ctx, v = mv.view, w = Math.max(0.8, Math.min(3, 1.4 * Math.sqrt(v.s / 0.3)));
-  ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.lineWidth = w; ctx.globalAlpha = 0.9;
-  for (let t = 1; t <= 6; t++) {
-    if (!mv.isOn("belt" + t)) continue;
-    ctx.strokeStyle = BELT_COLOR[t]; ctx.beginPath();
-    for (const b of Belts.list) {
-      if (b.t !== t || !keep(b)) continue;
-      b.pts.forEach((q, i) => { const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y))); const s = mv.toScreen(ip[i]); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const path = segs => { for (const b of segs) { const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y)));
+    ip.forEach((q, i) => { const s = mv.toScreen(q); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); }); } };
+  for (const [kind, list, colors, width] of [["pipe", Logistics.pipes, PIPE_COLOR, w * 1.4], ["belt", Logistics.belts, BELT_COLOR, w]]) {
+    for (const t of Object.keys(colors)) {
+      if (!mv.isOn(kind + t)) continue;
+      ctx.globalAlpha = hi ? 0.35 : 0.9; ctx.strokeStyle = colors[t]; ctx.lineWidth = width; ctx.beginPath();
+      path(list.filter(b => b.t === +t && keep(b))); ctx.stroke();
     }
-    ctx.stroke();
+  }
+  if (hi) {   // the picked network: dark casing + accent line on top
+    const segs = [...Logistics.belts, ...Logistics.pipes].filter(b => b.n === hi);
+    ctx.globalAlpha = 1; ctx.strokeStyle = "rgba(13,16,19,.9)"; ctx.lineWidth = w + 5; ctx.beginPath(); path(segs); ctx.stroke();
+    ctx.strokeStyle = "#fa9549"; ctx.lineWidth = w + 2; ctx.beginPath(); path(segs); ctx.stroke();
   }
   ctx.globalAlpha = 1;
 }
@@ -72,7 +84,7 @@ function drawBelts(mv, keep) {
 class MapView {
   constructor(el, opts) {
     this.opts = opts;
-    this.layers = [...opts.layers, ...(opts.belts ? beltLayers(opts.belts) : []), ...(opts.players ? [playerLayer()] : [])];
+    this.layers = [...opts.layers, ...(opts.logistics ? logisticsLayers(opts.logistics) : []), ...(opts.players ? [playerLayer()] : [])];
     this.points = {}; this.hoverId = null; this.focus = null; this.fitted = false;
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(opts.storeKey) || "{}"); } catch {}
@@ -143,7 +155,7 @@ class MapView {
     mapImg.addEventListener("load", () => this.draw());
     this.renderButtons();
     if (opts.players) Players.attach(this);
-    if (opts.belts) Belts.attach(this);
+    if (opts.logistics) Logistics.attach(this);
     if (opts.animate) {   // continuous repaint, skipped while the map isn't on screen (hidden tab)
       const loop = () => { if (this.canvas.clientWidth) this.paint(); requestAnimationFrame(loop); };
       requestAnimationFrame(loop);
@@ -297,7 +309,7 @@ class MapView {
       ctx.drawImage(mapImg, v.ox, v.oy, IMG * v.s, IMG * v.s);
       ctx.fillStyle = `rgba(10,12,16,${this.opts.dim ?? 0.45})`; ctx.fillRect(0, 0, r.width, r.height);
     }
-    if (this.opts.belts) { ctx.save(); drawBelts(this, this.opts.belts); ctx.restore(); }   // under everything else
+    if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.()); ctx.restore(); }   // under everything else
     if (this.opts.draw) { ctx.save(); this.opts.draw(ctx, performance.now(), this); ctx.restore(); }
     const marked = [], emph = [], top = [];
     for (const l of this.layers) {

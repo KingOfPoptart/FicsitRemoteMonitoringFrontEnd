@@ -314,6 +314,8 @@
     #tab-production .detail-lists { grid-template-columns: 1fr; }
     #tab-power .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); }
     #tab-power .w-chart { flex: 1.3; } #tab-power .w-batt { flex: 0 0 132px; } #tab-power .w-break { flex: 1; overflow-y: auto; }
+    #tab-logistics .pgrid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+    #tab-logistics .lg-tiers { flex: 0 0 auto; max-height: 30%; } #tab-logistics .lg-nets { flex: 1; } #tab-logistics .lg-map { flex: 1; }
     #tab-power .w-map { flex: 1.9; } #tab-power .w-gens { flex: 1; }   /* big map on top, generators table under it */
     .onescreen .card-body { flex: 1; min-height: 0; overflow-y: auto; }
     #tab-progression .pgrid { grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 1.35fr); }
@@ -382,6 +384,7 @@
   /* overview cards: richer content */
   .ov-card h3 { margin: 10px 0 4px; }
   .ov-card h3 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .sw-line { display: inline-block; width: 16px; height: 4px; border-radius: 2px; flex: none; }
   .stack { display: flex; gap: 2px; height: 10px; margin: 8px 0 4px; }
   .stack i { display: block; min-width: 3px; border-radius: 2px; }
   .stack-key { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--muted); }
@@ -497,13 +500,14 @@
 <header>
   <h1><span>FICSIT</span> Monitor</h1>
   <nav class="tabs" id="tabs">
-    <button data-tab="overview">Overview</button><button data-tab="vehicles">Vehicles</button><button data-tab="production">Production</button><button data-tab="power">Power</button><button data-tab="progression">Progression</button>
+    <button data-tab="overview">Overview</button><button data-tab="vehicles">Vehicles</button><button data-tab="production">Production</button><button data-tab="power">Power</button><button data-tab="logistics">Logistics</button><button data-tab="progression">Progression</button>
   </nav>
   <div class="stats" id="statsOv" data-for="overview" hidden></div>
   <div class="stats" id="stats" data-for="vehicles"></div>
   <div class="stats" id="statsProd" data-for="production" hidden></div>
   <div class="stats" id="statsPower" data-for="power" hidden></div>
   <div class="stats" id="statsProg" data-for="progression" hidden></div>
+  <div class="stats" id="statsLogi" data-for="logistics" hidden></div>
   <div class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
 </header>
 
@@ -544,6 +548,7 @@
 <main id="tab-overview" class="tab" hidden></main>
 <main id="tab-production" class="tab onescreen" hidden></main>
 <main id="tab-power" class="tab onescreen" hidden></main>
+<main id="tab-logistics" class="tab onescreen" hidden></main>
 <main id="tab-progression" class="tab onescreen" hidden></main>
 
 <script src="/js/charts.js"></script>
@@ -1515,7 +1520,7 @@ addEventListener("keydown", e => { if (e.key === "Escape" && document.querySelec
 
 // ---- tabs -----------------------------------------------------------------------
 // #overview / #vehicles / #production / #power / #progression in the URL, so a tab can be bookmarked; the last one is remembered
-const TABS = { overview: "Overview", vehicles: "Vehicles", production: "Production", power: "Power", progression: "Progression" };
+const TABS = { overview: "Overview", vehicles: "Vehicles", production: "Production", power: "Power", logistics: "Logistics", progression: "Progression" };
 let activeTab = (() => {
   const h = location.hash.slice(1); if (TABS[h]) return h;
   try { const t = localStorage.getItem("ft.tab"); return TABS[t] ? t : "overview"; } catch { return "overview"; }
@@ -1539,7 +1544,7 @@ function showTab(tab) {
   setHdr();
   $("banner").hidden = tab !== "vehicles";
   hideCargoPop(); closePopover();
-  const mods = { overview: Overview, production: Production, power: Power, progression: Progression };
+  const mods = { overview: Overview, production: Production, power: Power, logistics: LogisticsTab, progression: Progression };
   setExpanded(null);   // leaving a tab closes any full-screen panel
   for (const [k, m] of Object.entries(mods)) k === tab ? m.show() : m.hide();
   addExpanders();
@@ -1564,6 +1569,7 @@ setInterval(async () => {
 <script src="/js/power.js"></script>
 <script src="/js/progression.js"></script>
 <script src="/js/overview.js"></script>
+<script src="/js/logistics.js"></script>
 <script>itemsReady.then(() => showTab(activeTab));</script>
 </body>
 </html>

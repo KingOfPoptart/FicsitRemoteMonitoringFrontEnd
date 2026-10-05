@@ -6,7 +6,7 @@ and records power/production history so the charts have data from before the pag
 /api/<endpoint>  ->  <FRM URL>/<endpoint>   (responses cached ~1 s, so several open pages don't multiply FRM load)
 /hist/power?mins=60       power history per grid (sampled every 5 s, kept 24 h)
 /hist/production?mins=60  produced/consumed per item and generation per generator type (sampled every 15 s, kept 24 h)
-/belts                    every conveyor belt with its tier and whether it feeds production / power (every 60 s)
+/logistics                every belt and pipe (tier, production / power) and their networks (every 60 s)
 
 By default it only listens on this machine (127.0.0.1). Use --host 0.0.0.0 to reach it from other
 devices on your network. The FRM URL can also be set with the FRM_URL environment variable.
@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).parent
 ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths", "getTrains", "getTrainStation",
            "getTrainRails", "getDrone", "getDroneStation",
            "getFactory", "getExtractor", "getGenerators", "getPower", "getPowerUsage", "getSwitches", "getSessionInfo",
-           "getBelts", "getSplitterMerger", "getStorageInv",
+           "getBelts", "getSplitterMerger", "getStorageInv", "getPipes", "getPipeJunctions", "getPump",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")
@@ -239,13 +239,15 @@ class History:
 HIST = History()
 
 
-# ---- conveyor belts ---------------------------------------------------------------------------
-# FRM lists belts (curve, both ends, whether each end is connected) but not what they connect to, so networks are
-# worked out from geometry: belts whose ends meet, belts touching the same splitter/merger, and connected ends
-# straight above each other (a conveyor lift, which FRM doesn't list) form one network; a network is "production"
-# if any end sits at a machine/extractor, "power" if at a generator. Recomputed every minute in the background.
-BELTS = {"json": None, "t": 0}
-BELT_EVERY_S = 60
+# ---- logistics: conveyor belts and pipes --------------------------------------------------------
+# FRM lists belts and pipes (curve, both ends, whether each end is connected) but not what they connect to, so
+# networks are worked out from geometry: segments whose ends meet, segments touching the same joiner (splitter,
+# merger, pipe junction, pump, valve) and, for belts, connected ends straight above each other (a conveyor lift,
+# which FRM doesn't list) form one network. A network feeds "production" if any end sits at a machine or
+# extractor and "power" if at a generator; other buildings it reaches are listed by name. Every minute.
+LOGI = {"json": None, "t": 0}
+LOGI_EVERY_S = 60
+PIPE_FLOW = {1: 300, 2: 600}   # m³/min per pipe tier (wiki)
 
 
 def _box(b, pad):
@@ -274,8 +276,15 @@ class _BoxGrid:
                 yield tag
 
 
-def belt_networks(belts, splitters, production, generators):
-    parent = list(range(len(belts)))
+def _tier(name):
+    name = name or ""
+    return int(name.rsplit(".", 1)[-1]) if "Mk." in name and name.rsplit(".", 1)[-1].isdigit() else 1
+
+
+def networks(kind, segs, joiners, buildings, lifts):
+    """segs: belts or pipes; joiners: splitters/mergers or junctions/pumps/valves;
+    buildings: [(category 'p'|'w'|'o', name, id, box)]. Returns (segments, networks)."""
+    parent = list(range(len(segs)))
 
     def find(i):
         while parent[i] != i:
@@ -286,9 +295,8 @@ def belt_networks(belts, splitters, production, generators):
     def union(a, b):
         parent[find(a)] = find(b)
 
-    ends = [(i, b[k], b.get(c)) for i, b in enumerate(belts) for k, c in (("location0", "Connected0"), ("location1", "Connected1"))]
-    # belt ends at the same spot (within 20 cm)
-    grid = {}
+    ends = [(i, s[k], s.get(c)) for i, s in enumerate(segs) for k, c in (("location0", "Connected0"), ("location1", "Connected1"))]
+    grid = {}   # ends at the same spot (within 20 cm)
     for i, q, _ in ends:
         grid.setdefault((round(q["x"] / 50), round(q["y"] / 50), round(q["z"] / 50)), []).append((i, q))
     for i, q, _ in ends:
@@ -299,52 +307,93 @@ def belt_networks(belts, splitters, production, generators):
                     for j, r in grid.get((gx + dx, gy + dy, gz + dz), ()):
                         if j != i and abs(q["x"] - r["x"]) < 20 and abs(q["y"] - r["y"]) < 20 and abs(q["z"] - r["z"]) < 20:
                             union(i, j)
-    # splitters / mergers join the belts touching them
-    sgrid, first = _BoxGrid([(n, _box(x, 60)) for n, x in enumerate(splitters)]), {}
-    for i, q, _ in ends:
-        for n in sgrid.hits(q):
+    jgrid, first = _BoxGrid([(n, _box(x, 60)) for n, x in enumerate(joiners)]), {}
+    for i, q, _ in ends:   # segments touching the same joiner
+        for n in jgrid.hits(q):
             if n in first:
                 union(first[n], i)
             else:
                 first[n] = i
-    # conveyor lifts: connected ends vertically above each other
-    col = {}
-    for i, q, c in ends:
-        if c:
-            col.setdefault((round(q["x"] / 60), round(q["y"] / 60)), []).append((i, q))
-    for lst in col.values():
-        for a in range(len(lst)):
-            for b in range(a + 1, len(lst)):
-                (i, q), (j, r) = lst[a], lst[b]
-                if i != j and abs(q["x"] - r["x"]) < 30 and abs(q["y"] - r["y"]) < 30 and abs(q["z"] - r["z"]) > 150:
-                    union(i, j)
-    # what each network touches
-    mgrid = _BoxGrid([("p", _box(m, 80)) for m in production] + [("w", _box(g, 80)) for g in generators])
-    touch = {}
+    if lifts:   # conveyor lifts: connected ends vertically above each other
+        col = {}
+        for i, q, c in ends:
+            if c:
+                col.setdefault((round(q["x"] / 60), round(q["y"] / 60)), []).append((i, q))
+        for lst in col.values():
+            for a in range(len(lst)):
+                for b in range(a + 1, len(lst)):
+                    (i, q), (j, r) = lst[a], lst[b]
+                    if i != j and abs(q["x"] - r["x"]) < 30 and abs(q["y"] - r["y"]) < 30 and abs(q["z"] - r["z"]) > 150:
+                        union(i, j)
+    bgrid = _BoxGrid([((cat, name, bid), box) for cat, name, bid, box in buildings])
+    touch = {}   # network -> {(cat, name, id)}
     for i, q, _ in ends:
-        for tag in mgrid.hits(q):
+        for tag in bgrid.hits(q):
             touch.setdefault(find(i), set()).add(tag)
+    # per-network summary
+    nets = {}
+    for i, s in enumerate(segs):
+        r = find(i)
+        n = nets.setdefault(r, {"id": f"{kind[0]}{r}", "kind": kind, "segs": 0, "len": 0.0, "tiers": {}, "open": 0,
+                                "x0": 1e12, "y0": 1e12, "x1": -1e12, "y1": -1e12})
+        t = _tier(s.get("Name"))
+        n["segs"] += 1
+        n["len"] += (s.get("Length") or 0) / 100   # metres
+        n["tiers"][t] = n["tiers"].get(t, 0) + 1
+        n["open"] += (not s.get("Connected0")) + (not s.get("Connected1"))
+        for q in (s["location0"], s["location1"]):
+            n["x0"], n["y0"] = min(n["x0"], q["x"]), min(n["y0"], q["y"])
+            n["x1"], n["y1"] = max(n["x1"], q["x"]), max(n["y1"], q["y"])
+    out_nets = []
+    for r, n in nets.items():
+        t = touch.get(r, set())
+        names = {}
+        for cat, name, bid in t:
+            names[name] = names.get(name, 0) + 1
+        slowest = min(n["tiers"])
+        n.update({"p": any(c == "p" for c, _, _ in t), "w": any(c == "w" for c, _, _ in t), "len": round(n["len"]),
+                  "touches": dict(sorted(names.items(), key=lambda kv: -kv[1])),
+                  "cap": (BELT_IPM.get(slowest) if kind == "belt" else PIPE_FLOW.get(slowest)),
+                  "box": [round(n.pop("x0")), round(n.pop("y0")), round(n.pop("x1")), round(n.pop("y1"))]})
+        out_nets.append(n)
     out = []
-    for i, b in enumerate(belts):
-        t = touch.get(find(i), set())
-        tier = int((b.get("Name") or "Mk.1").rsplit(".", 1)[-1]) if "Mk." in (b.get("Name") or "") else 1
-        pts = b.get("SplineData") or [b["location0"], b["location1"]]
-        out.append({"t": tier, "pts": [[round(q["x"]), round(q["y"])] for q in pts], "p": "p" in t, "w": "w" in t,
-                    "n": find(i), "ipm": b.get("ItemsPerMinute")})
-    return out
+    for i, s in enumerate(segs):
+        n = nets[find(i)]
+        pts = s.get("SplineData") or [s["location0"], s["location1"]]
+        out.append({"t": _tier(s.get("Name")), "pts": [[round(q["x"]), round(q["y"])] for q in pts],
+                    "p": n["p"], "w": n["w"], "n": n["id"]})
+    return out, out_nets
 
 
-def belt_worker():
+BELT_IPM = {1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200}   # items/min per belt tier (wiki)
+
+
+def logistics_worker():
     while True:
         try:
-            belts = frm_json("getBelts", 30)
-            data = belt_networks(belts, frm_json("getSplitterMerger", 30),
-                                 frm_json("getFactory", 30) + frm_json("getExtractor", 30), frm_json("getGenerators", 30))
-            BELTS["json"] = json.dumps({"belts": data}, separators=(",", ":")).encode()
-            BELTS["t"] = time.time()
+            fac, ext, gens = frm_json("getFactory", 30), frm_json("getExtractor", 30), frm_json("getGenerators", 30)
+            seen = {m["ID"] for m in fac + ext + gens}
+            # other buildings a network can reach (storage, stations, sinks…), not the belt/pipe parts themselves
+            parts = ("Pipeline", "Pipe", "Junction", "Pump", "Valve", "Conveyor", "Splitter", "Merger", "Lift")
+            other = [b for b in frm_json("getPowerUsage", 30) + frm_json("getStorageInv", 30)
+                     if b.get("ID") not in seen and not any(w in (b.get("Name") or "") for w in parts)]
+            buildings = ([("p", m["Name"], m["ID"], _box(m, 80)) for m in fac + ext] +
+                         [("w", g["Name"], g["ID"], _box(g, 80)) for g in gens] +
+                         [("o", b["Name"], b["ID"], _box(b, 80)) for b in other if b.get("location") and b.get("Name")])
+            belts, bnets = networks("belt", frm_json("getBelts", 30), frm_json("getSplitterMerger", 30), buildings, True)
+            pump_like = [x for x in frm_json("getPump", 30)]
+            pipes, pnets = networks("pipe", frm_json("getPipes", 30), frm_json("getPipeJunctions", 30) + pump_like, buildings, False)
+            counts = {"splitters": sum("Splitter" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
+                      "mergers": sum("Merger" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
+                      "junctions": len(frm_json("getPipeJunctions", 30)),
+                      "pumps": sum("Pump" in (x.get("Name") or "") for x in pump_like),
+                      "valves": sum("Valve" in (x.get("Name") or "") for x in pump_like)}
+            LOGI["json"] = json.dumps({"belts": belts, "pipes": pipes, "networks": bnets + pnets, "counts": counts},
+                                      separators=(",", ":")).encode()
+            LOGI["t"] = time.time()
         except Exception:
             pass   # FRM down or loading: keep the last result
-        time.sleep(BELT_EVERY_S)
+        time.sleep(LOGI_EVERY_S)
 
 
 def recorder():
@@ -381,8 +430,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if path.startswith("/api/"):
             return self.proxy(path[5:])
-        if path == "/belts":
-            return self.send_body(200, BELTS["json"]) if BELTS["json"] else self.send_body(503, b'{"error":"belts not ready yet"}')
+        if path == "/logistics":
+            return self.send_body(200, LOGI["json"]) if LOGI["json"] else self.send_body(503, b'{"error":"belts and pipes not ready yet"}')
         if path in ("/hist/power", "/hist/production"):
             try:
                 mins = max(1, min(KEEP_S // 60, int(urllib.parse.parse_qs(query).get("mins", ["60"])[0])))
@@ -440,6 +489,6 @@ if __name__ == "__main__":
     if not args.no_history:
         HIST.load()
         threading.Thread(target=recorder, daemon=True).start()
-    threading.Thread(target=belt_worker, daemon=True).start()
+    threading.Thread(target=logistics_worker, daemon=True).start()
     print(f"FICSIT monitor on http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}  (FRM: {FRM})")
     http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
