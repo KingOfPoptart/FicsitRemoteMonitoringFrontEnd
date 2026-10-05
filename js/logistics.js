@@ -23,10 +23,13 @@ const LogisticsTab = (() => {
   const capText = n => n.cap ? `${fmtNum(n.cap)}${n.kind === "pipe" ? " m³" : ""}/min` : "–";
   const tierText = n => Object.entries(n.tiers).sort().map(([t, c]) => `Mk.${t}${Object.keys(n.tiers).length > 1 ? ` ×${c}` : ""}`).join(" · ");
 
-  function pick(id) {
-    picked = picked === id ? null : id;
+  // select a network (row click or map click) or clear the selection (same one again, or id null).
+  // fromMap: the network is already in view where it was clicked, so the map doesn't move.
+  function pick(id, fromMap = false) {
+    picked = id && picked !== id ? id : null;
     render();
     const n = picked && net(picked);
+    if (fromMap) { if (n) $("lgNets").querySelector(`tr[data-net="${CSS.escape(n.id)}"]`)?.scrollIntoView({ block: "nearest" }); return; }
     if (n) map.fitBox([worldToImg(n.box[0], n.box[1]), worldToImg(n.box[2], n.box[3])], 60, true); else map.fit();
   }
 
@@ -98,7 +101,8 @@ const LogisticsTab = (() => {
     map = new MapView($("lgMap"), {
       storeKey: "lg.map", layerMenu: true, players: true, layers: [],
       logistics: b => { const n = net(b.n); return !n || passes(n); },   // the map follows the filters
-      highlight: () => picked, hint: "hover a belt or pipe to see its network · click a row to highlight it",
+      highlight: () => picked, hint: "hover a belt or pipe to see its network · click it (or a row) to select it",
+      onNetClick: id => pick(id, true),   // click a belt/pipe = select its network; click it again or empty map = clear
       onNetHover: id => {   // map hover -> the network's row lights up and scrolls into view
         for (const tr of $("lgNets").querySelectorAll("tr.hl")) tr.classList.remove("hl");
         const tr = id && $("lgNets").querySelector(`tr[data-net="${CSS.escape(id)}"]`);

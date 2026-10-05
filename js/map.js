@@ -131,7 +131,10 @@ class MapView {
     let drag = null;
     this.canvas.addEventListener("mousedown", e => { this.anim = null; drag = { x: e.clientX, y: e.clientY, ox: this.view.ox, oy: this.view.oy, moved: false }; this.dragging = true; this.canvas.classList.add("dragging"); });
     addEventListener("mouseup", e => {
-      if (drag && !drag.moved && e.target === this.canvas && this.hoverId) { const p = this.find(this.hoverId); if (p && opts.onClick) opts.onClick(p); }
+      if (drag && !drag.moved && e.target === this.canvas) {   // a click, not a pan
+        if (this.hoverId) { const p = this.find(this.hoverId); if (p && opts.onClick) opts.onClick(p); }
+        else if (opts.onNetClick) opts.onNetClick(this.hoverNet || null);   // a belt/pipe network, or empty map (null)
+      }
       drag = null; this.dragging = false; this.canvas.classList.remove("dragging");
     });
     addEventListener("mousemove", e => {
