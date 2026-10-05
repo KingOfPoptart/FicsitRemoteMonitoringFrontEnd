@@ -1,15 +1,15 @@
 # Ficsit Remote Monitoring – FICSIT Monitor
 
-A live web dashboard for a Satisfactory world: how the factory is doing at a glance, every vehicle, every production machine, the power grid and your progression. It reads data from the [Ficsit Remote Monitoring](https://github.com/porisius/FicsitRemoteMonitoring) (FRM) mod's web API.
+A live web dashboard for a Satisfactory world: how the factory is doing at a glance, every vehicle, every production machine, the power grid, every conveyor belt and pipe, and your progression. It reads data from the [Ficsit Remote Monitoring](https://github.com/porisius/FicsitRemoteMonitoring) (FRM) mod's web API.
 
 ![Overview](docs/screenshots/overview.png)
 
 ## Tabs
 
 ### Overview (home)
-- **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
-- **Summary cards** for power (with a chart), production (status mix, top products, shortfalls), vehicles (per type, stuck ones by name) and progression (Space Elevator and HUB parts).
-- **World map** of machines, generators, vehicles, players, the HUB and Space Elevator, roads, rail, drone routes and stations.
+- **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), unconnected belt/pipe ends, milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
+- **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), vehicles (per type, stuck ones by name), logistics (belt and pipe totals by tier) and progression (Space Elevator and HUB parts).
+- **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, every belt and pipe, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
 
 ### Vehicles
 ![Vehicles](docs/screenshots/vehicles.png)
@@ -25,7 +25,14 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 ### Power
 ![Power](docs/screenshots/power.png)
 - Per grid, the in-game power graph's numbers (capacity, production, consumption, max consumption) plus headroom, batteries and fuse state, with history charts.
-- Generation by generator type, consumption by building type, and every generator with its fuel, water and status, beside a map.
+- Generation by generator type, consumption by building type, and every generator with its fuel, water and status, beside a map that also shows the belts and pipes feeding the generators.
+
+### Logistics
+![Logistics](docs/screenshots/logistics.png)
+- Every conveyor belt and pipe, grouped into **networks** (belts or pipes that connect to each other), with totals, segments by tier, splitters/mergers and junctions/pumps/valves, and unconnected ends.
+- **Networks table**: what each network feeds (production, power), the buildings it connects, its length, tier mix and bottleneck (the slowest tier), and open ends. Filter by kind, purpose, building and tier.
+- Hover a belt or pipe on any map to see its tier and speed and its network; click one (or a row) to highlight the whole network.
+- FRM doesn't say what a belt or pipe connects to, so `server.py` works the networks out from geometry (ends that meet, shared splitters/mergers/junctions/pumps, conveyor lifts), and a network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
 
 ### Progression
 ![Progression](docs/screenshots/progression.png)
@@ -33,10 +40,10 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - Collectibles found (Somersloops, Mercer Spheres, power slugs) and resource nodes tapped. Click one to find the ones still out there on the map.
 
 ### Everywhere
-- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline).
+- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline). The Production and Power maps show the belts and pipes of their own lines; the Overview and Logistics maps show them all.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
 - On a desktop browser each tab fits one screen; on phones the panels stack.
-- `server.py` records power and production history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened.
+- `server.py` records power and production history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened, and works out the belt and pipe networks every minute.
 
 ## Requirements
 - Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
