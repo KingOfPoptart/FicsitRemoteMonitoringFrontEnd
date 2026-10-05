@@ -177,7 +177,7 @@ const Overview = (() => {
     chart = new LineChart($("ovChart"), { height: 140, unit: "MW", fill: true });
     map = new MapView($("ovMap"), {
       // dropdown sections: Factory, Transport, Stations, People (players are added by MapView)
-      storeKey: "ov.map2", layerMenu: true, players: true, layers: [   // new key: everything starts enabled
+      storeKey: "ov.map2", layerMenu: true, players: true, belts: () => true, layers: [   // every belt   // new key: everything starts enabled
         // told apart by shape (and colour where status isn't the point): machines = small dots coloured by status,
         // generators = amber diamonds (red when out of fuel/water), vehicles = heading arrows, players = labelled dots on top
         { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6 },

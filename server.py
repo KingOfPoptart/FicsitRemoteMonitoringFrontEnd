@@ -6,6 +6,7 @@ and records power/production history so the charts have data from before the pag
 /api/<endpoint>  ->  <FRM URL>/<endpoint>   (responses cached ~1 s, so several open pages don't multiply FRM load)
 /hist/power?mins=60       power history per grid (sampled every 5 s, kept 24 h)
 /hist/production?mins=60  produced/consumed per item and generation per generator type (sampled every 15 s, kept 24 h)
+/belts                    every conveyor belt with its tier and whether it feeds production / power (every 60 s)
 
 By default it only listens on this machine (127.0.0.1). Use --host 0.0.0.0 to reach it from other
 devices on your network. The FRM URL can also be set with the FRM_URL environment variable.
@@ -28,6 +29,7 @@ ROOT = pathlib.Path(__file__).parent
 ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths", "getTrains", "getTrainStation",
            "getTrainRails", "getDrone", "getDroneStation",
            "getFactory", "getExtractor", "getGenerators", "getPower", "getPowerUsage", "getSwitches", "getSessionInfo",
+           "getBelts", "getSplitterMerger", "getStorageInv",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")
@@ -237,6 +239,114 @@ class History:
 HIST = History()
 
 
+# ---- conveyor belts ---------------------------------------------------------------------------
+# FRM lists belts (curve, both ends, whether each end is connected) but not what they connect to, so networks are
+# worked out from geometry: belts whose ends meet, belts touching the same splitter/merger, and connected ends
+# straight above each other (a conveyor lift, which FRM doesn't list) form one network; a network is "production"
+# if any end sits at a machine/extractor, "power" if at a generator. Recomputed every minute in the background.
+BELTS = {"json": None, "t": 0}
+BELT_EVERY_S = 60
+
+
+def _box(b, pad):
+    bb = b.get("BoundingBox") or {}
+    mn, mx = bb.get("min"), bb.get("max")
+    if not mn or mn == mx:   # no size reported: a box around its location
+        l = b["location"]
+        return (l["x"] - 600 - pad, l["y"] - 600 - pad, l["z"] - 200 - pad, l["x"] + 600 + pad, l["y"] + 600 + pad, l["z"] + 1200 + pad)
+    return (mn["x"] - pad, mn["y"] - pad, mn["z"] - pad, mx["x"] + pad, mx["y"] + pad, mx["z"] + pad)
+
+
+class _BoxGrid:
+    """boxes bucketed on a 20 m grid so 'which boxes contain this point' is quick"""
+    S = 2000
+
+    def __init__(self, boxes):
+        self.cells = {}
+        for tag, b in boxes:
+            for gx in range(int(b[0] // self.S), int(b[3] // self.S) + 1):
+                for gy in range(int(b[1] // self.S), int(b[4] // self.S) + 1):
+                    self.cells.setdefault((gx, gy), []).append((tag, b))
+
+    def hits(self, p):
+        for tag, b in self.cells.get((int(p["x"] // self.S), int(p["y"] // self.S)), ()):
+            if b[0] <= p["x"] <= b[3] and b[1] <= p["y"] <= b[4] and b[2] <= p["z"] <= b[5]:
+                yield tag
+
+
+def belt_networks(belts, splitters, production, generators):
+    parent = list(range(len(belts)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a, b):
+        parent[find(a)] = find(b)
+
+    ends = [(i, b[k], b.get(c)) for i, b in enumerate(belts) for k, c in (("location0", "Connected0"), ("location1", "Connected1"))]
+    # belt ends at the same spot (within 20 cm)
+    grid = {}
+    for i, q, _ in ends:
+        grid.setdefault((round(q["x"] / 50), round(q["y"] / 50), round(q["z"] / 50)), []).append((i, q))
+    for i, q, _ in ends:
+        gx, gy, gz = round(q["x"] / 50), round(q["y"] / 50), round(q["z"] / 50)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    for j, r in grid.get((gx + dx, gy + dy, gz + dz), ()):
+                        if j != i and abs(q["x"] - r["x"]) < 20 and abs(q["y"] - r["y"]) < 20 and abs(q["z"] - r["z"]) < 20:
+                            union(i, j)
+    # splitters / mergers join the belts touching them
+    sgrid, first = _BoxGrid([(n, _box(x, 60)) for n, x in enumerate(splitters)]), {}
+    for i, q, _ in ends:
+        for n in sgrid.hits(q):
+            if n in first:
+                union(first[n], i)
+            else:
+                first[n] = i
+    # conveyor lifts: connected ends vertically above each other
+    col = {}
+    for i, q, c in ends:
+        if c:
+            col.setdefault((round(q["x"] / 60), round(q["y"] / 60)), []).append((i, q))
+    for lst in col.values():
+        for a in range(len(lst)):
+            for b in range(a + 1, len(lst)):
+                (i, q), (j, r) = lst[a], lst[b]
+                if i != j and abs(q["x"] - r["x"]) < 30 and abs(q["y"] - r["y"]) < 30 and abs(q["z"] - r["z"]) > 150:
+                    union(i, j)
+    # what each network touches
+    mgrid = _BoxGrid([("p", _box(m, 80)) for m in production] + [("w", _box(g, 80)) for g in generators])
+    touch = {}
+    for i, q, _ in ends:
+        for tag in mgrid.hits(q):
+            touch.setdefault(find(i), set()).add(tag)
+    out = []
+    for i, b in enumerate(belts):
+        t = touch.get(find(i), set())
+        tier = int((b.get("Name") or "Mk.1").rsplit(".", 1)[-1]) if "Mk." in (b.get("Name") or "") else 1
+        pts = b.get("SplineData") or [b["location0"], b["location1"]]
+        out.append({"t": tier, "pts": [[round(q["x"]), round(q["y"])] for q in pts], "p": "p" in t, "w": "w" in t,
+                    "n": find(i), "ipm": b.get("ItemsPerMinute")})
+    return out
+
+
+def belt_worker():
+    while True:
+        try:
+            belts = frm_json("getBelts", 30)
+            data = belt_networks(belts, frm_json("getSplitterMerger", 30),
+                                 frm_json("getFactory", 30) + frm_json("getExtractor", 30), frm_json("getGenerators", 30))
+            BELTS["json"] = json.dumps({"belts": data}, separators=(",", ":")).encode()
+            BELTS["t"] = time.time()
+        except Exception:
+            pass   # FRM down or loading: keep the last result
+        time.sleep(BELT_EVERY_S)
+
+
 def recorder():
     last_prod = last_save = 0
     while True:
@@ -271,6 +381,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if path.startswith("/api/"):
             return self.proxy(path[5:])
+        if path == "/belts":
+            return self.send_body(200, BELTS["json"]) if BELTS["json"] else self.send_body(503, b'{"error":"belts not ready yet"}')
         if path in ("/hist/power", "/hist/production"):
             try:
                 mins = max(1, min(KEEP_S // 60, int(urllib.parse.parse_qs(query).get("mins", ["60"])[0])))
@@ -328,5 +440,6 @@ if __name__ == "__main__":
     if not args.no_history:
         HIST.load()
         threading.Thread(target=recorder, daemon=True).start()
+    threading.Thread(target=belt_worker, daemon=True).start()
     print(f"FICSIT monitor on http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}  (FRM: {FRM})")
     http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

@@ -207,7 +207,7 @@ const Power = (() => {
     ], { sortKey: "status", storeKey: "pw.genSort", rowAttrs: r => `data-gid="${esc(r.id)}" class="${r.id === selGen ? "sel" : ""}"` });
     const hl = id => { for (const tr of $("wGens").querySelectorAll("tr[data-gid]")) tr.classList.toggle("hl", tr.dataset.gid === id); };
     map = new MapView($("wMap"), {
-      storeKey: "pw.map", layerMenu: true, players: true, layers: [
+      storeKey: "pw.map", layerMenu: true, players: true, belts: b => b.w, layers: [   // belts feeding generators
         { key: "gens", group: "Power", label: "Generators", color: "var(--ok)", size: 5, shape: "diamond" },
         { key: "storage", group: "Power", label: "Power Storage", color: "var(--s3)", size: 4, shape: "square" },
         { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, on: false },

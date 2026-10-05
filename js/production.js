@@ -354,7 +354,7 @@ const Production = (() => {
     const hl = id => { for (const tr of $("pMachines").querySelectorAll("tr[data-mid]")) tr.classList.toggle("hl", tr.dataset.mid === id); };
     map = new MapView($("pMap"), {
       // one layer per machine type (with its icon) so the dropdown can show/hide each; markers stay coloured by status
-      storeKey: "pt.map2", layerMenu: true, players: true,
+      storeKey: "pt.map2", layerMenu: true, players: true, belts: b => b.p,   // belts on production lines
       layers: [...GAME_BUILDINGS, "Other"].map(b => ({ key: "b:" + b, group: "Machines", label: b, color: "var(--ok)", size: 4, swatchHtml: b === "Other" ? "" : icon(b, "icon sm") })),
       hint: "markers follow the filters · click a machine row to find it",
       tooltip: p => { const m = machines.find(x => x.id === p.id); return m ? machinePop(m) : ""; },
