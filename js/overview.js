@@ -42,11 +42,17 @@ const Overview = (() => {
   async function powerHist() {
     try {
       const h = await (await fetch("/hist/power?mins=60", { cache: "no-store" })).json();
+      // the biggest grid; if the live grid list hasn't arrived (or a request failed), the biggest one in the history
       const g = d.getPower && [...d.getPower].sort((a, b) => b.PowerCapacity - a.PowerCapacity)[0];
-      const s = g && h.groups[String(g.CircuitGroupID)];
+      const lastCap = k => { const c = h.groups[k].cap; for (let i = c.length - 1; i >= 0; i--) if (c[i] != null) return c[i]; return 0; };
+      const key = g ? String(g.CircuitGroupID) : Object.keys(h.groups).sort((a, b) => lastCap(b) - lastCap(a))[0];
+      const s = key && h.groups[key];
       chart.update(s ? { t: h.t, interval: h.interval, series: [
+        // the same four lines as the Power tab (and the in-game power graph)
         { key: "cap", name: "Capacity", color: "var(--s3)", values: s.cap },
+        { key: "prod", name: "Production", color: "var(--s1)", values: s.prod },
         { key: "cons", name: "Consumption", color: "var(--s2)", values: s.cons, area: true },
+        { key: "max", name: "Max consumption", color: "var(--s4)", values: s.max, dash: true },
       ] } : null);
     } catch {}
   }

@@ -479,11 +479,11 @@
     #tab-overview:not([hidden]) { display: flex; flex-direction: column; height: calc(100vh - var(--hdr, 58px)); padding-bottom: 12px; }
     #tab-overview .ov-cols { flex: 1; min-height: 0; align-items: stretch; }
     #tab-overview .ov-left { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-    #tab-overview .ov-left > .card { margin: 0; flex: 0 1 auto; max-height: 27%; display: flex; flex-direction: column; min-height: 0; }
+    #tab-overview .ov-left > .card { margin: 0; flex: 0 1 auto; max-height: 23%; display: flex; flex-direction: column; min-height: 0; }
     #tab-overview .attn-list { overflow-y: auto; min-height: 0; }
     /* the four summary cards share the rest of the height as a 2 x 2 grid */
     /* Power across the top (shorter, full width), then Production · Vehicles / Logistics · Progression */
-    #tab-overview .ov-cards { flex: 1; min-height: 0; grid-template-columns: 1fr 1fr; grid-template-rows: 172px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    #tab-overview .ov-cards { flex: 1; min-height: 0; grid-template-columns: 1fr 1fr; grid-template-rows: 252px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
     #tab-overview .ov-card.ov-power { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(250px, 0.8fr) minmax(0, 1.4fr);
                               grid-template-rows: auto minmax(0, 1fr); column-gap: 18px; }
     #tab-overview .ov-power > .card-head { grid-column: 1 / -1; }

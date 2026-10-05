@@ -169,6 +169,14 @@ class History:
         row = {str(g["CircuitGroupID"]): [r(g["PowerProduction"]), r(g["PowerConsumed"]), r(g["PowerCapacity"]),
                                           r(g["PowerMaxConsumed"]), r(g["BatteryPercent"]), r(g["BatteryInput"]),
                                           r(g["BatteryOutput"]), 1 if g.get("FuseTriggered") else 0] for g in groups}
+        # one value reading 0 for a grid that's running (no fuse) is a glitch too: keep its previous value
+        # (production, consumption, capacity, max consumption, battery %)
+        for k, v in row.items():
+            prev = last.get(k)
+            if prev and not v[7]:
+                for i in range(5):
+                    if v[i] == 0 and prev[i] > 0:
+                        v[i] = prev[i]
         with self.lock:
             self.power.append([round(time.time()), row])
             self.trim()
