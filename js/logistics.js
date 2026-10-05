@@ -4,18 +4,21 @@
 
 const LogisticsTab = (() => {
   const root = $("tab-logistics");
-  const ui = (() => { const d = { kind: "all", feeds: "all", open: false, q: "" };
+  const ui = (() => { const d = { kind: "all", feeds: "all", open: false, q: "", conn: [], tier: [] };
     try { return { ...d, ...JSON.parse(localStorage.getItem("lg.ui") || "{}") }; } catch { return d; } })();
   const saveUi = () => { try { localStorage.setItem("lg.ui", JSON.stringify(ui)); } catch {} };
-  let table, map, picked = null, inited = false;
+  let table, map, picked = null, inited = false, connPick, tierPick;
 
   const net = id => Logistics.networks.find(n => n.id === id);
   const feeds = n => n.p && n.w ? "both" : n.p ? "production" : n.w ? "power" : "other";
   const FEEDS = { production: ["Production", "var(--s1)"], power: ["Power", "var(--s4)"], both: ["Both", "var(--s3)", "Feeds production machines and generators"], other: ["Other", "var(--muted)"] };
-  const passes = n => (ui.kind === "all" || n.kind === ui.kind)
+  const tierKeys = n => Object.keys(n.tiers).map(t => `${n.kind}:${t}`);   // e.g. "belt:3", "pipe:1"
+  const passes = (n, except) => (ui.kind === "all" || n.kind === ui.kind)
     && (ui.feeds === "all" || (ui.feeds === "production" ? n.p : ui.feeds === "power" ? n.w : !n.p && !n.w))
     && (!ui.open || n.open > 0)
-    && (!ui.q || Object.keys(n.touches).some(k => k.toLowerCase().includes(ui.q.toLowerCase())));
+    && (!ui.q || Object.keys(n.touches).some(k => k.toLowerCase().includes(ui.q.toLowerCase())))
+    && (except === "conn" || !ui.conn.length || ui.conn.some(c => c in n.touches))
+    && (except === "tier" || !ui.tier.length || tierKeys(n).some(t => ui.tier.includes(t)));
   const km = m => m >= 1000 ? `${fmtNum(m / 1000, 1)} km` : `${fmtNum(m)} m`;
   const capText = n => n.cap ? `${fmtNum(n.cap)}${n.kind === "pipe" ? " m³" : ""}/min` : "–";
   const tierText = n => Object.entries(n.tiers).sort().map(([t, c]) => `Mk.${t}${Object.keys(n.tiers).length > 1 ? ` ×${c}` : ""}`).join(" · ");
@@ -50,7 +53,9 @@ const LogisticsTab = (() => {
         return { label: `<span class="with-icon"><i class="sw-line" style="background:${(k === "belt" ? BELT_COLOR : PIPE_COLOR)[t]}"></i>Mk.${t} ${k}s</span>`, value: list.length,
                  text: `<b>${fmtNum(list.length)}</b>`, color: (k === "belt" ? BELT_COLOR : PIPE_COLOR)[t] }; });
     hbars($("lgTiers"), rows);
-    const shown = nets.filter(passes);
+    const shown = nets.filter(n => passes(n));
+    connPick.refresh(); tierPick.refresh();
+    $("lgClear").disabled = !(ui.conn.length || ui.tier.length || ui.open || ui.q || ui.kind !== "all" || ui.feeds !== "all");
     table.render(shown);
     $("lgCount").textContent = `${shown.length} of ${nets.length}`;
     $("statsLogi").innerHTML = `<span class="stat"><b>${km(len("belt"))}</b>of belts</span><span class="stat"><b>${km(len("pipe"))}</b>of pipes</span>` +
@@ -70,7 +75,9 @@ const LogisticsTab = (() => {
         <div class="pcol">
           <section class="card lg-tiers"><div class="card-head"><h2>By tier</h2><span class="hint">segments</span></div><div class="card-body hbars" id="lgTiers"></div></section>
           <section class="card lg-nets"><div class="card-head"><h2>Networks</h2><span class="hint" id="lgCount"></span>
-            <span class="hint">belts or pipes that connect to each other · click one to see it on the map</span></div>
+            <button class="f-multi pick" id="lgConnSel" title="Networks connected to these buildings"></button>
+            <button class="f-multi pick" id="lgTierSel" title="Networks with these belt / pipe tiers"></button>
+            <button class="b" id="lgClear">Clear filters</button></div>
             <div class="table-wrap dtw tall" id="lgNets"></div></section>
         </div>
         <div class="pcol">
@@ -78,7 +85,7 @@ const LogisticsTab = (() => {
         </div>
       </div>`;
     table = new DataTable($("lgNets"), [
-      { key: "kind", label: "Kind", minW: 76, val: r => r.kind, cell: r => `<span class="with-icon"><i class="sw-line" style="background:${(r.kind === "belt" ? BELT_COLOR : PIPE_COLOR)[Math.max(...Object.keys(r.tiers).map(Number))]}"></i>${r.kind === "belt" ? "Belts" : "Pipes"}</span>` },
+      { key: "kind", label: "Kind", minW: 92, val: r => r.kind, cell: r => `<span class="with-icon"><i class="sw-line" style="background:${(r.kind === "belt" ? BELT_COLOR : PIPE_COLOR)[Math.max(...Object.keys(r.tiers).map(Number))]}"></i>${r.kind === "belt" ? "Belts" : "Pipes"}</span>` },
       { key: "feeds", label: "Feeds", minW: 96, val: r => feeds(r), cell: r => { const [l, c, t] = FEEDS[feeds(r)]; return `<span class="pill" style="color:${c};background:color-mix(in srgb, ${c} 14%, transparent)"${t ? ` title="${t}"` : ""}>${l}</span>`; } },
       { key: "touches", label: "Connects", minW: 160, title: "Buildings at the ends of this network", val: r => Object.keys(r.touches)[0] || "",
         cell: r => { const e = Object.entries(r.touches); return e.length ? e.slice(0, 3).map(([k, n]) => `${n} × ${esc(k)}`).join("<br>") + (e.length > 3 ? `<br><span class="muted sub">+${e.length - 3} more</span>` : "") : `<span class="muted">nothing found</span>`; } },
@@ -92,8 +99,26 @@ const LogisticsTab = (() => {
       storeKey: "lg.map", layerMenu: true, players: true, layers: [],
       logistics: b => { const n = net(b.n); return !n || passes(n); },   // the map follows the filters
       highlight: () => picked, hint: "click a network in the table to highlight it",
+      // Fit frames the networks the table shows
+      fitTo: () => Logistics.networks.filter(n => passes(n)).flatMap(n => [worldToImg(n.box[0], n.box[1]), worldToImg(n.box[2], n.box[3])]),
     });
+    // dropdown filters: every option, counted against the other filters; ones with no networks are greyed out
+    connPick = new MultiSelect($("lgConnSel"), { noun: "buildings", search: "Search buildings…",
+      options: () => { const names = new Map();
+        for (const n of Logistics.networks) for (const k of Object.keys(n.touches)) names.set(k, (names.get(k) || 0) + (passes(n, "conn") ? 1 : 0));
+        return [...names].map(([k, c]) => ({ value: k, label: icon(k, "icon sm") + esc(k), n: c || "", empty: !c })); },
+      selected: () => ui.conn, onChange: v => { ui.conn = v; saveUi(); render(); map.fit(); } });
+    tierPick = new MultiSelect($("lgTierSel"), { noun: "tiers", search: "Search tiers…",
+      options: () => [...[1, 2, 3, 4, 5, 6].map(t => `belt:${t}`), ...[1, 2].map(t => `pipe:${t}`)].map(k => {
+        const [kind, t] = k.split(":"), c = Logistics.networks.filter(n => passes(n, "tier") && tierKeys(n).includes(k)).length;
+        return { value: k, label: `<i class="sw-line" style="background:${(kind === "belt" ? BELT_COLOR : PIPE_COLOR)[t]}"></i> Mk.${t} ${kind}s`, n: c || "", empty: !c,
+                 group: kind === "belt" ? "Belts" : "Pipes" }; }),
+      selected: () => ui.tier, onChange: v => { ui.tier = v; saveUi(); render(); map.fit(); } });
     root.addEventListener("click", e => {
+      if (e.target.closest("#lgClear")) {
+        Object.assign(ui, { kind: "all", feeds: "all", open: false, q: "", conn: [], tier: [] }); $("lgSearch").value = "";
+        saveUi(); render(); map.fit(); return;
+      }
       const s = e.target.closest("[data-g]");
       if (s && (s.dataset.g === "kind" || s.dataset.g === "feeds")) { ui[s.dataset.g] = s.dataset.v; saveUi(); render(); map.fit(); return; }
       if (e.target.closest("[data-open]")) { ui.open = !ui.open; saveUi(); render(); map.fit(); return; }

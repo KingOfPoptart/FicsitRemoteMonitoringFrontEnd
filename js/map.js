@@ -62,7 +62,7 @@ const Logistics = {
   },
 };
 function drawLogistics(mv, keep, hi) {
-  const ctx = mv.ctx, v = mv.view, w = Math.max(0.8, Math.min(3, 1.4 * Math.sqrt(v.s / 0.3)));
+  const ctx = mv.ctx, v = mv.view, w = Math.max(1.3, Math.min(3, 1.4 * Math.sqrt(v.s / 0.3)));   // stays visible zoomed out
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   const path = segs => { for (const b of segs) { const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y)));
     ip.forEach((q, i) => { const s = mv.toScreen(q); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); }); } };
