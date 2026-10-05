@@ -56,12 +56,13 @@ const Logistics = {
     try {
       const r = await fetch("/logistics", { cache: "no-store" }); if (!r.ok) throw 0;
       Object.assign(this, await r.json());
+      this.byId = new Map(this.networks.map(n => [n.id, n]));
     } catch { if (!this.belts.length) setTimeout(() => this.poll(), 5000); return; }   // server still working it out
     for (const mv of this.maps) { mv.renderButtons(); mv.draw(); }
     for (const f of this.listeners) f();
   },
 };
-function drawLogistics(mv, keep, hi) {
+function drawLogistics(mv, keep, hi, hover) {
   const ctx = mv.ctx, v = mv.view, w = Math.max(1.3, Math.min(3, 1.4 * Math.sqrt(v.s / 0.3)));   // stays visible zoomed out
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   const path = segs => { for (const b of segs) { const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y)));
@@ -73,13 +74,20 @@ function drawLogistics(mv, keep, hi) {
       path(list.filter(b => b.t === +t && keep(b))); ctx.stroke();
     }
   }
-  if (hi) {   // the picked network: dark casing + accent line on top
-    const segs = [...Logistics.belts, ...Logistics.pipes].filter(b => b.n === hi);
+  const outline = (id, color) => {   // a whole network: dark casing + coloured line on top
+    const segs = [...Logistics.belts, ...Logistics.pipes].filter(b => b.n === id);
     ctx.globalAlpha = 1; ctx.strokeStyle = "rgba(13,16,19,.9)"; ctx.lineWidth = w + 5; ctx.beginPath(); path(segs); ctx.stroke();
-    ctx.strokeStyle = "#fa9549"; ctx.lineWidth = w + 2; ctx.beginPath(); path(segs); ctx.stroke();
-  }
+    ctx.strokeStyle = color; ctx.lineWidth = w + 2; ctx.beginPath(); path(segs); ctx.stroke();
+  };
+  if (hi) outline(hi, "#fa9549");                        // picked
+  if (hover && hover !== hi) outline(hover, "#ffffff");   // under the mouse
   ctx.globalAlpha = 1;
 }
+
+const netTooltip = n => !n ? "" :
+  `<div class="head">${n.kind === "belt" ? "Belt" : "Pipe"} network · ${n.p && n.w ? "production + power" : n.p ? "production" : n.w ? "power" : "other"} · ${n.len >= 1000 ? (n.len / 1000).toFixed(1) + " km" : n.len + " m"}</div>` +
+  (Object.entries(n.touches).slice(0, 5).map(([k, c]) => `<div class="row"><span>${esc(k)}</span><b>×${c}</b></div>`).join("") || `<div class="row muted"><span>connects to nothing found</span></div>`) +
+  `<div class="row muted"><span>${n.segs} pieces · bottleneck ${n.cap ? n.cap + (n.kind === "pipe" ? " m³" : "") + "/min" : "–"}${n.open ? ` · ${n.open} open ends` : ""}</span></div>`;
 
 class MapView {
   constructor(el, opts) {
@@ -147,11 +155,16 @@ class MapView {
       if (drag) return;
       const p = this.nearest(e.clientX - r.left, e.clientY - r.top);
       if ((p && p.id) !== this.hoverId) { this.hoverId = p ? p.id : null; opts.onHover && opts.onHover(p); this.draw(); }
-      const tip = p && (p.layer === "players" || !opts.tooltip ? p.label && `<div class="row"><span>${esc(p.label)}</span></div>` : opts.tooltip(p));
+      const seg = !p && opts.logistics ? this.nearestSegment(ix, iy) : null, netId = seg ? seg.n : null;
+      if (netId !== this.hoverNet) { this.hoverNet = netId; opts.onNetHover && opts.onNetHover(netId); this.draw(); }
+      const tip = p ? (p.layer === "players" || !opts.tooltip ? p.label && `<div class="row"><span>${esc(p.label)}</span></div>` : opts.tooltip(p))
+                    : seg && netTooltip(Logistics.byId?.get(netId));
       if (tip) showPopAt(tip, e.clientX, e.clientY); else hideCargoPop();
-      this.canvas.style.cursor = p ? "pointer" : "";
+      this.canvas.style.cursor = p || seg ? "pointer" : "";
     });
-    this.canvas.addEventListener("mouseleave", () => { this.mouseWorld = null; this.draw(); if (this.hoverId) { this.hoverId = null; opts.onHover && opts.onHover(null); this.draw(); } hideCargoPop(); });
+    this.canvas.addEventListener("mouseleave", () => {
+      if (this.hoverNet) { this.hoverNet = null; opts.onNetHover && opts.onNetHover(null); }
+      this.mouseWorld = null; this.draw(); if (this.hoverId) { this.hoverId = null; opts.onHover && opts.onHover(null); this.draw(); } hideCargoPop(); });
     mapImg.addEventListener("load", () => this.draw());
     this.renderButtons();
     if (opts.players) Players.attach(this);
@@ -167,6 +180,24 @@ class MapView {
     this.renderButtons();
     if (!this.fitted && this.canvas.clientWidth && this.framePoints().length) this.fit();
     this.draw();
+  }
+  // the belt / pipe under the cursor (image coords), among the ones this map shows; null if none within ~7 px
+  nearestSegment(ix, iy) {
+    const tol = 7 / this.view.s, keep = this.opts.logistics;
+    let best = null, bd = tol;
+    for (const [kind, list] of [["belt", Logistics.belts], ["pipe", Logistics.pipes]]) for (const b of list) {
+      if (!this.isOn(kind + b.t) || !keep(b)) continue;
+      const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y)));
+      const bx = b.bx || (b.bx = ip.reduce((a, q) => [Math.min(a[0], q.x), Math.min(a[1], q.y), Math.max(a[2], q.x), Math.max(a[3], q.y)], [1e9, 1e9, -1e9, -1e9]));
+      if (ix < bx[0] - tol || ix > bx[2] + tol || iy < bx[1] - tol || iy > bx[3] + tol) continue;
+      for (let i = 1; i < ip.length; i++) {
+        const a = ip[i - 1], c = ip[i], dx = c.x - a.x, dy = c.y - a.y, L = dx * dx + dy * dy;
+        const t = L ? Math.max(0, Math.min(1, ((ix - a.x) * dx + (iy - a.y) * dy) / L)) : 0;
+        const d = Math.hypot(ix - (a.x + t * dx), iy - (a.y + t * dy));
+        if (d < bd) { bd = d; best = b; }
+      }
+    }
+    return best;
   }
   // what "Fit" frames: visible points, not counting top layers (players), who arrive first and are always in one spot
   framePoints() { return this.layers.filter(l => l.on && !l.top).flatMap(l => this.points[l.key] || []); }
@@ -309,7 +340,7 @@ class MapView {
       ctx.drawImage(mapImg, v.ox, v.oy, IMG * v.s, IMG * v.s);
       ctx.fillStyle = `rgba(10,12,16,${this.opts.dim ?? 0.45})`; ctx.fillRect(0, 0, r.width, r.height);
     }
-    if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.()); ctx.restore(); }   // under everything else
+    if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.(), this.hoverNet); ctx.restore(); }   // under everything else
     if (this.opts.draw) { ctx.save(); this.opts.draw(ctx, performance.now(), this); ctx.restore(); }
     const marked = [], emph = [], top = [];
     for (const l of this.layers) {
