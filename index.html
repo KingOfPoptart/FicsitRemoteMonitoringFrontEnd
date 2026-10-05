@@ -534,8 +534,6 @@
     </table>
   </div>
   </div>
-  <div class="popover" id="popover"></div>
-  <div class="cargo-pop" id="cargoPop"></div>
 
   <div class="map-col">
   <div class="map-head">
@@ -554,6 +552,10 @@
   <div id="vehMap"></div>
   </div>
 </main>
+<!-- shared floating boxes: the hover tooltip and the filter popover. They sit outside every tab, so they show on
+     all of them (inside a hidden tab they'd be hidden too, whatever their position). -->
+<div class="popover" id="popover"></div>
+<div class="cargo-pop" id="cargoPop"></div>
 <main id="tab-overview" class="tab" hidden></main>
 <main id="tab-production" class="tab onescreen" hidden></main>
 <main id="tab-power" class="tab onescreen" hidden></main>
