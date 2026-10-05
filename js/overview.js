@@ -182,7 +182,8 @@ const Overview = (() => {
       map.setPoints("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "var(--s4)" : "var(--bad)", tab: "power" })).filter(Boolean));
     }
     map.setPoints("veh", veh.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tab: "vehicles" })));
-    map.setPoints("land", [...(d.getTradingPost || []), ...(d.getSpaceElevator || [])].map(o => pt(o, { label: o.Name })).filter(Boolean));
+    map.setPoints("hub", (d.getTradingPost || []).map(o => pt(o, { label: o.Name })).filter(Boolean));
+    map.setPoints("elevator", (d.getSpaceElevator || []).map(o => pt(o, { label: o.Name })).filter(Boolean));
   }
 
   function init() {
@@ -210,7 +211,8 @@ const Overview = (() => {
         // generators = amber diamonds (red when out of fuel/water), vehicles = heading arrows, players = labelled dots on top
         { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6 },
         { key: "gens", group: "Factory", label: "Generators", color: "var(--s4)", size: 5, shape: "diamond" },
-        { key: "land", group: "Factory", label: "HUB & Elevator", color: "#ffffff", size: 6, shape: "square" },
+        { key: "hub", group: "Factory", label: "The HUB", color: "#ffffff", size: 6, shape: "square" },
+        { key: "elevator", group: "Factory", label: "Space Elevator", color: "#ffffff", size: 8, shape: "triangle" },
         { key: "veh", group: "Transport", label: "Vehicles", color: "#5fcf80", size: 5, shape: "arrow" },
         ...networkLayers(),
       ],

@@ -227,7 +227,8 @@ class MapView {
     if (l.swatch) return `<i style="${l.swatch}"></i>`;
     const shape = { square: "", diamond: "transform:rotate(45deg) scale(.8);", ring: `background:none;border:2px solid ${l.color};border-radius:50%;`,
                     arrow: "clip-path:polygon(100% 50%,0 100%,25% 50%,0 0);width:11px;", dot: "border-radius:50%;",
-                    player: "border-radius:50%;box-shadow:0 0 0 2px #fff;width:8px;height:8px;" }[l.shape || "dot"];
+                    player: "border-radius:50%;box-shadow:0 0 0 2px #fff;width:8px;height:8px;",
+                    triangle: "clip-path:polygon(50% 0,100% 100%,0 100%);width:11px;height:11px;" }[l.shape || "dot"];
     return `<i style="background:${l.color};width:9px;height:9px;display:inline-block;${shape}"></i>`;
   }
   layerCount(l) { return l.count ? l.count() : (this.points[l.key] || []).length; }
@@ -433,6 +434,9 @@ class MapView {
     else if (l.shape === "arrow") {
       const a = (p.rot || 0) * Math.PI / 180, r = rad * 1.25, pt = (x, y) => [s.x + x * Math.cos(a) - y * Math.sin(a), s.y + x * Math.sin(a) + y * Math.cos(a)];
       ctx.moveTo(...pt(r * 1.4, 0)); ctx.lineTo(...pt(-r, r * 0.85)); ctx.lineTo(...pt(-r * 0.5, 0)); ctx.lineTo(...pt(-r, -r * 0.85)); ctx.closePath();
+    }
+    else if (l.shape === "triangle") {   // a tower (Space Elevator)
+      ctx.moveTo(s.x, s.y - rad * 1.5); ctx.lineTo(s.x + rad * 1.15, s.y + rad * 0.9); ctx.lineTo(s.x - rad * 1.15, s.y + rad * 0.9); ctx.closePath();
     }
     else if (l.shape === "player") {
       ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.fill();
