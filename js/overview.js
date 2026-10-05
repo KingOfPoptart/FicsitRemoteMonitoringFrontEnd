@@ -21,6 +21,23 @@ const Overview = (() => {
     render();
   }
   async function factory() { try { prod = await Production.snapshot(); } catch {} render(); }
+  // ---- Logistics card: belts and pipes, tiers, unconnected ends (data from the shared /logistics fetch)
+  function renderLogistics() {
+    const nets = Logistics.networks;
+    if (!nets.length || !$("ovLogi")) return;
+    const km = m => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${fmtNum(m)} m`;
+    const sum = (kind, k) => nets.filter(n => n.kind === kind).reduce((a, n) => a + n[k], 0);
+    const tiers = [...[1, 2, 3, 4, 5, 6].map(t => ["belt", t]), ...[1, 2].map(t => ["pipe", t])]
+      .map(([k, t]) => [k, t, (k === "belt" ? Logistics.belts : Logistics.pipes).filter(b => b.t === t).length]).filter(x => x[2]);
+    const maxT = Math.max(1, ...tiers.map(x => x[2]));
+    const open = nets.filter(n => n.open).sort((a, b) => b.open - a.open);
+    $("ovLogi").innerHTML = `<div class="big">${km(sum("belt", "len"))} <small>of belts · ${km(sum("pipe", "len"))} of pipes</small></div>
+      <div class="t-sub">${fmtNum(Logistics.belts.length)} belts in ${nets.filter(n => n.kind === "belt").length} networks · ${fmtNum(Logistics.pipes.length)} pipes in ${nets.filter(n => n.kind === "pipe").length}</div>
+      <h3>By tier</h3>${tiers.map(([k, t, c]) => `<div class="part"><span class="with-icon"><i class="sw-line" style="background:${(k === "belt" ? BELT_COLOR : PIPE_COLOR)[t]}"></i>Mk.${t} ${k}s</span>${bar(c / maxT, (k === "belt" ? BELT_COLOR : PIPE_COLOR)[t])}<span class="muted">${fmtNum(c)}</span></div>`).join("")}
+      ${open.length ? `<h3>Unconnected ends</h3>${open.slice(0, 4).map(n => `<div class="kvrow"><span>${n.kind === "belt" ? "Belts" : "Pipes"} · ${esc(Object.keys(n.touches).slice(0, 2).join(", ") || "nothing connected")}</span><b class="warn-text">${n.open}</b></div>`).join("")}` : ""}`;
+  }
+  Logistics.listeners.add(() => render());
+
   async function slow() { await load(["getSchematics"]); render(); }
   async function powerHist() {
     try {
@@ -55,6 +72,8 @@ const Overview = (() => {
       if (shorts.length) add("warn", `Used faster than made: ${shorts.slice(0, 4).map(i => `${i.name} (${fmtRate(i.net)}/min)`).join(", ")}${shorts.length > 4 ? ` +${shorts.length - 4} more` : ""}`, "production");
       if (by("full")) add("info", `${by("full")} machines are stopped with full output (backed up)`, "production");
     }
+    const openEnds = Logistics.networks.reduce((a, n) => a + n.open, 0);
+    if (openEnds) add("info", `${openEnds} belt / pipe end${openEnds === 1 ? " isn't" : "s aren't"} connected to anything (${Logistics.networks.filter(n => n.open).length} networks)`, "logistics");
     // each stuck vehicle by name with its problem, e.g. Train "Train" (2 locos+1 car): Station unreachable
     for (const v of veh.filter(v => v.status === "error"))
       add("bad", `${v.type} ${v.name && v.name !== v.type ? `"${v.name.trim()}"` : shortId(v.id)}${v.consist ? ` (${v.consist})` : ""}: ${v.error || "autopilot error"}`, "vehicles");
@@ -94,9 +113,9 @@ const Overview = (() => {
       <div class="t-sub">${bar(load, load > 1 ? "var(--bad)" : load > 0.9 ? "var(--warn)" : "var(--ok)")}${pct(load * 100)} of capacity${gs.length > 1 ? ` · ${gs.length} grids` : ""}</div>` : `<p class="muted">No grids.</p>`;
     $("ovPowerFigs").innerHTML = gs.length ? [
       ["Production", `${fmtNum(tot("PowerProduction"))} MW`],
-      ["Max consumption", `<span class="${maxOver ? "warn-text" : ""}">${fmtNum(tot("PowerMaxConsumed"))} MW</span>`],
+      ["Max use", `<span class="${maxOver ? "warn-text" : ""}" title="Max consumption: if every machine ran at once">${fmtNum(tot("PowerMaxConsumed"))} MW</span>`],
       ["Batteries", battPct == null ? "none" : pct(battPct)],
-      ["Generators", gens.length ? `${gensOn} / ${gens.length} running` : "–"],
+      ["Generators", gens.length ? `<span title="running / built">${gensOn} / ${gens.length}</span>` : "–"],
     ].map(([k, v]) => `<div><span class="muted">${k}</span><b>${v}</b></div>`).join("") : "";
 
     // ---- Production: status mix, top products, shortfalls
@@ -141,6 +160,7 @@ const Overview = (() => {
         ${se.done ? "" : se.parts.map(pt => partRow(pt.name, pt.done, pt.total)).join("")}` : ""}
       ${m ? `<h3>HUB · ${esc(m.Name)}</h3>${(m.Cost || []).map(c => partRow(c.Name, total(c) - left(c), total(c))).join("")}` : `<h3>HUB</h3><p class="muted">No milestone selected.</p>`}`;
 
+    renderLogistics();
     $("statsOv").innerHTML = (gs.length ? `<span class="stat"><b>${fmtNum(tot("PowerConsumed"))}</b>/ ${fmtNum(tot("PowerCapacity"))} MW</span>` : "") +
       (prod ? `<span class="stat"><b>${prod.machines.filter(m => m.status === "running" || m.status === "partial").length}</b>machines working</span>` : "") +
       `<span class="stat"><b>${veh.length}</b>vehicles</span>`;
@@ -166,9 +186,11 @@ const Overview = (() => {
         <div class="ov-left">
           <section class="card"><div class="card-head"><h2>Needs attention</h2></div><div id="ovAttn" class="attn-list"></div></section>
           <div class="ov-cards">
-            <a class="card link ov-card" href="#power"><div class="card-head"><h2>Power</h2><span class="hint">→</span></div><div id="ovPower"></div><div id="ovChart"></div><div class="figs" id="ovPowerFigs"></div></a>
+            <a class="card link ov-card ov-power" href="#power"><div class="card-head"><h2>Power</h2><span class="hint">→</span></div>
+              <div class="ov-power-side"><div id="ovPower"></div><div class="figs" id="ovPowerFigs"></div></div><div id="ovChart"></div></a>
             <a class="card link ov-card" href="#production"><div class="card-head"><h2>Production</h2><span class="hint">→</span></div><div class="ov-body" id="ovProd"><p class="muted">Loading…</p></div></a>
             <a class="card link ov-card" href="#vehicles"><div class="card-head"><h2>Vehicles</h2><span class="hint">→</span></div><div class="ov-body" id="ovVeh"></div></a>
+            <a class="card link ov-card" href="#logistics"><div class="card-head"><h2>Logistics</h2><span class="hint">→</span></div><div class="ov-body" id="ovLogi"><p class="muted">Working out belts and pipes…</p></div></a>
             <a class="card link ov-card" href="#progression"><div class="card-head"><h2>Progression</h2><span class="hint">→</span></div><div class="ov-body" id="ovProg"></div></a>
           </div>
         </div>
@@ -195,7 +217,7 @@ const Overview = (() => {
   return {
     show() {
       if (!map) init();
-      fast().then(powerHist); factory(); slow();
+      fast().then(powerHist); factory(); slow(); Logistics.start();
       if (!timers.length) timers = [setInterval(fast, 3000), setInterval(factory, 10000), setInterval(slow, 60000), setInterval(powerHist, 15000)];
     },
     hide() { timers.forEach(clearInterval); timers = []; },
