@@ -30,6 +30,7 @@ ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths"
            "getTrainRails", "getDrone", "getDroneStation",
            "getFactory", "getExtractor", "getGenerators", "getPower", "getPowerUsage", "getSwitches", "getSessionInfo",
            "getBelts", "getSplitterMerger", "getStorageInv", "getPipes", "getPipeJunctions", "getPump",
+           "getCables", "getPowerPoles",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")

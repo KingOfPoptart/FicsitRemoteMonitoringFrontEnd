@@ -40,6 +40,22 @@ function scrollRowIntoView(tr) {
   box.scrollTop = Math.max(0, top - head - (box.clientHeight - head - tr.offsetHeight) / 2);
 }
 
+// Put a segmented control into el. If it already holds the same buttons, they're updated in place (text,
+// highlight) instead of replaced, so a click that lands while the page refreshes isn't lost.
+function setSeg(el, html) {
+  const t = document.createElement("template"); t.innerHTML = html.trim();
+  const fresh = t.content.querySelectorAll("button"), old = el.querySelectorAll("button");
+  const key = list => [...list].map(b => b.dataset.g + ":" + b.dataset.v).join("|");
+  if (!old.length || key(old) !== key(fresh)) { el.innerHTML = html; return; }
+  fresh.forEach((b, i) => {
+    const o = old[i];
+    if (o.className !== b.className) o.className = b.className;
+    o.setAttribute("aria-checked", b.getAttribute("aria-checked"));
+    if (o.title !== b.title) o.title = b.title;
+    if (o.innerHTML !== b.innerHTML) o.innerHTML = b.innerHTML;
+  });
+}
+
 const SVGNS = "http://www.w3.org/2000/svg";
 const svgEl = (tag, attrs = {}, parent) => {
   const e = document.createElementNS(SVGNS, tag);

@@ -63,6 +63,7 @@ const Overview = (() => {
     for (const g of d.getPower || []) {
       const name = (d.getPower.length > 1 ? `Grid ${g.CircuitGroupID}: ` : "");
       if (g.FuseTriggered) add("bad", `${name}fuse tripped — the grid is off`, "power");
+      else if (!g.PowerCapacity && g.PowerProduction > 0) continue;   // capacity not reported (no-power-cost world): no overload alarms
       else if (g.PowerConsumed > g.PowerCapacity) add("bad", `${name}using ${fmtNum(g.PowerConsumed)} MW, more than the ${fmtNum(g.PowerCapacity)} MW capacity${g.BatteryCapacity ? ` — batteries at ${pct(g.BatteryPercent)}` : ""}`, "power");
       else if (g.PowerConsumed > g.PowerCapacity * 0.9) add("warn", `${name}power is ${pct(g.PowerConsumed / g.PowerCapacity * 100)} of capacity`, "power");
       if (g.PowerMaxConsumed > g.PowerCapacity) add("warn", `${name}max consumption ${fmtNum(g.PowerMaxConsumed)} MW is over capacity ${fmtNum(g.PowerCapacity)} MW — a fuse could trip if everything runs at once`, "power");
@@ -179,7 +180,7 @@ const Overview = (() => {
     if (prod) {
       map.setPoints("machines", prod.machines.filter(m => m.loc).map(m => ({ id: m.id, x: m.loc.x, y: m.loc.y, color: Production.M_STATUS[m.status].color,
         label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${Production.M_STATUS[m.status].label}`, tab: "production" })));
-      map.setPoints("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "var(--s4)" : "var(--bad)", tab: "power" })).filter(Boolean));
+      map.setPoints("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "#e879f9" : "var(--bad)", tab: "power" })).filter(Boolean));
     }
     map.setPoints("veh", veh.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tab: "vehicles" })));
     map.setPoints("hub", (d.getTradingPost || []).map(o => pt(o, { label: o.Name })).filter(Boolean));
@@ -206,13 +207,14 @@ const Overview = (() => {
     chart = new LineChart($("ovChart"), { height: 140, unit: "MW", fill: true });
     map = new MapView($("ovMap"), {
       // dropdown sections: Factory, Transport, Stations, People (players are added by MapView)
-      storeKey: "ov.map2", layerMenu: true, players: true, logistics: () => true, layers: [   // every belt   // new key: everything starts enabled
+      // everything: every belt and pipe, the whole power network (new storeKey = all layers start enabled)
+      storeKey: "ov.map2", layerMenu: true, players: true, logistics: () => true, powerNet: () => true, layers: [
         // told apart by shape (and colour where status isn't the point): machines = small dots coloured by status,
         // generators = amber diamonds (red when out of fuel/water), vehicles = heading arrows, players = labelled dots on top
         { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6 },
-        { key: "gens", group: "Factory", label: "Generators", color: "var(--s4)", size: 5, shape: "diamond" },
-        { key: "hub", group: "Factory", label: "The HUB", color: "#ffffff", size: 6, shape: "square" },
-        { key: "elevator", group: "Factory", label: "Space Elevator", color: "#ffffff", size: 8, shape: "triangle" },
+        { key: "gens", group: "Factory", label: "Generators", color: "#e879f9", size: 5, shape: "diamond" },   // fuchsia; red = not running
+        { key: "hub", group: "Factory", label: "The HUB", color: "#fa9549", size: 6.5, shape: "square" },
+        { key: "elevator", group: "Factory", label: "Space Elevator", color: "#fa9549", size: 8, shape: "triangle" },
         { key: "veh", group: "Transport", label: "Vehicles", color: "#5fcf80", size: 5, shape: "arrow" },
         ...networkLayers(),
       ],

@@ -224,9 +224,9 @@ const Production = (() => {
     const short = [...items.values()].filter(isShort).length;
     const modes = [{ v: "all", label: "All" }, { v: "short", label: "Shortfalls", n: short, dot: short ? "var(--bad)" : null, title: "Consumed faster than produced" },
                    { v: "solid", label: "Solids" }, { v: "fluid", label: "Fluids" }];
-    $("pModes").innerHTML = seg("mode", modes, o => ui.mode === o.v);
-    $("pStSeg").innerHTML = seg("view", statusViews(), o => sameSet(ui.st, o.st));
-    $("pRange").innerHTML = seg("range", RANGES.map(([l, v]) => ({ v, label: l })), o => ui.range === o.v);
+    setSeg($("pModes"), seg("mode", modes, o => ui.mode === o.v));
+    setSeg($("pStSeg"), seg("view", statusViews(), o => sameSet(ui.st, o.st)));
+    setSeg($("pRange"), seg("range", RANGES.map(([l, v]) => ({ v, label: l })), o => ui.range === o.v));
     itemPick.refresh(); bldPick.refresh();
     $("pClear").disabled = !(ui.bld.length || ui.st.length || focusItem);
   }

@@ -14,17 +14,44 @@ const Power = (() => {
     running: { label: "Running", color: "var(--ok)", title: "Producing power" },
     standby: { label: "Standby", color: "var(--muted)", title: "Fuelled, but nothing on the grid needs its power" },
   };
-  let groups = [], gens = [], usage = [], hist = null, timer = null, detailTimer = null, histTimer = null, loaded = false;
-  const ui = (() => { try { return { range: 60, grid: null, gq: "", ...JSON.parse(localStorage.getItem("pw.ui") || "{}") }; } catch { return { range: 60, grid: null, gq: "" }; } })();
-  const saveUi = () => { try { localStorage.setItem("pw.ui", JSON.stringify(ui)); } catch {} };
+  let groups = [], gens = [], usage = [], hist = null, timer = null, detailTimer = null, histTimer = null, netTimer = null, loaded = false;
+  const ui = (() => { try { return { range: 60, grid: "all", gq: "", ...JSON.parse(localStorage.getItem("pw.ui2") || "{}") }; } catch { return { range: 60, grid: "all", gq: "" }; } })();
+  const saveUi = () => { try { localStorage.setItem("pw.ui2", JSON.stringify(ui)); } catch {} };
   let chart, battChart, genTable, map, selGen = null;
   const root = $("tab-power");
   const mw = v => `${v < 0 ? "−" : ""}${fmtNum(Math.abs(v), Math.abs(v) < 100 ? 1 : 0)} <small>MW</small>`;
 
   // ---- data ----------------------------------------------------------------------------------
-  const grid = () => groups.find(g => String(g.CircuitGroupID) === String(ui.grid)) || groups[0];
-  const gridName = g => groups.length > 1 ? `Grid ${groups.indexOf(g) + 1}` : "Main grid";
-  const onGrid = (pi, g) => pi && g && pi.CircuitGroupID === g.CircuitGroupID;
+  // the selected grid, or (All grids) every grid added together; batteries weighted by capacity
+  function allGrids() {
+    const sum = k => groups.reduce((a, g) => a + (g[k] || 0), 0), cap = sum("BatteryCapacity");
+    const t = s => groups.map(g => g[s]).find(v => v && v !== "00:00:00") || "00:00:00";
+    return { CircuitGroupID: "all", all: true, AssociatedCircuits: groups.flatMap(g => g.AssociatedCircuits || []),
+      PowerProduction: sum("PowerProduction"), PowerConsumed: sum("PowerConsumed"), PowerCapacity: sum("PowerCapacity"), PowerMaxConsumed: sum("PowerMaxConsumed"),
+      BatteryCapacity: cap, BatteryPercent: cap ? groups.reduce((a, g) => a + (g.BatteryPercent || 0) * (g.BatteryCapacity || 0), 0) / cap : 0,
+      BatteryInput: sum("BatteryInput"), BatteryOutput: sum("BatteryOutput"), BatteryTimeEmpty: t("BatteryTimeEmpty"), BatteryTimeFull: t("BatteryTimeFull"),
+      FuseTriggered: groups.some(g => g.FuseTriggered) };
+  }
+  const grid = () => ui.grid === "all" || groups.length <= 1 ? (groups.length === 1 ? groups[0] : allGrids())
+                   : groups.find(g => String(g.CircuitGroupID) === String(ui.grid)) || allGrids();
+  // a grid is named after what powers it (e.g. "Coal", "Coal + Fuel", "No generators · Train Station"),
+  // numbered only when two grids would get the same name
+  const short = n => n.replace(/-Powered Generator| Generator| Power Plant| Burner$/, "").replace(/^Biomass$/, "Biomass");
+  function baseName(g) {
+    const types = [...new Set(gens.filter(x => onGrid(x.pi, g)).map(x => short(x.type)))];
+    if (types.length) return types.join(" + ");
+    const top = Object.entries(usage.filter(u => onGrid(u.PowerInfo, g) && u.PowerInfo.MaxPowerConsumed > 0)
+      .reduce((a, u) => (a[u.Name] = (a[u.Name] || 0) + 1, a), {})).sort((a, b) => b[1] - a[1])[0];
+    return `No generators${top ? ` · ${top[0]}` : ""}`;
+  }
+  function gridName(g) {
+    if (groups.length <= 1) return "Main grid";
+    const base = baseName(g), same = groups.filter(x => baseName(x) === base);
+    return same.length > 1 ? `${base} ${same.indexOf(g) + 1}` : base;
+  }
+  const onGrid = (pi, g) => pi && g && (g.all ? pi.CircuitID >= 0 : pi.CircuitGroupID === g.CircuitGroupID);
+  // a switch / pole / line belongs to the selected grid if any of its circuits is one of the grid's
+  const inGrid = circuits => { const g = grid(); return !!g && (circuits || []).some(c => (g.AssociatedCircuits || []).includes(c)); };
   const energy = name => gameItems.find(i => i.name === name)?.energy;
 
   function genStatus(g) {
@@ -67,22 +94,26 @@ const Power = (() => {
   // ---- render ----------------------------------------------------------------------------------
   const pill = s => `<span class="pill" style="color:${G_STATUS[s].color};background:color-mix(in srgb, ${G_STATUS[s].color} 14%, transparent)" title="${G_STATUS[s].title}">${G_STATUS[s].label}</span>`;
 
+  // FRM reports 0 capacity while power still flows (seen with the "no power cost" sandbox setting): treat it as
+  // unknown, not as an overload
+  const capUnknown = g => !g.PowerCapacity && g.PowerProduction > 0 && !g.FuseTriggered;
   function renderTiles(g) {
+    const unk = capUnknown(g);
     const load = g.PowerCapacity ? g.PowerConsumed / g.PowerCapacity : 0;
     const loadColor = load > 1 ? "var(--bad)" : load > 0.9 ? "var(--warn)" : "var(--ok)";
-    const headroom = g.PowerCapacity - g.PowerConsumed;
-    const maxOver = g.PowerMaxConsumed > g.PowerCapacity;
+    const headroom = unk ? null : g.PowerCapacity - g.PowerConsumed;
+    const maxOver = !unk && g.PowerMaxConsumed > g.PowerCapacity;
     const hasBatt = g.BatteryCapacity > 0;
     const flow = g.BatteryInput - g.BatteryOutput;
     $("wTiles").innerHTML = `
       <div class="tile click" data-jump="wUseCard" title="Show what's using the power"><div class="t-label">Consumption</div><div class="t-val">${mw(g.PowerConsumed)}</div>
-        <div class="t-sub">${bar(load, loadColor)}${pct(load * 100)} of capacity</div></div>
+        <div class="t-sub">${unk ? "capacity not reported" : `${bar(load, loadColor)}${pct(load * 100)} of capacity`}</div></div>
       <div class="tile click" data-jump="wGenCard" title="Show what's generating the power"><div class="t-label">Production</div><div class="t-val">${mw(g.PowerProduction)}</div><div class="t-sub">what generators put out now</div></div>
-      <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Capacity</div><div class="t-val">${mw(g.PowerCapacity)}</div><div class="t-sub">if every fuelled generator ran flat out</div></div>
+      <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Capacity</div><div class="t-val">${unk ? `<span class="muted">–</span>` : mw(g.PowerCapacity)}</div><div class="t-sub">${unk ? "FRM reports 0 here (e.g. a no-power-cost world)" : "if every fuelled generator ran flat out"}</div></div>
       <div class="tile click${maxOver ? " warn" : ""}" data-jump="wUseCard" title="Show max consumption by building type (lighter bars)"><div class="t-label">Max consumption</div><div class="t-val">${mw(g.PowerMaxConsumed)}</div>
-        <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - g.PowerCapacity)} MW over capacity if everything runs at once</span>` : "if every machine ran at once — fits"}</div></div>
-      <div class="tile click${headroom < 0 ? " bad" : ""}" data-jump="wChartCard" title="Show power over time"><div class="t-label">Headroom</div><div class="t-val">${mw(headroom)}</div>
-        <div class="t-sub">${headroom >= 0 ? "capacity − consumption" : hasBatt && g.BatteryPercent > 0 ? `<span class="bad-text">⚠ over capacity — batteries are covering it</span>` : `<span class="bad-text">⚠ over capacity</span>`}</div></div>
+        <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - g.PowerCapacity)} MW over capacity if everything runs at once</span>` : unk ? "if every machine ran at once" : "if every machine ran at once — fits"}</div></div>
+      <div class="tile click${headroom < 0 ? " bad" : ""}" data-jump="wChartCard" title="Show power over time"><div class="t-label">Headroom</div><div class="t-val">${headroom == null ? `<span class="muted">–</span>` : mw(headroom)}</div>
+        <div class="t-sub">${headroom == null ? "unknown without capacity" : headroom >= 0 ? "capacity − consumption" : hasBatt && g.BatteryPercent > 0 ? `<span class="bad-text">⚠ over capacity — batteries are covering it</span>` : `<span class="bad-text">⚠ over capacity</span>`}</div></div>
       <div class="tile click" data-jump="${hasBatt ? "wBattCard" : "wChartCard"}" title="Show battery charge over time"><div class="t-label">Batteries</div>${hasBatt ? `<div class="t-val">${pct(g.BatteryPercent)} <small>of ${fmtNum(g.BatteryCapacity)} MWh</small></div>
         <div class="t-sub">${bar(g.BatteryPercent / 100, "var(--s3)")}${flow < -0.05 ? `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}` : g.BatteryPercent >= 99.95 ? "full" : flow < 0.05 ? "idle" : flow > 0 ? `charging ${fmtNum(flow, 1)} MW · full in ${esc(g.BatteryTimeFull)}` : `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}`}</div>`
         : `<div class="t-val muted">none</div><div class="t-sub">no Power Storage on this grid</div>`}</div>`;
@@ -91,13 +122,63 @@ const Power = (() => {
       (groups.length > 1 ? `<span class="stat"><b>${groups.length}</b>grids</span>` : "") +
       (groups.some(x => x.FuseTriggered) ? `<span class="stat" style="color:var(--bad)"><b>⚠</b>fuse tripped</span>` : "");
     $("wFuse").style.display = g.FuseTriggered ? "block" : "none";
-    $("wFuse").textContent = `⚠ ${gridName(g)}: the fuse has tripped — everything on it is off. Reset it at any power pole or generator (and fix the overload first: consumption ${fmtNum(g.PowerConsumed)} MW vs capacity ${fmtNum(g.PowerCapacity)} MW).`;
+    $("wFuse").textContent = `⚠ ${g.all ? groups.filter(x => x.FuseTriggered).map(gridName).join(", ") : gridName(g)}: the fuse has tripped — everything on it is off. Reset it at any power pole or generator (and fix the overload first: consumption ${fmtNum(g.PowerConsumed)} MW vs capacity ${fmtNum(g.PowerCapacity)} MW).`;
   }
 
   function renderGrids() {
     $("wGridGroup").style.display = groups.length > 1 ? "" : "none";   // one grid: nothing to choose
-    $("wGrids").innerHTML = segControl("grid", groups.map(g => ({ v: String(g.CircuitGroupID), label: `${g.FuseTriggered ? "⚠ " : ""}${gridName(g)}`,
-      n: `${fmtNum(g.PowerConsumed)} / ${fmtNum(g.PowerCapacity)} MW` })), o => o.v === String(grid().CircuitGroupID));
+    const all = allGrids();
+    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: "All grids", n: `${fmtNum(all.PowerConsumed)} / ${fmtNum(all.PowerCapacity)} MW` },
+      ...groups.map(g => ({ v: String(g.CircuitGroupID), label: `${g.FuseTriggered ? "⚠ " : ""}${gridName(g)}`,
+        n: `${fmtNum(g.PowerConsumed)} / ${fmtNum(g.PowerCapacity)} MW` }))], o => o.v === String(grid().CircuitGroupID)));
+  }
+
+  // ---- grid layout: start at the circuit with the generators and follow the switches outward
+  function renderLayout(g) {
+    if (g.all) {   // each grid with its own layout, under its name
+      const parts = groups.map(x => [x, layoutHtml(x)]).filter(([, h]) => h);
+      $("wLayoutCard").style.display = parts.length ? "" : "none";
+      $("wLayout").innerHTML = parts.map(([x, h]) => `<h3>${esc(gridName(x))}</h3>${h}`).join("");
+      $("wLayoutHint").textContent = `${groups.length} grids · starting from the generators`;
+      return;
+    }
+    const html = layoutHtml(g);
+    $("wLayoutCard").style.display = html ? "" : "none";
+    if (!html) return;
+    $("wLayout").innerHTML = html;
+    const circuits = g.AssociatedCircuits || [], sw = PowerNet.switches.filter(s => s.circuits.some(c => circuits.includes(c)));
+    $("wLayoutHint").textContent = `${circuits.length} section${circuits.length === 1 ? "" : "s"} joined by ${sw.length} switch${sw.length === 1 ? "" : "es"} · starting from the generators`;
+  }
+  function layoutHtml(g) {
+    const circuits = g.AssociatedCircuits || [];
+    const sw = PowerNet.switches.filter(s => s.circuits.some(c => circuits.includes(c)));
+    if (!(circuits.length > 1 || sw.length) && groups.length <= 1) return "";   // a single plain circuit: nothing to show
+    const on = c => x => (x.pi || x.PowerInfo)?.CircuitID === c;
+    const contents = c => {
+      const n = {}; gens.filter(on(c)).forEach(x => n[x.type] = (n[x.type] || 0) + 1);
+      usage.filter(u => on(c)(u) && !/Generator|Burner|Power Plant/.test(u.Name)).forEach(u => n[u.Name] = (n[u.Name] || 0) + 1);
+      const poles = PowerNet.poles.filter(p => p.CircuitID === c).length;
+      const items = Object.entries(n).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="with-icon">${icon(k, "icon sm")}${v} × ${esc(k)}</span>`);
+      return (items.join("") || `<span class="muted">nothing but wires</span>`) + (poles ? `<span class="muted">${poles} pole${poles === 1 ? "" : "s"}</span>` : "");
+    };
+    const genMW = c => gens.filter(on(c)).reduce((a, x) => a + x.cap, 0);
+    const seen = new Set();
+    const branch = (c, depth) => {
+      seen.add(c);
+      let html = `<div class="lay-node" style="--d:${depth}"><div class="lay-items">${contents(c)}</div></div>`;
+      for (const s of sw.filter(s => s.circuits.includes(c))) {
+        const other = s.circuits.find(x => x !== c);
+        if (other == null || seen.has(other)) continue;
+        const name = s.SwitchTag || s.Name || "Power Switch";
+        html += `<div class="lay-switch" style="--d:${depth + 1}"><span class="pill" style="color:${s.IsOn ? "var(--ok)" : "var(--bad)"};background:color-mix(in srgb, ${s.IsOn ? "var(--ok)" : "var(--bad)"} 14%, transparent)">${s.IsOn ? "on" : "off"}</span>
+          <b>${esc(name)}</b>${s.Priority >= 0 ? ` <span class="muted">priority ${s.Priority} switch</span>` : ` <span class="muted">switch</span>`}</div>` + branch(other, depth + 1);
+      }
+      return html;
+    };
+    const order = [...circuits].sort((a, b) => genMW(b) - genMW(a));
+    let html = "";
+    for (const c of order) if (!seen.has(c)) html += branch(c, 0);
+    return html;
   }
 
   function renderBreakdowns(g) {
@@ -140,16 +221,23 @@ const Power = (() => {
     genTable.render(gens.filter(x => onGrid(x.pi, g) && (!q || `${x.type} ${G_STATUS[x.status].label} ${x.fuel?.Name || ""}`.toLowerCase().includes(q))));
     $("wGenCount").textContent = `${gens.filter(x => onGrid(x.pi, g)).length} generators`;
     const pt = (u, extra) => u.location && { id: u.ID || u.id, x: u.location.x, y: u.location.y, ...extra };
-    map.setPoints("gens", gens.filter(x => onGrid(x.pi, g) && x.raw.location).map(x => pt(x.raw, { color: G_STATUS[x.status].color,
+    map.setPoints("gens", gens.filter(x => x.raw.location).map(x => pt(x.raw, { circuits: [x.pi?.CircuitID], color: G_STATUS[x.status].color,
       label: `${x.type} · ${G_STATUS[x.status].label} · ${fmtNum(x.out, 0)} MW` })));
-    map.setPoints("storage", usage.filter(u => onGrid(u.PowerInfo, g) && /PowerStorage/.test(u.ClassName || u.ID)).map(u => pt(u, { label: "Power Storage" })).filter(Boolean));
-    map.setPoints("use", usage.filter(u => onGrid(u.PowerInfo, g) && u.PowerInfo.MaxPowerConsumed > 0).map(u => pt(u, {
+    map.setPoints("use", usage.filter(u => u.PowerInfo?.MaxPowerConsumed > 0).map(u => pt(u, { circuits: [u.PowerInfo.CircuitID],
       label: `${u.Name} · ${fmtNum(u.PowerInfo.PowerConsumed, 1)} MW (max ${fmtNum(u.PowerInfo.MaxPowerConsumed, 1)})` })).filter(Boolean));
   }
 
   function renderCharts() {
     const g = grid(); if (!chart || !g || !hist) return;
-    const h = hist.groups[String(g.CircuitGroupID)];
+    let h = hist.groups[String(g.CircuitGroupID)];
+    if (g.all) {   // add the grids up point by point (a grid missing at a point counts as 0 there)
+      const hs = Object.values(hist.groups), n = hist.t.length;
+      if (hs.length) {
+        h = {};
+        for (const k of ["prod", "cons", "cap", "max"]) h[k] = Array.from({ length: n }, (_, i) => hs.some(x => x[k][i] != null) ? hs.reduce((a, x) => a + (x[k][i] || 0), 0) : null);
+        h.batt = Array.from({ length: n }, (_, i) => { const w = hs.filter(x => x.batt[i] != null); return w.length ? w.reduce((a, x) => a + x.batt[i], 0) / w.length : null; });
+      }
+    }
     const s = (key, name, color, extra) => ({ key, name, color, values: h ? h[key] : [], ...extra });
     chart.update(h ? { t: hist.t, interval: hist.interval, series: [
       s("cap", "Capacity", "var(--s3)"), s("prod", "Production", "var(--s1)"),
@@ -165,9 +253,9 @@ const Power = (() => {
       return;
     }
     const g = grid();
-    renderGrids(); renderTiles(g); renderBreakdowns(g);
+    renderGrids(); renderTiles(g); renderBreakdowns(g); renderLayout(g);
     if (!chart.data) renderCharts();
-    $("wRange").innerHTML = segControl("range", RANGES.map(([l, v]) => ({ v, label: l })), o => ui.range === o.v);
+    setSeg($("wRange"), segControl("range", RANGES.map(([l, v]) => ({ v, label: l })), o => ui.range === o.v));
   }
 
   // ---- markup + events ---------------------------------------------------------------------------
@@ -181,6 +269,8 @@ const Power = (() => {
         <div class="pcol">
           <section class="card w-chart" id="wChartCard"><div class="card-head"><h2>Power over time</h2><span class="hint">like the in-game power graph · hover for values</span></div><div id="wChart"></div></section>
           <section class="card w-batt" id="wBattCard"><div class="card-head"><h2>Battery charge</h2><span class="hint">% of total Power Storage</span></div><div id="wBatt"></div></section>
+          <section class="card w-layout" id="wLayoutCard"><div class="card-head"><h2>Grid layout</h2><span class="hint" id="wLayoutHint"></span></div>
+            <div class="card-body" id="wLayout"></div></section>
           <section class="card w-break"><div class="break-cols">
             <div id="wGenCard"><div class="card-head"><h2>Generation</h2><span class="hint">output now · lighter bar = capacity</span></div><div id="wGen" class="hbars"></div></div>
             <div id="wUseCard"><div class="card-head"><h2>Consumption</h2><span class="hint">by building type · lighter bar = max</span></div><div id="wUse" class="hbars"></div>
@@ -207,11 +297,14 @@ const Power = (() => {
     ], { sortKey: "status", storeKey: "pw.genSort", rowAttrs: r => `data-gid="${esc(r.id)}" class="${r.id === selGen ? "sel" : ""}"` });
     const hl = id => { for (const tr of $("wGens").querySelectorAll("tr[data-gid]")) tr.classList.toggle("hl", tr.dataset.gid === id); };
     map = new MapView($("wMap"), {
-      storeKey: "pw.map", layerMenu: true, players: true, logistics: b => b.w, layers: [   // belts and pipes feeding generators
+      // the selected grid only: its generators and consumers, and its part of the power network
+      storeKey: "pw.map2", layerMenu: true, players: true, powerNet: () => true, layers: [
+        // points and lines not on the selected grid fade (All grids: nothing fades), see fade below
         { key: "gens", group: "Power", label: "Generators", color: "var(--ok)", size: 5, shape: "diamond" },
-        { key: "storage", group: "Power", label: "Power Storage", color: "var(--s3)", size: 4, shape: "square" },
         { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, on: false },
       ],
+      fade: p => p.circuits ? !grid().all && !inGrid(p.circuits) : false,   // other grids fade
+      fitTo: () => grid().all ? [] : map.all(true).filter(p => p.circuits && inGrid(p.circuits)).map(p => p.ip),
       tooltip: p => `<div class="row"><span>${esc(p.label)}</span></div>`, hint: "click a generator row to find it",
       onHover: p => { hl(p && p.id); if (p) scrollRowIntoView($("wGens").querySelector(`tr[data-gid="${CSS.escape(p.id)}"]`)); },
     });
@@ -220,6 +313,7 @@ const Power = (() => {
       selGen = tr.dataset.gid; map.locate(selGen);
       for (const t of $("wGens").querySelectorAll("tr.sel")) t.classList.remove("sel"); tr.classList.add("sel");
     });
+    PowerNet.listeners.add(() => { if (loaded && groups.length) renderLayout(grid()); });
     $("wGens").addEventListener("mousemove", e => { const tr = e.target.closest("tr[data-gid]"); map.highlight(tr ? tr.dataset.gid : null); });
     $("wGens").addEventListener("mouseleave", () => map.highlight(null));
 
@@ -227,7 +321,7 @@ const Power = (() => {
       const j = e.target.closest("[data-jump]");
       if (j) { const t = $(j.dataset.jump); t.scrollIntoView({ behavior: "smooth", block: "start" }); t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash"); return; }
       const sb = e.target.closest("[data-g]");
-      if (sb && sb.dataset.g === "grid") { ui.grid = sb.dataset.v; saveUi(); render(); renderCharts(); return; }
+      if (sb && sb.dataset.g === "grid") { ui.grid = sb.dataset.v; saveUi(); render(); renderCharts(); map.draw(); map.fit(); return; }
       if (sb && sb.dataset.g === "range") { ui.range = +sb.dataset.v; saveUi(); render(); pollHistory(); }
     });
     $("wGenSearch").addEventListener("input", e => { ui.gq = e.target.value; saveUi(); render(); });
@@ -241,6 +335,6 @@ const Power = (() => {
       detailTimer = detailTimer || setInterval(pollDetail, DETAIL_MS);
       histTimer = histTimer || setInterval(pollHistory, 5000);
     },
-    hide() { [timer, detailTimer, histTimer].forEach(clearInterval); timer = detailTimer = histTimer = null; },
+    hide() { [timer, detailTimer, histTimer, netTimer].forEach(clearInterval); timer = detailTimer = histTimer = netTimer = null; },
   };
 })();

@@ -19,7 +19,8 @@
  * setPoints(layerKey, [{ id, x, y, color?, label?, ... }]) — world coordinates (Unreal cm)
  */
 // Players on any map: MapView({ players: true }) adds this layer, and one shared poll keeps every such map updated.
-const playerLayer = () => ({ key: "players", group: "People", label: "Players", color: "#fa9549", size: 6, shape: "player", top: true });
+const PLAYER_COLOR = "#22d3ee";   // cyan: nothing else on the maps uses it
+const playerLayer = () => ({ key: "players", group: "People", label: "Players", color: PLAYER_COLOR, size: 6, shape: "player", top: true });
 const Players = {
   list: [], maps: new Set(), timer: null,
   attach(mv) {
@@ -33,7 +34,7 @@ const Players = {
   push(mv) {   // online: solid orange + name; offline: grey, dashed outline, "(offline)"
     mv.setPoints("players", this.list.filter(p => p.location).map(p => ({ id: p.ID, x: p.location.x, y: p.location.y,
       label: `${p.Name}${p.Online ? " · online" : " · offline"}`, name: p.Online ? p.Name : `${p.Name} (offline)`,
-      offline: !p.Online, color: p.Online ? "#fa9549" : "#8c94a1" })));
+      offline: !p.Online, color: p.Online ? PLAYER_COLOR : "#8c94a1" })));
   },
 };
 
@@ -41,7 +42,7 @@ const Players = {
 // tier (Mk.1-Mk.2) and draws the segments the filter keeps (all, production lines, power lines). One shared fetch
 // of /logistics (the server works out the networks). opts.highlight() -> network id draws that network on top.
 const BELT_COLOR = { 1: "#4d6a85", 2: "#5d89b3", 3: "#6fa6dc", 4: "#8fc0f1", 5: "#b6d6f7", 6: "#dfecfb" };   // faster = brighter
-const PIPE_COLOR = { 1: "#5cc97e", 2: "#a9f0bd" };   // drawn as hollow tubes, belts as solid lines
+const PIPE_COLOR = { 1: "#2dd4bf", 2: "#99f6e4" };   // teal, drawn as hollow tubes; belts are solid blue lines
 const logisticsLayers = keep => [
   ...[1, 2, 3, 4, 5, 6].map(t => ({ key: "belt" + t, group: "Belts", label: `Mk.${t} belts`, swatch: `background:${BELT_COLOR[t]}`,
     count: () => Logistics.belts.filter(b => b.t === t && keep(b)).length })),
@@ -96,10 +97,69 @@ const netTooltip = (n, seg) => !n ? "" :
   (Object.entries(n.touches).slice(0, 5).map(([k, c]) => `<div class="row"><span>${esc(k)}</span><b>×${c}</b></div>`).join("") || `<div class="row muted"><span>connects to nothing found</span></div>`) +
   `<div class="row muted"><span>${n.segs} pieces · bottleneck ${n.cap ? n.cap + (n.kind === "pipe" ? " m³" : "") + "/min" : "–"}${n.open ? ` · ${n.open} open ends` : ""}</span></div>`;
 
+// The power network on any map: MapView({ powerNet: circuits => bool }) adds power lines, poles, wall outlets,
+// towers, switches and power storage, keeping the ones whose circuit(s) the filter accepts (all, or one grid).
+// FRM gives poles/storage/buildings a circuit ID and switches two; lines have none, so each line takes the circuit
+// of whatever its ends touch. One shared poll every 30 s.
+const POWER_COLOR = "#f2d64e";
+const powerLayers = keep => [
+  { key: "wires", group: "Power network", label: "Power lines", swatch: `background:${POWER_COLOR};height:2px`, count: () => PowerNet.wires.filter(w => keep(w.circuits)).length },
+  { key: "poles", group: "Power network", label: "Power poles", color: POWER_COLOR, size: 2.5 },
+  { key: "outlets", group: "Power network", label: "Wall outlets", color: POWER_COLOR, size: 3, shape: "square" },
+  { key: "towers", group: "Power network", label: "Power towers", color: "#ffe9a3", size: 6, shape: "triangle" },
+  { key: "switches", group: "Power network", label: "Power switches", color: POWER_COLOR, size: 5, shape: "diamond" },
+  { key: "pstorage", group: "Power network", label: "Power Storage", color: "#fff1a8", size: 4.5, shape: "square" },
+];
+const PowerNet = {
+  wires: [], poles: [], switches: [], storage: [], things: [], groupOf: new Map(), maps: new Set(), listeners: new Set(), timer: null,
+  attach(mv) { this.maps.add(mv); if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 30000); } else this.push(mv); },
+  async poll() {
+    const [c, p, s, u, g, w] = await Promise.allSettled(["getCables", "getPowerPoles", "getSwitches", "getPowerUsage", "getGenerators", "getPower"].map(e => getJSON(e)));
+    const ok = r => r.status === "fulfilled" ? r.value : null;
+    const usage = ok(u) || [], gens = ok(g) || [], poles = ok(p) || [];   // getPowerPoles needs the newer FRM build
+    this.groupOf = new Map((ok(w) || []).flatMap(gr => (gr.AssociatedCircuits || []).map(c => [c, gr.CircuitGroupID])));
+    this.poles = poles.map(x => ({ ...x, kind: /Tower/i.test(x.ClassName) ? "towers" : /Wall/i.test(x.ClassName) ? "outlets" : "poles", circuits: [x.CircuitID] }));
+    this.switches = (ok(s) || []).map(x => ({ ...x, circuits: [x.Primary, x.Secondary] }));
+    this.storage = usage.filter(x => /PowerStorage/.test(x.ClassName || x.ID)).map(x => ({ ...x, circuits: [x.PowerInfo?.CircuitID] }));
+    // everything with a circuit and a place: what a line's end can attach to
+    this.things = [...this.poles, ...this.switches, ...usage.filter(x => x.location && x.PowerInfo?.CircuitID >= 0).map(x => ({ location: x.location, circuits: [x.PowerInfo.CircuitID] })),
+                   ...gens.filter(x => x.location && x.PowerInfo?.CircuitID >= 0).map(x => ({ location: x.location, circuits: [x.PowerInfo.CircuitID] }))];
+    const near = q => { let best = null, bd = 2500 ** 2;   // within 25 m
+      for (const t of this.things) { const d = (t.location.x - q.x) ** 2 + (t.location.y - q.y) ** 2 + ((t.location.z - q.z) ** 2) / 4; if (d < bd) { bd = d; best = t; } }
+      return best ? best.circuits : []; };
+    this.wires = (ok(c) || []).map(x => ({ a: worldToImg(x.location0.x, x.location0.y), b: worldToImg(x.location1.x, x.location1.y),
+      circuits: [...new Set([...near(x.location0), ...near(x.location1)])].filter(c => c >= 0) }));
+    for (const mv of this.maps) this.push(mv);
+    for (const f of this.listeners) f();
+  },
+  push(mv) {
+    const keep = mv.opts.powerNet, pt = (o, extra) => o.location && { id: o.ID, x: o.location.x, y: o.location.y, ...extra };
+    for (const k of ["poles", "outlets", "towers"])
+      mv.setPoints(k, this.poles.filter(x => x.kind === k && keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, label: `${x.Name} · ${x.Connections} of ${x.MaxConnections} wires` })).filter(Boolean));
+    mv.setPoints("switches", this.switches.filter(x => keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, color: x.IsOn ? POWER_COLOR : "#6b7380",
+      label: `${x.SwitchTag || x.Name || "Power Switch"} · ${x.IsOn ? "on" : "off"}${x.Priority >= 0 ? ` · priority ${x.Priority}` : ""}` })).filter(Boolean));
+    mv.setPoints("pstorage", this.storage.filter(x => keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, label: "Power Storage" })).filter(Boolean));
+    mv.draw();
+  },
+};
+function drawPowerLines(mv, keep) {
+  if (!mv.isOn("wires") || !PowerNet.wires.length) return;
+  const ctx = mv.ctx; ctx.lineWidth = Math.max(0.7, Math.min(1.8, mv.view.s * 2));
+  for (const faded of [true, false]) {   // lines off the highlighted grid first, faint; then the rest on top
+    ctx.strokeStyle = faded ? "rgba(242,214,78,.12)" : "rgba(242,214,78,.7)"; ctx.beginPath();
+    for (const w of PowerNet.wires) {
+      if (!keep(w.circuits) || !!mv.opts.fade?.(w) !== faded) continue;
+      const a = mv.toScreen(w.a), b = mv.toScreen(w.b); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+  }
+}
+
 class MapView {
   constructor(el, opts) {
     this.opts = opts;
-    this.layers = [...opts.layers, ...(opts.logistics ? logisticsLayers(opts.logistics) : []), ...(opts.players ? [playerLayer()] : [])];
+    this.layers = [...opts.layers, ...(opts.powerNet ? powerLayers(opts.powerNet) : []), ...(opts.logistics ? logisticsLayers(opts.logistics) : []),
+                   ...(opts.players ? [playerLayer()] : [])];
     this.points = {}; this.hoverId = null; this.focus = null; this.fitted = false;
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(opts.storeKey) || "{}"); } catch {}
@@ -182,6 +242,7 @@ class MapView {
     this.renderButtons();
     if (opts.players) Players.attach(this);
     if (opts.logistics) Logistics.attach(this);
+    if (opts.powerNet) PowerNet.attach(this);
     if (opts.animate) {   // continuous repaint, skipped while the map isn't on screen (hidden tab)
       const loop = () => { if (this.canvas.clientWidth) this.paint(); requestAnimationFrame(loop); };
       requestAnimationFrame(loop);
@@ -307,7 +368,8 @@ class MapView {
   }
   // frame the tab's chosen points (or the visible point layers); whole map until there's something to frame
   fit() {
-    const pts = this.opts.fitTo ? this.opts.fitTo() : this.framePoints().map(p => p.ip);
+    let pts = this.opts.fitTo ? this.opts.fitTo() : null;
+    if (!pts || !pts.length) pts = this.framePoints().map(p => p.ip);
     const glide = this.fitted;   // the very first framing is instant; later ones (Fit, filters) glide
     if (pts.length && this.canvas.clientWidth) { this.fitBox(pts, this.opts.fitTo ? 60 : 40, glide); this.fitted = true; } else this.fitWorld(glide);
     this.draw();
@@ -352,9 +414,13 @@ class MapView {
     ctx.clearRect(0, 0, r.width, r.height);
     if (mapImg.complete && mapImg.naturalWidth) {
       ctx.imageSmoothingEnabled = v.s < 1;
-      ctx.drawImage(mapImg, v.ox, v.oy, IMG * v.s, IMG * v.s);
+      // only the part of the map image that's on screen: drawing all 8192 px scaled up fails (blank) when zoomed in
+      const sx = Math.max(0, -v.ox / v.s), sy = Math.max(0, -v.oy / v.s);
+      const sw = Math.min(IMG - sx, r.width / v.s - Math.max(0, v.ox / v.s)), sh = Math.min(IMG - sy, r.height / v.s - Math.max(0, v.oy / v.s));
+      if (sw > 0 && sh > 0) ctx.drawImage(mapImg, sx, sy, sw, sh, v.ox + sx * v.s, v.oy + sy * v.s, sw * v.s, sh * v.s);
       ctx.fillStyle = `rgba(10,12,16,${this.opts.dim ?? 0.45})`; ctx.fillRect(0, 0, r.width, r.height);
     }
+    if (this.opts.powerNet) { ctx.save(); drawPowerLines(this, this.opts.powerNet); ctx.restore(); }
     if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.(), this.hoverNet); ctx.restore(); }   // under everything else
     if (this.opts.draw) { ctx.save(); this.opts.draw(ctx, performance.now(), this); ctx.restore(); }
     const marked = [], emph = [], top = [];
@@ -367,7 +433,7 @@ class MapView {
         if (s.x < -10 || s.y < -10 || s.x > r.width + 10 || s.y > r.height + 10) continue;
         if (p.id === this.hoverId || (this.focus && p.id === this.focus.id)) { marked.push([p, s, l, rad]); continue; }
         if (this.emphasis?.has(p.id)) { emph.push([p, s, l, rad]); continue; }
-        this.mark(p, s, l, rad, this.emphasis ? 0.25 : this.hoverId || this.focus ? 0.6 : 1);
+        this.mark(p, s, l, rad, this.opts.fade?.(p) ? 0.18 : this.emphasis ? 0.25 : this.hoverId || this.focus ? 0.6 : 1);
       }
     }
     for (const [p, s, l, rad] of emph) {   // emphasised points: full colour with a coloured ring, above the faded rest

@@ -314,6 +314,7 @@
     #tab-production .detail-lists { grid-template-columns: 1fr; }
     #tab-power .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); }
     #tab-power .w-chart { flex: 1.3; } #tab-power .w-batt { flex: 0 0 132px; } #tab-power .w-break { flex: 1; overflow-y: auto; }
+    #tab-power .w-layout { flex: 0 1 auto; max-height: 34%; }
     #tab-logistics .pgrid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
     #tab-logistics .lg-tiers { flex: 0 0 auto; max-height: 30%; } #tab-logistics .lg-nets { flex: 1; } #tab-logistics .lg-map { flex: 1; }
     #tab-power .w-map { flex: 1.9; } #tab-power .w-gens { flex: 1; }   /* big map on top, generators table under it */
@@ -384,6 +385,12 @@
   /* overview cards: richer content */
   .ov-card h3 { margin: 10px 0 4px; }
   .ov-card h3 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  /* power grid layout: sections (indented by --d) joined by switches */
+  .lay-node, .lay-switch { margin-left: calc(var(--d) * 22px); }
+  .lay-node { padding: 4px 0 4px 10px; border-left: 2px solid var(--line); }
+  .lay-items { display: flex; flex-wrap: wrap; gap: 3px 14px; font-size: 13px; }
+  .lay-switch { display: flex; align-items: center; gap: 6px; padding: 4px 0 2px; font-size: 13px; }
+  .lay-switch::before { content: "└"; color: var(--muted); }
   .sw-line { display: inline-block; width: 16px; height: 4px; border-radius: 2px; flex: none; }
   .stack { display: flex; gap: 2px; height: 10px; margin: 8px 0 4px; }
   .stack i { display: block; min-width: 3px; border-radius: 2px; }
@@ -543,8 +550,8 @@
         <span><i style="background:#5fcf80"></i>moving</span><span><i style="background:#5fa8ef"></i>docking</span>
         <span><i style="background:#c5cad3"></i>stopped</span><span><i style="background:#c39cf7"></i>driven</span>
         <span><i style="background:#ef5f5f"></i>error</span>
-        <span><i style="background:#f2c14e;border-radius:2px"></i>truck station</span>
-        <span><i style="background:#2ec4b6;border-radius:2px"></i>train station</span>
+        <span><i style="background:#f4f4f4;border-radius:2px"></i>truck station</span>
+        <span><i style="background:#c39cf7;border-radius:2px"></i>train station</span>
         <span><i style="background:#f06292;border-radius:2px"></i>drone port</span>
       </div>
     </div>
@@ -592,8 +599,10 @@ const STATUS_LABEL = { error: "Error", driven: "Driven", moving: "Moving", docki
 const STATUS_ORDER = { error: 0, driven: 1, moving: 2, docking: 3, stopped: 4 };
 const STATUS_COLOR = { moving: "#5fcf80", docking: "#5fa8ef", stopped: "#c5cad3", driven: "#c39cf7", error: "#ef5f5f" };
 // station squares use colors no vehicle status uses
-const STATION_COLOR = { truck: "#f2c14e", train: "#2ec4b6", drone: "#f06292" };
-const PATH_COLOR = { vehicle: "rgba(240,244,250,.85)", cart: "#ff8a1f" };
+// map palette: green/yellow/orange/blue/red are status (machines, vehicles); each other system has one hue —
+// roads white (truck stations white squares on them), cart paths tan, rail + train stations lavender, drones pink
+const STATION_COLOR = { truck: "#f4f4f4", train: "#c39cf7", drone: "#f06292" };
+const PATH_COLOR = { vehicle: "rgba(240,244,250,.85)", cart: "#d8b48a" };
 
 // ---- state ----------------------------------------------------------------
 let vehicles = [];
@@ -1221,11 +1230,11 @@ const onMap = () => visible().filter(v => layers["v:" + v.type]);
 // transport network layers, drawn by drawNetwork() on the Vehicles and Overview maps
 const networkLayers = () => [
   { key: "vehPaths", group: "Transport", label: "Vehicle paths", swatch: "background:#f0f4fa", count: () => paths.filter(p => !p.cart).length },
-  { key: "cartPaths", group: "Transport", label: "Cart paths", swatch: "background:#ff8a1f", count: () => paths.filter(p => p.cart).length },
+  { key: "cartPaths", group: "Transport", label: "Cart paths", swatch: "background:#d8b48a", count: () => paths.filter(p => p.cart).length },
   { key: "rails", group: "Transport", label: "Train tracks", swatch: "background:#c39cf7", count: () => rails.length },
   { key: "droneRoutes", group: "Transport", label: "Drone routes", swatch: "background:repeating-linear-gradient(90deg,#f06292 0 3px,transparent 3px 5px)", count: () => droneLinks().length },
-  { key: "truckStations", group: "Stations", label: "Truck stations", swatch: "background:#f2c14e;width:9px;height:9px;border-radius:2px", count: () => truckStations.length },
-  { key: "trainStations", group: "Stations", label: "Train stations", swatch: "background:#2ec4b6;width:9px;height:9px;border-radius:2px", count: () => trainStations.length },
+  { key: "truckStations", group: "Stations", label: "Truck stations", swatch: "background:#f4f4f4;width:9px;height:9px;border-radius:2px", count: () => truckStations.length },
+  { key: "trainStations", group: "Stations", label: "Train stations", swatch: "background:#c39cf7;width:9px;height:9px;border-radius:2px", count: () => trainStations.length },
   { key: "dronePorts", group: "Stations", label: "Drone ports", swatch: "background:#f06292;width:9px;height:9px;border-radius:2px", count: () => dronePorts.length },
 ];
 const vmap = new MapView($("vehMap"), {
@@ -1425,8 +1434,8 @@ function drawNetwork(mv, on, focus = {}) {
   ctx.font = "11px Segoe UI, sans-serif"; ctx.textBaseline = "middle";
   const fade = !!focus.stops, skip = s => focus.stops && focus.stops.has(s.Name);
   // each station type is its own layer; label priority when names collide: train, then truck, then drone
-  if (on("trainStations")) for (const s of trainStations) if (!skip(s)) drawStation(mv, s, STATION_COLOR.train, "#b5efe8", fade);
-  if (on("truckStations")) for (const s of truckStations) if (!skip(s)) drawStation(mv, s, STATION_COLOR.truck, "#f7e2a8", fade);
+  if (on("trainStations")) for (const s of trainStations) if (!skip(s)) drawStation(mv, s, STATION_COLOR.train, "#e2d4fb", fade);
+  if (on("truckStations")) for (const s of truckStations) if (!skip(s)) drawStation(mv, s, STATION_COLOR.truck, "#ffffff", fade);
   if (on("dronePorts")) for (const s of dronePorts) if (!skip(s)) drawStation(mv, s, STATION_COLOR.drone, "#f8c6d8", fade);
 }
 

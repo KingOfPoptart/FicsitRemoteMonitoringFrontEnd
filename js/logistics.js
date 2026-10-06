@@ -46,10 +46,10 @@ const LogisticsTab = (() => {
       <div class="tile"><div class="t-label">Junctions · pumps · valves</div><div class="t-val">${fmtNum(c.junctions || 0)} <small>· ${fmtNum(c.pumps || 0)} · ${fmtNum(c.valves || 0)}</small></div><div class="t-sub">on the pipes</div></div>
       <div class="tile click${ui.open ? " on" : ""}" data-open title="Show only networks with an end that isn't connected to anything"><div class="t-label">Unconnected ends</div><div class="t-val">${fmtNum(open)}</div>
         <div class="t-sub">in ${nets.filter(n => n.open).length} networks · click to list them</div></div>`;
-    $("lgKind").innerHTML = segControl("kind", [{ v: "all", label: "All", n: nets.length }, { v: "belt", label: "Belts", n: nets.filter(n => n.kind === "belt").length },
-      { v: "pipe", label: "Pipes", n: nets.filter(n => n.kind === "pipe").length }], o => ui.kind === o.v);
-    $("lgFeeds").innerHTML = segControl("feeds", [{ v: "all", label: "All" }, { v: "production", label: "Production", dot: "var(--s1)" },
-      { v: "power", label: "Power", dot: "var(--s4)" }, { v: "other", label: "Other" }], o => ui.feeds === o.v);
+    setSeg($("lgKind"), segControl("kind", [{ v: "all", label: "All", n: nets.length }, { v: "belt", label: "Belts", n: nets.filter(n => n.kind === "belt").length },
+      { v: "pipe", label: "Pipes", n: nets.filter(n => n.kind === "pipe").length }], o => ui.kind === o.v));
+    setSeg($("lgFeeds"), segControl("feeds", [{ v: "all", label: "All" }, { v: "production", label: "Production", dot: "var(--s1)" },
+      { v: "power", label: "Power", dot: "var(--s4)" }, { v: "other", label: "Other" }], o => ui.feeds === o.v));
     // length by tier
     const rows = [...[1, 2, 3, 4, 5, 6].map(t => ["belt", t]), ...[1, 2].map(t => ["pipe", t])].filter(([k, t]) => segs(k, t))
       .map(([k, t]) => { const list = (k === "belt" ? Logistics.belts : Logistics.pipes).filter(b => b.t === t);
