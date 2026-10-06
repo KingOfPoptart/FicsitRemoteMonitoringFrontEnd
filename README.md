@@ -43,7 +43,7 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - Collectibles found (Somersloops, Mercer Spheres, power slugs) and resource nodes tapped. Click one to find the ones still out there on the map.
 
 ### Everywhere
-- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline). The Production map shows the belts and pipes of production lines; the Overview and Logistics maps show them all.
+- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline). **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview and Logistics maps show them all.
 - Every table has its title and row count on the left, **Clear filters** on the right, and filters under the column headings.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
 - On a desktop browser each tab fits one screen; on phones the panels stack.
