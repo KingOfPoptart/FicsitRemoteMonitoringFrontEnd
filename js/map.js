@@ -319,7 +319,7 @@ class MapView {
     this.renderMenu(); this.menu.classList.add("open");
     const r = btn.getBoundingClientRect();
     this.menu.style.left = Math.max(8, Math.min(r.left, innerWidth - this.menu.offsetWidth - 8)) + "px";
-    this.menu.style.top = (r.bottom + 4) + "px";
+    placePopover(this.menu, btn);
   }
   closeMenu() { this.menu?.classList.remove("open"); }
   resize() {

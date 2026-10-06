@@ -56,6 +56,19 @@ function setSeg(el, html) {
   });
 }
 
+// Place a dropdown panel under its button, or above it when there isn't room below; the list scrolls if neither fits.
+function placePopover(pop, btn) {
+  const r = btn.getBoundingClientRect(), list = pop.querySelector(".pop-list");
+  if (list) list.style.maxHeight = "";
+  const below = innerHeight - r.bottom - 12, above = r.top - 12;
+  let h = pop.offsetHeight;
+  const up = h > below && above > below;
+  const room = up ? above : below;
+  if (h > room && list) { list.style.maxHeight = Math.max(80, list.clientHeight - (h - room)) + "px"; h = pop.offsetHeight; }
+  pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + "px";
+  pop.style.top = (up ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+}
+
 const SVGNS = "http://www.w3.org/2000/svg";
 const svgEl = (tag, attrs = {}, parent) => {
   const e = document.createElementNS(SVGNS, tag);
@@ -210,12 +223,17 @@ const pct = v => v == null || isNaN(v) ? "–" : `${Math.round(v)}%`;
 const bar = (frac, color) => `<span class="fill"><i style="width:${Math.max(0, Math.min(1, frac)) * 100}%;background:${color || "var(--accent)"}"></i></span>`;
 
 // sortable table with resizable columns — same header classes as the Vehicles table (sort-row, .rz handles).
-// cols = [{ key, label, title?, num?, val(row) -> sort value, cell(row) -> html, cls?, minW? (narrowest when fitting the panel) }]
+// cols = [{ key, label, title?, num?, val(row) -> sort value, cell(row) -> html, cls?, minW? (narrowest when fitting the panel),
+//           filter? }] — a filter row under the headers, like the Vehicles table:
+//   filter: { text: row => string, placeholder? }                         search box (all words must match)
+//   filter: { value: row => string | string[], all?: () => [{ value, label?, group? }], noun? }   multi-select dropdown;
+//           `all` lists every possible value (ones no row has are greyed out), otherwise the values present are listed
+// Options are counted against the other columns' filters. onFilter() is called after a filter changes.
 // Widths: measured from the content on first render, then fixed; drag a header edge to resize, double-click it
 // to fit the content. Sort and widths are remembered under storeKey.
 class DataTable {
-  constructor(el, cols, { sortKey, dir = 1, rowAttrs = () => "", empty = "Nothing to show.", storeKey, pin = () => 0 } = {}) {
-    Object.assign(this, { el, cols, rowAttrs, empty, storeKey, pin });
+  constructor(el, cols, { sortKey, dir = 1, rowAttrs = () => "", empty = "Nothing to show.", storeKey, pin = () => 0, onFilter } = {}) {
+    Object.assign(this, { el, cols, rowAttrs, empty, storeKey, pin, onFilter });
     const load = k => { try { return k && JSON.parse(localStorage.getItem(k)); } catch { return null; } };
     const saved = load(storeKey);
     this.sort = saved && cols.some(c => c.key === saved.key) ? saved : { key: sortKey || cols[0].key, dir };
@@ -224,6 +242,8 @@ class DataTable {
     el.innerHTML = `<table class="dt"><colgroup></colgroup><thead><tr class="sort-row"></tr></thead><tbody></tbody></table>`;
     this.table = el.querySelector("table"); this.colgroup = el.querySelector("colgroup");
     this.head = el.querySelector("thead tr"); this.body = el.querySelector("tbody");
+    this.f = load(storeKey && storeKey + ".f") || {};   // column filters: key -> text or [values]
+    if (cols.some(c => c.filter)) this.buildFilters();
     this.head.addEventListener("click", e => {
       const th = e.target.closest("th[data-key]"); if (!th || this.justResized || e.target.closest(".rz")) return;
       const k = th.dataset.key;
@@ -246,6 +266,57 @@ class DataTable {
     });
     this.head.addEventListener("dblclick", e => { const h = e.target.closest(".rz"); if (h) this.fitColumn(h.dataset.rz); });
     new ResizeObserver(() => { if (this.measured && this.el.clientWidth) this.applyWidths(); }).observe(el);
+  }
+  // the filter row is built once (not on every refresh), so typing and clicking in it is never interrupted
+  buildFilters() {
+    const tr = document.createElement("tr"); tr.className = "filter-row"; this.head.after(tr); this.filterRow = tr;
+    this.pickers = [];
+    for (const c of this.cols) {
+      const th = document.createElement("th"); tr.appendChild(th);
+      if (!c.filter) continue;
+      if (c.filter.text) {
+        const inp = document.createElement("input"); inp.className = "f-input"; inp.placeholder = c.filter.placeholder || "search";
+        inp.value = this.f[c.key] || ""; th.appendChild(inp);
+        inp.addEventListener("input", () => { this.f[c.key] = inp.value; this.filtersChanged(); });
+        c._input = inp;
+      } else {
+        const btn = document.createElement("button"); btn.className = "f-multi"; th.appendChild(btn);
+        const vals = r => { const v = c.filter.value(r); return Array.isArray(v) ? v : [v]; };
+        this.pickers.push(new MultiSelect(btn, { noun: c.filter.noun || "values", search: "Search…",
+          options: () => {
+            const rows = (this.rows || []).filter(r => this.passes(r, c.key)), n = new Map();
+            for (const r of rows) for (const v of vals(r)) if (v != null && v !== "") n.set(v, (n.get(v) || 0) + 1);
+            const all = c.filter.all ? c.filter.all() : [...n.keys()].map(value => ({ value }));
+            return all.map(o => ({ value: o.value, label: o.label || esc(o.value), group: o.group, n: n.get(o.value) || "", empty: !n.get(o.value) }));
+          },
+          selected: () => this.f[c.key] || [], onChange: v => { this.f[c.key] = v; this.filtersChanged(); } }));
+      }
+    }
+  }
+  filtersChanged() {
+    try { this.storeKey && localStorage.setItem(this.storeKey + ".f", JSON.stringify(this.f)); } catch {}
+    this.render(this.rows); this.onFilter && this.onFilter();
+  }
+  // does a row pass every column filter (except `skip`, used to count a dropdown's own options)?
+  passes(r, skip) {
+    for (const c of this.cols) {
+      if (!c.filter || c.key === skip) continue;
+      const f = this.f[c.key];
+      if (c.filter.text) {
+        if (f && !f.toLowerCase().split(/\s+/).filter(Boolean).every(w => String(c.filter.text(r)).toLowerCase().includes(w))) return false;
+      } else if (f && f.length) {
+        const v = c.filter.value(r), vs = Array.isArray(v) ? v : [v];
+        if (!vs.some(x => f.includes(x))) return false;
+      }
+    }
+    return true;
+  }
+  get filtered() { return (this.rows || []).filter(r => this.passes(r)); }
+  hasFilters() { return Object.values(this.f).some(v => Array.isArray(v) ? v.length : v); }
+  clearFilters() {
+    this.f = {};
+    for (const c of this.cols) if (c._input) c._input.value = "";
+    this.filtersChanged();
   }
   saveWidths() { try { this.storeKey && localStorage.setItem(this.storeKey + ".w", JSON.stringify(this.widths)); } catch {} }
   // natural (unwrapped) header+content widths, measured once there are rows and the table is visible
@@ -285,7 +356,7 @@ class DataTable {
     this.rows = rows;
     this.head.innerHTML = this.cols.map(c => `<th data-key="${c.key}" class="${c.num ? "num" : ""}${this.sort.key === c.key ? " sorted" : ""}" title="${esc(c.title ? `${c.label}: ${c.title}` : c.label)}">${c.label}${this.sort.key === c.key ? `<span class="arrow">${this.sort.dir > 0 ? "▲" : "▼"}</span>` : ""}<span class="rz" data-rz="${c.key}" title="Drag to resize · double-click to fit"></span></th>`).join("");
     const col = this.cols.find(c => c.key === this.sort.key) || this.cols[0];
-    const sorted = [...rows].sort((a, b) => {
+    const sorted = rows.filter(r => this.passes(r)).sort((a, b) => {
       const va = col.val(a), vb = col.val(b);
       const r = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true });
       return this.pin(a) - this.pin(b) || r * this.sort.dir || String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { numeric: true });
@@ -294,6 +365,7 @@ class DataTable {
       || `<tr><td colspan="${this.cols.length}" class="muted">${this.empty}</td></tr>`;
     if (!this.measured && rows.length && this.el.clientWidth) this.measure();
     if (this.measured) this.applyWidths();
+    if (this.pickers) for (const p of this.pickers) p.refresh();
   }
 }
 
@@ -331,11 +403,9 @@ class MultiSelect {
     this.pop.innerHTML = `<input class="f-input pop-search" placeholder="${esc(this.search)}"><div class="pop-list"></div>
       <div class="pop-foot"><button data-act="clear">Clear</button><button data-act="done">Done</button></div>`;
     this.pop.classList.add("open");
-    const r = this.btn.getBoundingClientRect();
-    this.pop.style.left = Math.max(8, Math.min(r.left, innerWidth - this.pop.offsetWidth - 8)) + "px";
-    this.pop.style.top = (r.bottom + 4) + "px";
     this.renderList();
-    this.pop.querySelector(".pop-search").focus();
+    placePopover(this.pop, this.btn);   // after the list is filled in, so its real height is known
+    this.pop.querySelector(".pop-search").focus({ preventScroll: true });
   }
   close() { this.pop.classList.remove("open"); }
   renderList() {
@@ -349,6 +419,18 @@ class MultiSelect {
       else if (!o.empty && o.group && o.group !== lastGroup) { html += `<div class="pop-group">${esc(o.group)}</div>`; lastGroup = o.group; }
       html += `<label class="${o.empty ? "empty" : ""}"><input type="checkbox" value="${esc(o.value)}"${sel.has(o.value) ? " checked" : ""}>${o.label}<span class="n">${o.n ?? ""}</span></label>`;
     }
-    this.pop.querySelector(".pop-list").innerHTML = html || `<div class="muted" style="padding:6px 8px">No matches</div>`;
+    html = html || `<div class="muted" style="padding:6px 8px">No matches</div>`;
+    // while it's open the page keeps refreshing: update the existing rows in place when the same options are listed,
+    // so a click that lands mid-refresh isn't lost (and the list doesn't scroll back)
+    const list = this.pop.querySelector(".pop-list"), t = document.createElement("template"); t.innerHTML = html;
+    const key = el => [...el.children].map(c => c.tagName + (c.querySelector("input")?.value || c.textContent)).join("|");
+    if (list.children.length && key(list) === key(t.content)) {
+      [...t.content.children].forEach((c, i) => {
+        const o = list.children[i];
+        if (o.className !== c.className) o.className = c.className;
+        const n = o.querySelector(".n"), cn = c.querySelector(".n"); if (n && cn && n.textContent !== cn.textContent) n.textContent = cn.textContent;
+        const inp = o.querySelector("input"), ci = c.querySelector("input"); if (inp && ci) inp.checked = ci.checked;
+      });
+    } else list.innerHTML = html;
   }
 }

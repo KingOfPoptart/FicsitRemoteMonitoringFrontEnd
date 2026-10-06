@@ -17,7 +17,7 @@ const Power = (() => {
   let groups = [], gens = [], usage = [], hist = null, timer = null, detailTimer = null, histTimer = null, netTimer = null, loaded = false;
   const ui = (() => { try { return { range: 60, grid: "all", gq: "", ...JSON.parse(localStorage.getItem("pw.ui2") || "{}") }; } catch { return { range: 60, grid: "all", gq: "" }; } })();
   const saveUi = () => { try { localStorage.setItem("pw.ui2", JSON.stringify(ui)); } catch {} };
-  let chart, battChart, genTable, swTable, map, selGen = null, selSw = null, sideShown = null;
+  let chart, battChart, unitTable, map, selGen = null, selSw = null, sideShown = null;
   const root = $("tab-power");
   const mw = v => `${v < 0 ? "−" : ""}${fmtNum(Math.abs(v), Math.abs(v) < 100 ? 1 : 0)} <small>MW</small>`;
 
@@ -55,7 +55,14 @@ const Power = (() => {
       .reduce((a, u) => (a[u.Name] = (a[u.Name] || 0) + 1, a), {})).sort((a, b) => b[1] - a[1])[0];
     return `No generators${top ? ` · ${top[0]}` : ""}`;
   }
-  const mwPair = g => `${fmtNum(g.PowerConsumed)}/${fmtNum(g.PowerProduction)} MW`;
+  // a grid's max: FRM's capacity, or (when FRM reports 0, e.g. a no-power-cost world) its generators' capacity
+  const capOf = g => g.PowerCapacity || (g.all ? groups.reduce((a, x) => a + capOf(x), 0) : gens.filter(x => onGrid(x.pi, g)).reduce((a, x) => a + x.cap, 0));
+  const hasGens = g => gens.some(x => onGrid(x.pi, g));
+  const mwPair = g => `${fmtNum(g.PowerConsumed)}/${fmtNum(capOf(g))} MW`;   // used / max
+  // grids with generators first (biggest first), grids without any always last
+  function sortGroups() {
+    groups.sort((a, b) => (hasGens(b) - hasGens(a)) || capOf(b) - capOf(a) || a.CircuitGroupID - b.CircuitGroupID);
+  }
   // numbered only if two grids would otherwise read exactly the same
   function gridName(g) {
     if (groups.length <= 1) return `Main grid ${mwPair(g)}`;
@@ -88,7 +95,8 @@ const Power = (() => {
 
   async function poll() {
     try {
-      groups = (await getJSON("getPower")).sort((a, b) => b.PowerCapacity - a.PowerCapacity || a.CircuitGroupID - b.CircuitGroupID);
+      groups = await getJSON("getPower");
+      sortGroups();
       loaded = true; setConn(true); render();
     } catch (e) { setConn(false, e.message); }
   }
@@ -96,7 +104,7 @@ const Power = (() => {
     const [g, u] = await Promise.allSettled([getJSON("getGenerators"), getJSON("getPowerUsage")]);
     if (g.status === "fulfilled") gens = g.value.map(fromGen);
     if (u.status === "fulfilled") usage = u.value;
-    render();
+    sortGroups(); render();
   }
 
   // ---- power switches: what's on each side --------------------------------------------------
@@ -175,22 +183,23 @@ const Power = (() => {
 
   // FRM reports 0 capacity while power still flows (seen with the "no power cost" sandbox setting): treat it as
   // unknown, not as an overload
-  const capUnknown = g => !g.PowerCapacity && g.PowerProduction > 0 && !g.FuseTriggered;
+  // unknown only if neither FRM nor the generators give a capacity (e.g. a grid with no generators in such a world)
+  const capUnknown = g => !capOf(g) && g.PowerProduction > 0 && !g.FuseTriggered;
   function renderTiles(g) {
-    const unk = capUnknown(g);
-    const load = g.PowerCapacity ? g.PowerConsumed / g.PowerCapacity : 0;
+    const unk = capUnknown(g), cap = capOf(g);
+    const load = cap ? g.PowerConsumed / cap : 0;
     const loadColor = load > 1 ? "var(--bad)" : load > 0.9 ? "var(--warn)" : "var(--ok)";
-    const headroom = unk ? null : g.PowerCapacity - g.PowerConsumed;
-    const maxOver = !unk && g.PowerMaxConsumed > g.PowerCapacity;
+    const headroom = unk ? null : cap - g.PowerConsumed;
+    const maxOver = !unk && g.PowerMaxConsumed > cap;
     const hasBatt = g.BatteryCapacity > 0;
     const flow = g.BatteryInput - g.BatteryOutput;
     $("wTiles").innerHTML = `
       <div class="tile click" data-jump="wUseCard" title="Show what's using the power"><div class="t-label">Consumption</div><div class="t-val">${mw(g.PowerConsumed)}</div>
         <div class="t-sub">${unk ? "capacity not reported" : `${bar(load, loadColor)}${pct(load * 100)} of capacity`}</div></div>
       <div class="tile click" data-jump="wGenCard" title="Show what's generating the power"><div class="t-label">Production</div><div class="t-val">${mw(g.PowerProduction)}</div><div class="t-sub">what generators put out now</div></div>
-      <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Capacity</div><div class="t-val">${unk ? `<span class="muted">–</span>` : mw(g.PowerCapacity)}</div><div class="t-sub">${unk ? "FRM reports 0 here (e.g. a no-power-cost world)" : "if every fuelled generator ran flat out"}</div></div>
+      <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Capacity</div><div class="t-val">${unk ? `<span class="muted">–</span>` : mw(cap)}</div><div class="t-sub">${unk ? "no generators, and FRM reports 0" : g.PowerCapacity ? "if every fuelled generator ran flat out" : "the generators' own capacity (FRM reports 0)"}</div></div>
       <div class="tile click${maxOver ? " warn" : ""}" data-jump="wUseCard" title="Show max consumption by building type (lighter bars)"><div class="t-label">Max consumption</div><div class="t-val">${mw(g.PowerMaxConsumed)}</div>
-        <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - g.PowerCapacity)} MW over capacity if everything runs at once</span>` : unk ? "if every machine ran at once" : "if every machine ran at once — fits"}</div></div>
+        <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - cap)} MW over capacity if everything runs at once</span>` : unk ? "if every machine ran at once" : "if every machine ran at once — fits"}</div></div>
       <div class="tile click${headroom < 0 ? " bad" : ""}" data-jump="wChartCard" title="Show power over time"><div class="t-label">Headroom</div><div class="t-val">${headroom == null ? `<span class="muted">–</span>` : mw(headroom)}</div>
         <div class="t-sub">${headroom == null ? "unknown without capacity" : headroom >= 0 ? "capacity − consumption" : hasBatt && g.BatteryPercent > 0 ? `<span class="bad-text">⚠ over capacity — batteries are covering it</span>` : `<span class="bad-text">⚠ over capacity</span>`}</div></div>
       <div class="tile click" data-jump="${hasBatt ? "wBattCard" : "wChartCard"}" title="Show battery charge over time"><div class="t-label">Batteries</div>${hasBatt ? `<div class="t-val">${pct(g.BatteryPercent)} <small>of ${fmtNum(g.BatteryCapacity)} MWh</small></div>
@@ -207,9 +216,9 @@ const Power = (() => {
   function renderGrids() {
     $("wGridGroup").style.display = groups.length > 1 ? "" : "none";   // one grid: nothing to choose
     const all = allGrids();
-    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: `All grids <span class="n">${mwPair(all)}</span>` },
+    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: `All grids <span class="n">${mwPair(all)}</span>`, title: "used / max (generator capacity)" },
       ...groups.map(g => ({ v: String(g.CircuitGroupID), label: `${g.FuseTriggered ? "⚠ " : ""}${esc(gridName(g))}`,
-        title: "consumption / production" }))], o => o.v === String(grid().CircuitGroupID)));
+        title: "used / max (generator capacity)" }))], o => o.v === String(grid().CircuitGroupID)));
   }
 
   // ---- grid layout: start at the circuit with the generators and follow the switches outward
@@ -296,14 +305,7 @@ const Power = (() => {
     const unpowered = usage.filter(u => u.PowerInfo && u.PowerInfo.CircuitID === -1 && /Build_(Constructor|Smelter|Assembler|Foundry|Manufacturer|Refinery|Packager|Blender|HadronCollider|Converter|QuantumEncoder|Miner|WaterPump|OilPump|FrackingExtractor)/.test(u.ClassName || u.ID)).length;
     $("wUnpowered").textContent = unpowered ? `⚠ ${unpowered} production building${unpowered === 1 ? " is" : "s are"} not connected to any grid.` : "";
 
-    const q = ui.gq.trim().toLowerCase();
-    genTable.render(gens.filter(x => onGrid(x.pi, g) && (!q || `${x.type} ${G_STATUS[x.status].label} ${x.fuel?.Name || ""}`.toLowerCase().includes(q))));
-    $("wGenCount").textContent = ui.list === "switches" ? "" : `${gens.filter(x => onGrid(x.pi, g)).length} generators`;
-    const sws = switchRows().filter(r => g.all || r.grid === g);
-    setSeg($("wListSeg"), segControl("list", [{ v: "gens", label: "Generators", n: gens.filter(x => onGrid(x.pi, g)).length },
-      { v: "switches", label: "Switches", n: sws.length }], o => (ui.list || "gens") === o.v));
-    $("wGens").hidden = ui.list === "switches"; $("wSws").hidden = ui.list !== "switches";
-    swTable.render(sws.filter(r => !q || `${r.name} ${r.feed.names.map(n => n[0]).join(" ")} ${r.ctrl.names.map(n => n[0]).join(" ")}`.toLowerCase().includes(q)));
+    renderUnits(g);
     if (sideShown) showSides(switchRows().find(r => r.id === sideShown.id) || null);   // keep the map highlight current
     const pt = (u, extra) => u.location && { id: u.ID || u.id, x: u.location.x, y: u.location.y, ...extra };
     map.setPoints("gens", gens.filter(x => x.raw.location).map(x => pt(x.raw, { circuits: [x.pi?.CircuitID], color: G_STATUS[x.status].color,
@@ -343,6 +345,28 @@ const Power = (() => {
     setSeg($("wRange"), segControl("range", RANGES.map(([l, v]) => ({ v, label: l })), o => ui.range === o.v));
   }
 
+
+  // ---- one table for generators and switches ----------------------------------------------------
+  // Filters: Type (every generator type in the game + both switch kinds; ones you don't have are greyed), Status,
+  // and a search box; the grid picker at the top applies too.
+  const GEN_TYPES = ["Biomass Burner", "Coal-Powered Generator", "Fuel-Powered Generator", "Geothermal Generator", "Nuclear Power Plant", "Alien Power Augmenter"];
+  const SW_TYPES = ["Power Switch", "Priority Power Switch"];
+  const SW_STATUS = { on: { label: "On", color: "var(--ok)", title: "Switch is on" }, off: { label: "Off", color: "var(--bad)", title: "Switch is off" } };
+  const unitStatus = r => r.kind === "gen" ? G_STATUS[r.status] : SW_STATUS[r.status];
+  function unitRows() {
+    return [...gens.map(x => ({ ...x, kind: "gen", name: x.type, gridG: groups.find(gr => onGrid(x.pi, gr)) })),
+            ...switchRows().map(r => ({ ...r, kind: "sw", type: r.priority >= 0 ? "Priority Power Switch" : "Power Switch", status: r.s.IsOn ? "on" : "off", gridG: r.grid }))];
+  }
+  function renderUnits(g) {
+    unitTable.render(unitRows().filter(r => g.all || r.gridG === g));
+    unitCount();
+  }
+  function unitCount() {
+    const shown = unitTable.filtered, nGen = shown.filter(r => r.kind === "gen").length, nSw = shown.length - nGen;
+    $("wUnitCount").textContent = `${nGen} generator${nGen === 1 ? "" : "s"} · ${nSw} switch${nSw === 1 ? "" : "es"}`;
+    $("wUnitClear").disabled = !unitTable.hasFilters();
+  }
+
   // ---- markup + events ---------------------------------------------------------------------------
   function init() {
     root.innerHTML = `
@@ -354,6 +378,12 @@ const Power = (() => {
         <div class="pcol">
           <section class="card w-chart" id="wChartCard"><div class="card-head"><h2>Power over time</h2><span class="hint">like the in-game power graph · hover for values</span></div><div id="wChart"></div></section>
           <section class="card w-batt" id="wBattCard"><div class="card-head"><h2>Battery charge</h2><span class="hint">% of total Power Storage</span></div><div id="wBatt"></div></section>
+          <section class="card w-gens" id="wGensCard"><div class="card-head"><h2>Generators &amp; switches</h2><span class="hint" id="wUnitCount"></span>
+              <button class="b" id="wUnitClear">Clear filters</button></div>
+            <div class="table-wrap dtw tall" id="wUnits"></div></section>
+        </div>
+        <div class="pcol">
+          <section class="card w-map"><div id="wMap"></div></section>
           <section class="card w-layout" id="wLayoutCard"><div class="card-head"><h2>Grid layout</h2><span class="hint" id="wLayoutHint"></span></div>
             <div class="card-body" id="wLayout"></div></section>
           <section class="card w-break"><div class="break-cols">
@@ -361,39 +391,44 @@ const Power = (() => {
             <div id="wUseCard"><div class="card-head"><h2>Consumption</h2><span class="hint">by building type · lighter bar = max</span></div><div id="wUse" class="hbars"></div>
               <p class="warn-text small" id="wUnpowered"></p></div></div></section>
         </div>
-        <div class="pcol">
-          <section class="card w-map"><div id="wMap"></div></section>
-          <section class="card w-gens" id="wGensCard"><div class="card-head"><span id="wListSeg"></span><span class="hint" id="wGenCount"></span>
-            <input class="f-input search sm" id="wGenSearch" placeholder="Filter: type, status, fuel, name…" value="${esc(ui.gq)}"></div>
-            <div class="table-wrap dtw tall" id="wGens"></div><div class="table-wrap dtw tall" id="wSws" hidden></div></section>
-        </div>
       </div>`;
     chart = new LineChart($("wChart"), { height: 260, unit: "MW", fill: true });
     battChart = new LineChart($("wBatt"), { height: 120, unit: "%", fmt: v => fmtNum(v, 1), fill: true });
-    swTable = new DataTable($("wSws"), [
-      { key: "name", label: "Switch", minW: 130, val: r => r.name,
-        cell: r => `<span class="with-icon">${icon(r.priority >= 0 ? "Priority Power Switch" : "Power Switch")}<span>${esc(r.name)}<br><span class="muted sub">${r.priority >= 0 ? "priority switch" : "power switch"}</span></span></span>` },
-      { key: "on", label: "State", minW: 66, val: r => r.s.IsOn ? 0 : 1,
-        cell: r => `<span class="pill" style="color:${r.s.IsOn ? "var(--ok)" : "var(--bad)"};background:color-mix(in srgb, ${r.s.IsOn ? "var(--ok)" : "var(--bad)"} 14%, transparent)">${r.s.IsOn ? "on" : "off"}</span>` },
-      { key: "prio", label: "Priority", minW: 86, title: "Priority group. When power runs short, switches turn off in order: Undefined first, then 8, 7 … 1 last",
-        val: r => shedRank(r.priority), cell: r => r.priority < 0 ? `<span class="muted">–</span>` : `${prioLabel(r.priority)}<br><span class="muted sub">${r.priority === 0 ? "turns off first" : r.priority === 1 ? "turns off last" : "group " + r.priority}</span>` },
-      { key: "feed", label: "Fed from", minW: 130, title: "The side the power comes from (blue on the map)", val: r => r.feed.out, cell: r => sideText(r.feed) },
-      { key: "ctrl", label: "Controls", minW: 140, title: "What turning this switch off cuts off (orange on the map)", val: r => r.ctrl.users.length, cell: r => sideText(r.ctrl) },
-      { key: "mw", label: "MW", num: true, minW: 64, title: "Power going through the switch now (max if everything behind it ran)", val: r => r.ctrl.use,
-        cell: r => `${fmtNum(r.ctrl.use, 1)}<br><span class="muted sub">max ${fmtNum(r.ctrl.max, 0)}</span>` },
-    ], { sortKey: "prio", storeKey: "pw.swSort", empty: "No power switches on this grid.",
-         rowAttrs: r => `data-sw="${esc(r.id)}" class="${r.id === selSw ? "sel" : ""}"` });
-    genTable = new DataTable($("wGens"), [
-      { key: "type", label: "Generator", val: r => r.type, cell: r => `<span class="with-icon">${icon(r.type)}<span>${esc(r.type)}<br><span class="muted sub">${esc(shortId(r.id))}</span></span></span>` },
-      { key: "status", label: "Status", val: r => Object.keys(G_STATUS).indexOf(r.status), cell: r => pill(r.status) },
-      { key: "out", label: "Output", num: true, title: "MW now / capacity", val: r => r.out, cell: r => `${bar(r.cap ? r.out / r.cap : 0, "var(--s1)")}${fmtNum(r.out, 1)} <span class="muted">/ ${fmtNum(r.cap, 0)}</span>` },
-      { key: "clock", label: "Clock", num: true, val: r => r.clock, cell: r => `${pct(r.clock)}${r.shards ? `<br><span class="muted sub">◆${r.shards}</span>` : ""}` },
-      { key: "fuel", label: "Fuel", val: r => r.fuel ? r.fuel.Amount : -1,
-        cell: r => r.fuel ? `<span class="with-icon">${icon(r.fuel.Name, "icon sm")}<span>${fmtRate(r.fuel.Amount)} ${esc(r.fuel.Name)}${r.burn ? `<br><span class="muted sub">burning ${fmtRate(r.burn)}/min</span>` : ""}</span></span>` : `<span class="muted">–</span>` },
-      { key: "sup", label: "Water", num: true, title: "Supplemental resource tank (coal and nuclear need water)", val: r => r.sup ? r.sup.PercentFull : -1,
-        cell: r => r.sup ? `${bar(r.sup.PercentFull / 100, "var(--s1)")}${pct(r.sup.PercentFull)}<br><span class="muted sub">${fmtRate(r.sup.CurrentConsumed)} m³/min</span>` : `<span class="muted">–</span>` },
-    ], { sortKey: "status", storeKey: "pw.genSort", rowAttrs: r => `data-gid="${esc(r.id)}" class="${r.id === selGen ? "sel" : ""}"` });
-    const hl = id => { for (const tr of $("wGens").querySelectorAll("tr[data-gid]")) tr.classList.toggle("hl", tr.dataset.gid === id); };
+    const pillFor = r => { const st = unitStatus(r); return `<span class="pill" style="color:${st.color};background:color-mix(in srgb, ${st.color} 14%, transparent)" title="${st.title}">${st.label}</span>`; };
+    unitTable = new DataTable($("wUnits"), [
+      { key: "name", label: "Name", minW: 140, val: r => (r.kind === "gen" ? "0" : "1") + r.name,
+        filter: { value: r => r.type, noun: "types",
+                  all: () => [...GEN_TYPES.map(t => ({ value: t, label: icon(t, "icon sm") + esc(t), group: "Generators" })),
+                              ...SW_TYPES.map(t => ({ value: t, label: icon(t, "icon sm") + esc(t), group: "Switches" }))] },
+        cell: r => `<span class="with-icon">${icon(r.type)}<span>${esc(r.name)}<br><span class="muted sub">${r.kind === "gen" ? esc(shortId(r.id)) : r.priority >= 0 ? "priority switch" : "power switch"}</span></span></span>` },
+      { key: "status", label: "Status", minW: 88,
+        filter: { value: r => unitStatus(r).label, noun: "statuses",
+                  all: () => [...Object.values(G_STATUS).map(v => ({ value: v.label, group: "Generators", label: `<i class="sw" style="background:${v.color}"></i> ${v.label}` })),
+                              ...Object.values(SW_STATUS).map(v => ({ value: v.label, group: "Switches", label: `<i class="sw" style="background:${v.color}"></i> ${v.label}` }))] },
+        val: r => r.kind === "gen" ? Object.keys(G_STATUS).indexOf(r.status) : 10 + (r.status === "off"), cell: pillFor },
+      { key: "grid", label: "Grid", minW: 76, filter: { value: r => r.gridG ? baseName(r.gridG) : "not connected", noun: "grids" }, val: r => r.gridG ? baseName(r.gridG) : "", cell: r => r.gridG ? esc(baseName(r.gridG)) : `<span class="muted">–</span>` },
+      { key: "mw", label: "MW", num: true, minW: 104,
+        filter: { value: r => (r.kind === "gen" ? r.out : r.ctrl.use) > 0 ? "Power flowing" : "None (0 MW)", noun: "MW",
+                  all: () => [{ value: "Power flowing" }, { value: "None (0 MW)" }] }, title: "Generators: output now / capacity. Switches: power going through now / max",
+        val: r => r.kind === "gen" ? r.out : r.ctrl.use,
+        cell: r => r.kind === "gen" ? `${fmtNum(r.out, 1)} <span class="muted">/ ${fmtNum(r.cap, 0)}</span><br>${bar(r.cap ? r.out / r.cap : 0, "var(--s1)")}`
+                                    : `${fmtNum(r.ctrl.use, 1)} <span class="muted">/ ${fmtNum(r.ctrl.max, 0)}</span>` },
+      { key: "detail", label: "Fuel · controls", minW: 200,
+        filter: { placeholder: "fuel, building…", text: r => r.kind === "gen" ? `${r.fuel?.Name || ""} ${r.sup ? "water" : ""}`
+                  : `${r.feed.names.map(n => n[0]).join(" ")} ${r.ctrl.names.map(n => n[0]).join(" ")}` }, title: "Generators: fuel and water. Switches: what they're fed from → what they control",
+        val: r => r.kind === "gen" ? (r.fuel ? r.fuel.Amount : -1) : r.ctrl.users.length,
+        cell: r => r.kind === "gen"
+          ? (r.fuel ? `<span class="with-icon">${icon(r.fuel.Name, "icon sm")}<span>${fmtRate(r.fuel.Amount)} ${esc(r.fuel.Name)}${r.burn ? ` · burning ${fmtRate(r.burn)}/min` : ""}${r.sup ? `<br><span class="muted sub">water ${pct(r.sup.PercentFull)} · ${fmtRate(r.sup.CurrentConsumed)} m³/min</span>` : ""}</span></span>` : `<span class="muted">–</span>`)
+          : `<span class="sw-feed">fed from: ${sideText(r.feed).replace(/<br>/g, ", ")}</span><br><span class="sw-ctrl">controls: ${sideText(r.ctrl).replace(/<br>/g, ", ")}</span>` },
+      { key: "prio", label: "Clock · priority", minW: 92,
+        filter: { value: r => r.kind === "gen" ? `Clock ${Math.round(r.clock)}%` : r.priority < 0 ? "Not a priority switch" : `Priority ${prioLabel(r.priority)}`, noun: "values" }, title: "Generators: clock speed and power shards. Priority switches: group (Undefined turns off first, then 8 … 1)",
+        val: r => r.kind === "gen" ? r.clock : 1000 + shedRank(r.priority),
+        cell: r => r.kind === "gen" ? `${pct(r.clock)}${r.shards ? ` <span class="muted sub">◆${r.shards}</span>` : ""}`
+                 : r.priority < 0 ? `<span class="muted">–</span>` : `${prioLabel(r.priority)}<br><span class="muted sub">${r.priority === 0 ? "turns off first" : r.priority === 1 ? "turns off last" : "group " + r.priority}</span>` },
+    ], { sortKey: "status", storeKey: "pw.unitSort", empty: "Nothing matches the filters.", onFilter: () => unitCount(),
+         rowAttrs: r => r.kind === "gen" ? `data-gid="${esc(r.id)}" class="${r.id === selGen ? "sel" : ""}"` : `data-sw="${esc(r.id)}" class="${r.id === selSw ? "sel" : ""}"` });
+
+    const hl = id => { for (const tr of $("wUnits").querySelectorAll("tr[data-gid], tr[data-sw]")) tr.classList.toggle("hl", (tr.dataset.gid || tr.dataset.sw) === id); };
     map = new MapView($("wMap"), {
       // the selected grid only: its generators and consumers, and its part of the power network
       storeKey: "pw.map2", layerMenu: true, players: true, powerNet: () => true, layers: [
@@ -407,42 +442,41 @@ const Power = (() => {
         return `<div class="row"><span>${esc(p.label)}</span></div>`; },
       hint: "hover a switch to see what's on each side · click a row to find it",
       onHover: p => {
-        hl(p && p.id); if (p) scrollRowIntoView($("wGens").querySelector(`tr[data-gid="${CSS.escape(p.id)}"]`));
+        hl(p && p.id); if (p) scrollRowIntoView($("wUnits").querySelector(`tr[data-gid="${CSS.escape(p.id)}"], tr[data-sw="${CSS.escape(p.id)}"]`));
         if (p && p.layer === "switches") { const r = switchRows().find(x => x.id === p.id); if (r) showSides(r); }
         else if (!p && sideShown && (!selSw || sideShown.id !== selSw)) showSides(selSw ? switchRows().find(x => x.id === selSw) : null);
       },
     });
     // switches: hover a row = show its two sides on the map; click = keep them shown and find it
     const swRow = id => switchRows().find(r => r.id === id);
-    $("wSws").addEventListener("mousemove", e => {
-      const tr = e.target.closest("tr[data-sw]"), r = tr && swRow(tr.dataset.sw);
-      if (r) { showSides(r); showPopAt(switchPop(r), e.clientX, e.clientY); } else hideCargoPop();
+    // hover a row: a generator lights up on the map; a switch shows its two sides. Click: find / keep it shown
+    $("wUnits").addEventListener("mousemove", e => {
+      const tr = e.target.closest("tr[data-gid], tr[data-sw]");
+      if (tr && tr.dataset.sw) { const r = swRow(tr.dataset.sw); map.highlight(null); if (r) { showSides(r); showPopAt(switchPop(r), e.clientX, e.clientY); } return; }
+      hideCargoPop(); map.highlight(tr ? tr.dataset.gid : null);
+      if (sideShown && (!selSw || sideShown.id !== selSw)) showSides(selSw ? swRow(selSw) : null);
     });
-    $("wSws").addEventListener("mouseleave", () => { hideCargoPop(); showSides(selSw ? swRow(selSw) : null); });
-    $("wSws").addEventListener("click", e => {
-      const tr = e.target.closest("tr[data-sw]"); if (!tr) return;
-      selSw = selSw === tr.dataset.sw ? null : tr.dataset.sw;
-      for (const t of $("wSws").querySelectorAll("tr.sel")) t.classList.remove("sel");
-      if (selSw) { tr.classList.add("sel"); showSides(swRow(selSw)); map.fitEmphasis(); } else { showSides(null); map.fit(); }
+    $("wUnits").addEventListener("mouseleave", () => { hideCargoPop(); map.highlight(null); showSides(selSw ? swRow(selSw) : null); });
+    $("wUnits").addEventListener("click", e => {
+      const tr = e.target.closest("tr[data-gid], tr[data-sw]"); if (!tr) return;
+      for (const t of $("wUnits").querySelectorAll("tr.sel")) t.classList.remove("sel");
+      if (tr.dataset.sw) {
+        selSw = selSw === tr.dataset.sw ? null : tr.dataset.sw; selGen = null;
+        if (selSw) { tr.classList.add("sel"); showSides(swRow(selSw)); map.fitEmphasis(); } else { showSides(null); map.fit(); }
+      } else {
+        selGen = tr.dataset.gid; selSw = null; showSides(null); tr.classList.add("sel"); map.locate(selGen);
+      }
     });
-    $("wGens").addEventListener("click", e => {
-      const tr = e.target.closest("tr[data-gid]"); if (!tr) return;
-      selGen = tr.dataset.gid; map.locate(selGen);
-      for (const t of $("wGens").querySelectorAll("tr.sel")) t.classList.remove("sel"); tr.classList.add("sel");
-    });
-    PowerNet.listeners.add(() => { if (loaded && groups.length) renderLayout(grid()); });
-    $("wGens").addEventListener("mousemove", e => { const tr = e.target.closest("tr[data-gid]"); map.highlight(tr ? tr.dataset.gid : null); });
-    $("wGens").addEventListener("mouseleave", () => map.highlight(null));
+    PowerNet.listeners.add(() => { if (loaded && groups.length) { renderLayout(grid()); renderUnits(grid()); } });
 
     root.addEventListener("click", e => {
       const j = e.target.closest("[data-jump]");
       if (j) { const t = $(j.dataset.jump); t.scrollIntoView({ behavior: "smooth", block: "start" }); t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash"); return; }
       const sb = e.target.closest("[data-g]");
       if (sb && sb.dataset.g === "grid") { ui.grid = sb.dataset.v; saveUi(); render(); renderCharts(); map.draw(); map.fit(); return; }
-      if (sb && sb.dataset.g === "list") { ui.list = sb.dataset.v; saveUi(); render(); return; }
       if (sb && sb.dataset.g === "range") { ui.range = +sb.dataset.v; saveUi(); render(); pollHistory(); }
     });
-    $("wGenSearch").addEventListener("input", e => { ui.gq = e.target.value; saveUi(); render(); });
+    $("wUnitClear").addEventListener("click", () => unitTable.clearFilters());
   }
 
   return {
