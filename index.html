@@ -98,6 +98,11 @@
                        border-bottom: 1px solid var(--line); margin-bottom: 4px; }
   .popover .pop-mode label { padding: 2px 4px; font-size: 12px; color: var(--text); gap: 3px; }
   .popover { max-width: 320px; }
+  .map-ctx { min-width: 200px; padding: 4px; }
+  .map-ctx .ctx-item { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text); font: inherit;
+                       font-size: 13px; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+  .map-ctx .ctx-item:hover { background: var(--accent-dim); color: var(--accent); }
+  .map-ctx .ctx-coords { font-size: 11px; padding: 6px 10px 3px; border-top: 1px solid var(--line); margin-top: 4px; }
   .popover .pop-foot { display: flex; justify-content: space-between; border-top: 1px solid var(--line); margin-top: 4px; padding: 6px 4px 2px; }
   .popover .pop-foot button { background: none; border: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
 
@@ -1196,7 +1201,7 @@ async function poll() {
     $("dot").className = "dot ok";
     $("conn").textContent = "live · " + new Date().toLocaleTimeString();
     renderStats(); renderHead(); renderTable(); layoutColumns(); renderLayerButtons();
-    if (!fitted && vehicles.length) { fitVehicles(); fitted = true; }
+    if (!fitted && vehicles.length) { vmap.autoFit(); fitted = true; }
   } catch (e) {
     $("dot").className = "dot bad";
     $("conn").textContent = "offline: " + e.message;

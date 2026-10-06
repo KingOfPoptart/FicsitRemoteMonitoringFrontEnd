@@ -173,7 +173,7 @@ const Progression = (() => {
       ? new Map([...(data.getArtifacts || []), ...(data.getPowerSlug || [])].filter(a => a.Name === pickCol.name).map(a => [a.ID, pickCol.color]))
       : new Map(nodes.map(n => [n.ID, n.Exploited ? "#5fcf80" : "#ffffff"])));
     // frame the map once the collectibles and nodes have loaded (players arrive first and would otherwise set the zoom)
-    if (!framed && data.getArtifacts && data.getResourceNode) { framed = true; ui.node ? map.fitEmphasis() : map.fit(); }
+    if (!framed && data.getArtifacts && data.getResourceNode) { framed = true; map.autoFit(() => ui.node ? map.fitEmphasis() : map.fit()); }
     $("pgNodeFilter").innerHTML = ui.node ? `Showing: <b>${esc(ui.node)}</b> <button class="b" data-clear-node>Show all</button>` : "Click a collectible or resource to find it";
   }
 

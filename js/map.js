@@ -155,12 +155,48 @@ function drawPowerLines(mv, keep) {
   }
 }
 
+// Right-click any map: "open this spot in another tab's map". The view (centre in image coords + zoom) waits in
+// MapView.pending until that tab's map exists and has a size (tabs build their maps on first show).
+const MapCtx = {
+  el: null,
+  open(mv, x, y) {
+    if (!this.el) {
+      this.el = document.createElement("div"); this.el.className = "popover map-ctx"; document.body.appendChild(this.el);
+      this.el.addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) { this.close(); this.go(this.from, b.dataset.tab); } });
+      document.addEventListener("mousedown", e => { if (this.el && !this.el.contains(e.target)) this.close(); });
+      addEventListener("keydown", e => { if (e.key === "Escape") this.close(); });
+      addEventListener("scroll", () => this.close(), true); addEventListener("resize", () => this.close());
+    }
+    this.from = mv;
+    const here = mv.tab, tabs = [...document.querySelectorAll("#tabs button[data-tab]")]
+      .filter(b => b.dataset.tab !== here && MAP_TABS.includes(b.dataset.tab));
+    const w = mv.mouseWorld;
+    this.el.innerHTML = `<div class="pop-group">Open this spot in</div>` +
+      tabs.map(b => `<button class="ctx-item" data-tab="${b.dataset.tab}">${esc(b.textContent.trim())} map</button>`).join("") +
+      (w ? `<div class="ctx-coords muted">X ${fmtNum(w.x / 100)} m · Y ${fmtNum(w.y / 100)} m</div>` : "");
+    this.el.classList.add("open");
+    const r = this.el.getBoundingClientRect();
+    this.el.style.left = Math.min(x, innerWidth - r.width - 8) + "px";
+    this.el.style.top = Math.min(y, innerHeight - r.height - 8) + "px";
+  },
+  close() { if (this.el) this.el.classList.remove("open"); },
+  go(mv, tab) {
+    const r = mv.canvas.getBoundingClientRect(), v = mv.view;
+    MapView.pending = { tab, cx: (r.width / 2 - v.ox) / v.s, cy: (r.height / 2 - v.oy) / v.s, s: v.s };
+    showTab(tab);
+    requestAnimationFrame(() => { for (const m of MapView.all) m.applyPending(); });   // a map that already exists and kept its size
+  },
+};
+const MAP_TABS = ["overview", "vehicles", "production", "power", "logistics", "progression"];
+
 class MapView {
+  static all = []; static pending = null;
   constructor(el, opts) {
     this.opts = opts;
     this.layers = [...opts.layers, ...(opts.powerNet ? powerLayers(opts.powerNet) : []), ...(opts.logistics ? logisticsLayers(opts.logistics) : []),
                    ...(opts.players ? [playerLayer()] : [])];
     this.points = {}; this.hoverId = null; this.focus = null; this.fitted = false;
+    this.tab = el.closest("main.tab")?.id.replace(/^tab-/, ""); MapView.all.push(this);
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(opts.storeKey) || "{}"); } catch {}
     for (const l of this.layers) l.on = saved[l.key] ?? l.on ?? true;
@@ -210,6 +246,7 @@ class MapView {
       if (Math.abs(dx) + Math.abs(dy) > 3) { if (!drag.moved && opts.onPan) opts.onPan(); drag.moved = true; }
       this.view.ox = drag.ox + dx; this.view.oy = drag.oy + dy; this.draw();
     });
+    this.canvas.addEventListener("contextmenu", e => { e.preventDefault(); hideCargoPop(); MapCtx.open(this, e.clientX, e.clientY); });
     this.canvas.addEventListener("wheel", e => {
       this.anim = null;
       e.preventDefault();
@@ -339,10 +376,12 @@ class MapView {
     const last = this.lastSize, v = this.view;
     if (this.fitted && last && last.w && (last.w !== r.width || last.h !== r.height)) {
       const cx = (last.w / 2 - v.ox) / v.s, cy = (last.h / 2 - v.oy) / v.s;
-      v.s *= Math.min(r.width / last.w, r.height / last.h);
+      // a view handed over from another tab keeps its zoom while the new tab's layout settles
+      if (!(this.handedAt && performance.now() - this.handedAt < 3000)) v.s *= Math.min(r.width / last.w, r.height / last.h);
       v.ox = r.width / 2 - cx * v.s; v.oy = r.height / 2 - cy * v.s;
     }
     this.lastSize = { w: r.width, h: r.height };
+    if (this.applyPending()) return;
     if (!this.fitted) this.fit();
     this.draw();
   }
@@ -381,6 +420,17 @@ class MapView {
     if (pts.length && this.canvas.clientWidth) { this.fitBox(pts, this.opts.fitTo ? 60 : 40, glide); this.fitted = true; } else this.fitWorld(glide);
     this.draw();
   }
+  // a view handed over from another tab's map (right-click → Open this spot in…): same centre, same zoom
+  applyPending() {
+    const p = MapView.pending, r = this.canvas.getBoundingClientRect();
+    if (!p || p.tab !== this.tab || !r.width) return false;
+    MapView.pending = null;
+    this.goTo({ s: p.s, ox: r.width / 2 - p.cx * p.s, oy: r.height / 2 - p.cy * p.s });
+    this.fitted = this.handedOver = true; this.handedAt = performance.now();   // and no automatic framing over it
+    return true;
+  }
+  // a tab's one-time framing once its data has loaded: skipped if the map was opened on a spot from another tab
+  autoFit(how = () => this.fit()) { if (!this.handedOver) how(); }
   fitWorld(animate = false) { this.fitBox([{ x: 0, y: 0 }, { x: IMG, y: IMG }], 6, animate); }
   // fly to a point and pulse it for a few seconds (turns its layer on if needed)
   locate(id) {
