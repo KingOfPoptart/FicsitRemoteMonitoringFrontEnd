@@ -34,21 +34,35 @@ const Power = (() => {
   }
   const grid = () => ui.grid === "all" || groups.length <= 1 ? (groups.length === 1 ? groups[0] : allGrids())
                    : groups.find(g => String(g.CircuitGroupID) === String(ui.grid)) || allGrids();
-  // a grid is named after what powers it (e.g. "Coal", "Coal + Fuel", "No generators · Train Station"),
-  // numbered only when two grids would get the same name
-  const short = n => n.replace(/-Powered Generator| Generator| Power Plant| Burner$/, "").replace(/^Biomass$/, "Biomass");
+  // A grid is named after what powers it, biggest share of its output first; types under 10% are counted as "+N".
+  // Then consumption / production: "Nuclear 200/2,000 MW", "Nuclear + Fuel +2 1,850/9,400 MW".
+  // No generators: "No generators · Train Station 151/151 MW" (its most common consumer). If nothing is producing,
+  // the types are ordered by capacity instead.
+  const short = n => n.replace(/-Powered Generator| Generator| Power Plant| Burner$/, "");
+  function genMix(g) {
+    const gs = gens.filter(x => onGrid(x.pi, g)), share = new Map();
+    const running = gs.some(x => x.out > 0), val = x => running ? x.out : x.cap;
+    for (const x of gs) share.set(short(x.type), (share.get(short(x.type)) || 0) + val(x));
+    const total = [...share.values()].reduce((a, b) => a + b, 0);
+    const sorted = [...share].sort((a, b) => b[1] - a[1]);
+    const main = sorted.filter(([, v], i) => i === 0 || (total && v / total >= 0.1)).map(([k]) => k);
+    return { types: sorted.length, label: main.join(" + ") + (sorted.length > main.length ? ` +${sorted.length - main.length}` : "") };
+  }
   function baseName(g) {
-    const types = [...new Set(gens.filter(x => onGrid(x.pi, g)).map(x => short(x.type)))];
-    if (types.length) return types.join(" + ");
+    const mix = genMix(g);
+    if (mix.types) return mix.label;
     const top = Object.entries(usage.filter(u => onGrid(u.PowerInfo, g) && u.PowerInfo.MaxPowerConsumed > 0)
       .reduce((a, u) => (a[u.Name] = (a[u.Name] || 0) + 1, a), {})).sort((a, b) => b[1] - a[1])[0];
     return `No generators${top ? ` · ${top[0]}` : ""}`;
   }
+  const mwPair = g => `${fmtNum(g.PowerConsumed)}/${fmtNum(g.PowerProduction)} MW`;
+  // numbered only if two grids would otherwise read exactly the same
   function gridName(g) {
-    if (groups.length <= 1) return "Main grid";
-    const base = baseName(g), same = groups.filter(x => baseName(x) === base);
-    return same.length > 1 ? `${base} ${same.indexOf(g) + 1}` : base;
+    if (groups.length <= 1) return `Main grid ${mwPair(g)}`;
+    const full = x => `${baseName(x)} ${mwPair(x)}`, same = groups.filter(x => full(x) === full(g));
+    return same.length > 1 ? `${baseName(g)} ${same.indexOf(g) + 1} ${mwPair(g)}` : full(g);
   }
+
   const onGrid = (pi, g) => pi && g && (g.all ? pi.CircuitID >= 0 : pi.CircuitGroupID === g.CircuitGroupID);
   // a switch / pole / line belongs to the selected grid if any of its circuits is one of the grid's
   const inGrid = circuits => { const g = grid(); return !!g && (circuits || []).some(c => (g.AssociatedCircuits || []).includes(c)); };
@@ -128,9 +142,9 @@ const Power = (() => {
   function renderGrids() {
     $("wGridGroup").style.display = groups.length > 1 ? "" : "none";   // one grid: nothing to choose
     const all = allGrids();
-    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: "All grids", n: `${fmtNum(all.PowerConsumed)} / ${fmtNum(all.PowerCapacity)} MW` },
-      ...groups.map(g => ({ v: String(g.CircuitGroupID), label: `${g.FuseTriggered ? "⚠ " : ""}${gridName(g)}`,
-        n: `${fmtNum(g.PowerConsumed)} / ${fmtNum(g.PowerCapacity)} MW` }))], o => o.v === String(grid().CircuitGroupID)));
+    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: `All grids <span class="n">${mwPair(all)}</span>` },
+      ...groups.map(g => ({ v: String(g.CircuitGroupID), label: `${g.FuseTriggered ? "⚠ " : ""}${esc(gridName(g))}`,
+        title: "consumption / production" }))], o => o.v === String(grid().CircuitGroupID)));
   }
 
   // ---- grid layout: start at the circuit with the generators and follow the switches outward
