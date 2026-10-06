@@ -410,13 +410,13 @@ const Power = (() => {
                   all: () => [...Object.values(G_STATUS).map(v => ({ value: v.label, group: "Generators", label: `<i class="sw" style="background:${v.color}"></i> ${v.label}` })),
                               ...Object.values(SW_STATUS).map(v => ({ value: v.label, group: "Switches", label: `<i class="sw" style="background:${v.color}"></i> ${v.label}` }))] },
         val: r => r.kind === "gen" ? Object.keys(G_STATUS).indexOf(r.status) : 10 + (r.status === "off"), cell: pillFor },
-      // grids in the grid picker's order (generator grids first, "No generators" after), "not connected" always last
+      // grids in the grid picker's order (generator grids first, "No generators" after), "Not Connected" always last
       { key: "grid", label: "Grid", minW: 76,
-        filter: { value: r => r.gridG ? gridLabel(r.gridG) : "not connected", noun: "grids",
+        filter: { value: r => r.gridG ? gridLabel(r.gridG) : "Not Connected", noun: "grids",
                   // only grids that have generators or switches (a grid with neither can't match a row)
                   all: () => { const has = new Set(unitRows().map(r => r.gridG));
-                    return [...groups.filter(g => has.has(g)).map((g, i) => ({ value: gridLabel(g), ord: i })), { value: "not connected", ord: groups.length }]; } },
-        val: r => r.gridG ? groups.indexOf(r.gridG) : groups.length, cell: r => r.gridG ? esc(gridLabel(r.gridG)) : `<span class="muted">–</span>` },
+                    return [...groups.filter(g => has.has(g)).map((g, i) => ({ value: gridLabel(g), ord: i })), { value: "Not Connected", ord: groups.length }]; } },
+        val: r => r.gridG ? groups.indexOf(r.gridG) : groups.length, cell: r => r.gridG ? esc(gridLabel(r.gridG)) : `<span class="muted">Not Connected</span>` },
       { key: "mw", label: "MW", num: true, minW: 104,
         filter: { value: r => (r.kind === "gen" ? r.out : r.ctrl.use) > 0 ? "Power flowing" : "None (0 MW)", noun: "",
                   all: () => [{ value: "Power flowing" }, { value: "None (0 MW)" }] }, title: "Generators: output now / capacity. Switches: power going through now / max",
