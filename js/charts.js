@@ -289,7 +289,7 @@ class DataTable {
             const rows = (this.rows || []).filter(r => this.passes(r, c.key)), n = new Map();
             for (const r of rows) for (const v of vals(r)) if (v != null && v !== "") n.set(v, (n.get(v) || 0) + 1);
             const all = c.filter.all ? c.filter.all() : [...n.keys()].map(value => ({ value }));
-            return all.map(o => ({ value: o.value, label: o.label || (c.filter.label ? c.filter.label(o.value) : esc(o.value)), group: o.group,
+            return all.map(o => ({ value: o.value, label: o.label || (c.filter.label ? c.filter.label(o.value) : esc(o.value)), group: o.group, ord: o.ord,
                                    n: n.get(o.value) || "", empty: !n.get(o.value) }));
           },
           selected: () => this.fget(c) || [], onChange: v => { this.fset(c, v); this.filtersChanged(); } }));
@@ -360,7 +360,8 @@ class DataTable {
   }
   render(rows) {
     this.rows = rows;
-    this.head.innerHTML = this.cols.map(c => `<th data-key="${c.key}" class="${c.num ? "num" : ""}${this.sort.key === c.key ? " sorted" : ""}" title="${esc(c.title ? `${c.label}: ${c.title}` : c.label)}">${c.label}${this.sort.key === c.key ? `<span class="arrow">${this.sort.dir > 0 ? "▲" : "▼"}</span>` : ""}<span class="rz" data-rz="${c.key}" title="Drag to resize · double-click to fit"></span></th>`).join("");
+    const headHtml = this.cols.map(c => `<th data-key="${c.key}" class="${c.num ? "num" : ""}${this.sort.key === c.key ? " sorted" : ""}" title="${esc(c.title ? `${c.label}: ${c.title}` : c.label)}">${c.label}${this.sort.key === c.key ? `<span class="arrow">${this.sort.dir > 0 ? "▲" : "▼"}</span>` : ""}<span class="rz" data-rz="${c.key}" title="Drag to resize · double-click to fit"></span></th>`).join("");
+    if (this.headHtml !== headHtml) { this.head.innerHTML = headHtml; this.headHtml = headHtml; }   // only when it changes: a rebuilt header swallows sort clicks
     const col = this.cols.find(c => c.key === this.sort.key) || this.cols[0];
     const sorted = rows.filter(r => this.passes(r)).sort((a, b) => {
       const va = col.val(a), vb = col.val(b);
@@ -421,7 +422,8 @@ class MultiSelect {
     const sel = new Set(this.selected()), q = this.q.trim().toLowerCase();
     // existing ones first, greyed-out ones after; selected always shown
     const opts = this.options().filter(o => !q || o.value.toLowerCase().includes(q) || sel.has(o.value))
-      .sort((a, b) => (a.empty - b.empty) || String(a.group || "").localeCompare(String(b.group || "")) || a.value.localeCompare(b.value));
+      .sort((a, b) => (a.empty - b.empty) || String(a.group || "").localeCompare(String(b.group || ""))
+        || (a.ord != null && b.ord != null ? a.ord - b.ord : a.value.localeCompare(b.value)));   // ord: keep the list's own order
     let html = "", lastGroup = null, greyed = false;
     for (const o of opts) {
       if (o.empty && !greyed) { greyed = true; html += `<div class="pop-group">Not in your factory</div>`; lastGroup = null; }
