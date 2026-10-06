@@ -22,7 +22,7 @@ const Production = (() => {
   const ui = (() => { const d = { mode: "all", range: 60, bld: [], st: [], items: [], q: "" };
     try { return { ...d, ...JSON.parse(localStorage.getItem("pt.ui") || "{}") }; } catch { return d; } })();
   const saveUi = () => { try { localStorage.setItem("pt.ui", JSON.stringify(ui)); } catch {} };
-  let itemTable, machineTable, chart, map, selMachine = null, itemPick, bldPick;
+  let itemTable, machineTable, chart, map, selMachine = null;
   let focusItem = null;   // item clicked in the Items table: its machines are highlighted (click again to clear)
   const relation = m => !focusItem ? null : m.outputs.some(o => o.name === focusItem) ? "make" : m.inputs.some(i => i.name === focusItem) ? "use" : null;
   // every production machine / extractor in the game, for the Building filter (ones you haven't built are greyed out)
@@ -143,13 +143,11 @@ const Production = (() => {
     const q = ui.q.trim().toLowerCase();
     return [...items.values()].filter(it =>
       (ui.mode === "all" || (ui.mode === "short" && it.net < -Math.max(0.01, it.prod * 0.015)) || (ui.mode === "fluid" && it.fluid) || (ui.mode === "solid" && !it.fluid))
-      && (!ui.items.length || ui.items.includes(it.name))
       && (!q || it.name.toLowerCase().includes(q)));
   }
   function visibleMachines() {
     const q = ui.q.trim().toLowerCase();
-    return machines.filter(m => (!ui.bld.length || ui.bld.includes(m.building)) && (!ui.st.length || ui.st.includes(m.status))
-      && (!q || [m.building, m.recipe, ...m.outputs.map(o => o.name), ...m.inputs.map(i => i.name)].some(s => s.toLowerCase().includes(q))));
+    return machines.filter(m => (!q || [m.building, m.recipe, ...m.outputs.map(o => o.name), ...m.inputs.map(i => i.name)].some(s => s.toLowerCase().includes(q))));
   }
 
   // Summary tiles double as filters: clicking a tile (or a count inside one) filters or sorts the tables below;
@@ -227,8 +225,7 @@ const Production = (() => {
     setSeg($("pModes"), seg("mode", modes, o => ui.mode === o.v));
     setSeg($("pStSeg"), seg("view", statusViews(), o => sameSet(ui.st, o.st)));
     setSeg($("pRange"), seg("range", RANGES.map(([l, v]) => ({ v, label: l })), o => ui.range === o.v));
-    itemPick.refresh(); bldPick.refresh();
-    $("pClear").disabled = !(ui.bld.length || ui.st.length || focusItem);
+
   }
 
   function renderDetail() {
@@ -254,9 +251,12 @@ const Production = (() => {
     if (!loaded) return;
     renderTiles(); renderChips();
     itemTable.render(visibleItems());
-    const vm = visibleMachines();
     machineTable.body.classList.toggle("focus", !!focusItem);
-    machineTable.render(vm);
+    machineTable.render(visibleMachines());
+    const vm = machineTable.filtered;   // after the column filters: what the map shows
+    $("pItemCount").textContent = `${itemTable.filtered.length} of ${items.size}`;
+    $("pItemClear").disabled = !itemTable.hasFilters();
+    $("pClear").disabled = !(machineTable.hasFilters() || focusItem);
     const mk = vm.filter(m => relation(m) === "make").length, us = vm.filter(m => relation(m) === "use").length;
     $("pMachCount").textContent = `${vm.length} of ${machines.length}`;
     $("pFocus").innerHTML = focusItem ? `<span class="key make"></span>${mk} make · <span class="key use"></span>${us} use ${icon(focusItem, "icon sm")}<b>${esc(focusItem)}</b>
@@ -299,11 +299,11 @@ const Production = (() => {
       <!-- left: the two tables (items, machines); right: a big map with the item details under it -->
       <div class="pgrid">
         <div class="pcol">
-          <section class="card p-items"><div class="card-head"><h2>Items</h2><button class="f-multi pick" id="pItemSel"></button>
-            <span class="hint">per minute, fluids in m³ · click an item for its details and machines</span></div>
+          <section class="card p-items"><div class="card-head"><h2>Items</h2><span class="hint" id="pItemCount"></span>
+            <span class="hint">per minute, fluids in m³ · click an item for its details and machines</span>
+            <button class="b" id="pItemClear">Clear filters</button></div>
             <div class="table-wrap dtw" id="pItems"></div></section>
           <section class="card p-mach"><div class="card-head"><h2>Machines</h2><span class="hint" id="pMachCount"></span>
-              <button class="f-multi pick" id="pBldSel"></button>
               <button class="b" id="pClear">Clear filters</button></div>
             <div class="focus-bar" id="pFocus"></div>
             <div class="table-wrap dtw tall" id="pMachines"></div></section>
@@ -316,39 +316,43 @@ const Production = (() => {
       </div>`;
 
     itemTable = new DataTable($("pItems"), [
-      { key: "name", label: "Item", minW: 140, val: r => r.name, cell: r => `<span class="with-icon">${icon(r.name)}${esc(r.name)}</span>` },
+      { key: "name", label: "Item", minW: 140, val: r => r.name, cell: r => `<span class="with-icon">${icon(r.name)}${esc(r.name)}</span>`,
+        filter: { value: r => r.name, noun: "items", get: () => ui.items, set: v => { ui.items = v; saveUi(); },
+                  all: () => gameItems.map(i => ({ value: i.name, label: icon(i.name, "icon sm") + esc(i.name), group: i.kind === "fluid" ? "Fluids" : "Solids" })) } },
       { key: "prod", label: "Producing", minW: 96, title: "Produced per minute right now, by all machines", num: true, val: r => r.prod, cell: r => rateCell(r.prod, r.name) },
       { key: "cons", label: "Consuming", minW: 100, title: "Consumed per minute right now, by machines and generators (fuel, water)", num: true, val: r => r.cons, cell: r => rateCell(r.cons, r.name) },
-      { key: "net", label: "Net", minW: 58, title: "Producing − consuming, per minute (red = used faster than made)", num: true, val: r => r.net, cell: netCell },
+      { key: "net", label: "Net", minW: 58,
+        filter: { value: r => r.net < -Math.max(0.01, r.prod * 0.015) ? "Shortfall" : r.net > Math.max(0.01, r.prod * 0.015) ? "Surplus" : "Balanced", noun: "",
+                  all: () => ["Shortfall", "Balanced", "Surplus"].map(value => ({ value })) }, title: "Producing − consuming, per minute (red = used faster than made)", num: true, val: r => r.net, cell: netCell },
       { key: "cap", label: "Capacity", minW: 86, title: "What the machines making it could produce per minute at 100% productivity; underneath, how much of that is in use", num: true,
         val: r => r.maxProd, cell: r => r.maxProd ? `${rateCell(r.maxProd, r.name)}<br><span class="muted sub">${pct(r.prod / r.maxProd * 100)} in use</span>` : `<span class="muted">–</span>` },
-      { key: "np", label: "Producers", minW: 90, title: "Number of machines making it", num: true, val: r => count(r.producers), cell: r => count(r.producers) || `<span class="muted">0</span>` },
-      { key: "nc", label: "Consumers", minW: 94, title: "Number of machines and generators using it", num: true, val: r => count(r.consumers), cell: r => count(r.consumers) || `<span class="muted">0</span>` },
-    ], { sortKey: "prod", dir: -1, storeKey: "pt.itemSort", rowAttrs: r => `data-item="${esc(r.name)}" class="${r.name === selected ? "sel" : ""}"` });
+      { key: "np", label: "Producers", minW: 90, filter: { value: r => count(r.producers) ? "Made" : "Not made", noun: "", all: () => [{ value: "Made" }, { value: "Not made" }] }, title: "Number of machines making it", num: true, val: r => count(r.producers), cell: r => count(r.producers) || `<span class="muted">0</span>` },
+      { key: "nc", label: "Consumers", minW: 94, filter: { value: r => count(r.consumers) ? "Used" : "Not used", noun: "", all: () => [{ value: "Used" }, { value: "Not used" }] }, title: "Number of machines and generators using it", num: true, val: r => count(r.consumers), cell: r => count(r.consumers) || `<span class="muted">0</span>` },
+    ], { sortKey: "prod", dir: -1, storeKey: "pt.itemSort", onFilter: () => render(), rowAttrs: r => `data-item="${esc(r.name)}" class="${r.name === selected ? "sel" : ""}"` });
 
     machineTable = new DataTable($("pMachines"), [
-      { key: "building", label: "Building", minW: 128, val: r => r.building, cell: r => `<span class="with-icon">${icon(r.building)}<span>${esc(r.building)}<br><span class="muted sub">${esc(shortId(r.id))}</span></span></span>` },
-      { key: "recipe", label: "Recipe", minW: 96, val: r => r.recipe, cell: r => r.recipe ? esc(r.recipe) : `<span class="muted">–</span>` },
-      { key: "status", label: "Status", minW: 96, val: r => Object.keys(M_STATUS).indexOf(r.status), cell: r => statusPill(r.status) },
-      { key: "eff", label: "Productivity", minW: 104, num: true, val: r => r.eff, cell: r => `${bar(r.eff / 100, "var(--s1)")}${pct(r.eff)}` },
-      { key: "in", label: "Input /min", val: r => r.inputs[0]?.cur || 0, num: true,
+      { key: "building", label: "Building", minW: 128, val: r => r.building,
+        filter: { value: r => r.building, noun: "buildings", get: () => ui.bld, set: v => { ui.bld = v; saveUi(); },
+                  all: () => [...new Set([...GAME_BUILDINGS, ...machines.map(m => m.building)])].map(b => ({ value: b, label: icon(b, "icon sm") + esc(b) })) }, cell: r => `<span class="with-icon">${icon(r.building)}<span>${esc(r.building)}<br><span class="muted sub">${esc(shortId(r.id))}</span></span></span>` },
+      { key: "recipe", label: "Recipe", minW: 96, filter: { value: r => r.recipe || "No recipe", noun: "recipes" }, val: r => r.recipe, cell: r => r.recipe ? esc(r.recipe) : `<span class="muted">–</span>` },
+      { key: "status", label: "Status", minW: 96,
+        filter: { value: r => r.status, noun: "statuses", get: () => ui.st, set: v => { ui.st = v; saveUi(); },
+                  all: () => Object.entries(M_STATUS).map(([k, v]) => ({ value: k, label: `<i class="sw" style="background:${v.color}"></i> ${esc(v.label)}` })) },
+        val: r => Object.keys(M_STATUS).indexOf(r.status), cell: r => statusPill(r.status) },
+      { key: "eff", label: "Productivity", minW: 104,
+        filter: { value: r => r.eff >= 90 ? "90–100%" : r.eff >= 50 ? "50–89%" : r.eff > 0 ? "1–49%" : "0%", noun: "",
+                  all: () => ["90–100%", "50–89%", "1–49%", "0%"].map(value => ({ value })) }, num: true, val: r => r.eff, cell: r => `${bar(r.eff / 100, "var(--s1)")}${pct(r.eff)}` },
+      { key: "in", label: "Input /min", filter: { value: r => r.inputs.map(o => o.name), noun: "inputs", label: v => icon(v, "icon sm") + esc(v) }, val: r => r.inputs[0]?.cur || 0, num: true,
         cell: r => r.inputs.map(o => `<div class="io">${fmtRate(o.cur)} <span class="muted">/ ${fmtRate(o.max)}</span> ${icon(o.name, "icon sm")}<span class="muted">${esc(o.name)}</span></div>`).join("") || `<span class="muted">–</span>` },
-      { key: "out", label: "Output /min", title: "Now / at 100% productivity", val: r => r.outputs[0]?.cur || 0, num: true,
+      { key: "out", label: "Output /min", filter: { value: r => r.outputs.map(o => o.name), noun: "outputs", label: v => icon(v, "icon sm") + esc(v) }, title: "Now / at 100% productivity", val: r => r.outputs[0]?.cur || 0, num: true,
         cell: r => r.outputs.map(o => `<div class="io">${fmtRate(o.cur)} <span class="muted">/ ${fmtRate(o.max)}</span> ${icon(o.name, "icon sm")}<span class="muted">${esc(o.name)}</span></div>`).join("") || `<span class="muted">–</span>` },
-      { key: "clock", label: "Clock", minW: 62, num: true, title: "Clock speed · power shards · Somersloops", val: r => r.clock,
+      { key: "clock", label: "Clock", minW: 62, filter: { value: r => pct(r.clock), noun: "" }, num: true, title: "Clock speed · power shards · Somersloops", val: r => r.clock,
         cell: r => `${pct(r.clock)}${r.shards ? `<br><span class="muted sub" title="Power shards">◆${r.shards}</span>` : ""}${r.sloops ? ` <span class="muted sub" title="Somersloops">✦${r.sloops}</span>` : ""}` },
       { key: "mw", label: "MW", minW: 58, num: true, title: "Power draw now (max)", val: r => r.mw, cell: r => `${fmtNum(r.mw, 1)}<br><span class="muted sub">max ${fmtNum(r.maxMw, 1)}</span>` },
-    ], { sortKey: "status", storeKey: "pt.machSort", rowAttrs: r => `data-mid="${esc(r.id)}" class="${r.id === selMachine ? "sel" : ""}${relation(r) ? " rel-" + relation(r) : ""}"`,
+    ], { sortKey: "status", storeKey: "pt.machSort", onFilter: () => { render(); map.fit(); }, rowAttrs: r => `data-mid="${esc(r.id)}" class="${r.id === selMachine ? "sel" : ""}${relation(r) ? " rel-" + relation(r) : ""}"`,
          pin: r => relation(r) ? 0 : 1 });   // the clicked item's machines first, keeping the column sort among them
 
-    itemPick = new MultiSelect($("pItemSel"), { noun: "items", search: "Search all items…",
-      options: () => gameItems.map(i => { const it = items.get(i.name); return { value: i.name, label: icon(i.name, "icon sm") + esc(i.name),
-        n: it ? fmtRate(it.prod) + "/min" : "", empty: !it || (!it.prod && !it.cons), group: i.kind === "fluid" ? "Fluids" : "Solids" }; }),
-      selected: () => ui.items, onChange: v => { ui.items = v; saveUi(); render(); } });
-    bldPick = new MultiSelect($("pBldSel"), { noun: "buildings", search: "Search buildings…",
-      options: () => { const n = b => machines.filter(m => m.building === b).length;
-        return [...new Set([...GAME_BUILDINGS, ...machines.map(m => m.building)])].map(b => ({ value: b, label: icon(b, "icon sm") + esc(b), n: n(b) || "", empty: !n(b) })); },
-      selected: () => ui.bld, onChange: v => { ui.bld = v; saveUi(); render(); } });
+
 
     chart = new LineChart($("pChart"), { height: 150, fill: true });
     const hl = id => { for (const tr of $("pMachines").querySelectorAll("tr[data-mid]")) tr.classList.toggle("hl", tr.dataset.mid === id); };
@@ -372,7 +376,8 @@ const Production = (() => {
         else if (g === "view") { ui.st = [...statusViews().find(o => o.v === v).st]; map.fit(); }
         saveUi(); render(); return;
       }
-      if (e.target.closest("#pClear")) { ui.bld = []; ui.st = []; saveUi(); selected ? unfocus() : render(); return; }
+      if (e.target.closest("#pClear")) { machineTable.clearFilters(); if (selected) unfocus(); return; }
+      if (e.target.closest("#pItemClear")) { itemTable.clearFilters(); return; }
       if (e.target.closest("#pUnfocus")) { unfocus(); return; }
       const tr = e.target.closest("tr[data-item]");
       if (tr) focus(tr.dataset.item);

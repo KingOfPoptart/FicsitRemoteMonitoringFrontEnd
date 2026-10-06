@@ -408,7 +408,7 @@ const Power = (() => {
         val: r => r.kind === "gen" ? Object.keys(G_STATUS).indexOf(r.status) : 10 + (r.status === "off"), cell: pillFor },
       { key: "grid", label: "Grid", minW: 76, filter: { value: r => r.gridG ? baseName(r.gridG) : "not connected", noun: "grids" }, val: r => r.gridG ? baseName(r.gridG) : "", cell: r => r.gridG ? esc(baseName(r.gridG)) : `<span class="muted">–</span>` },
       { key: "mw", label: "MW", num: true, minW: 104,
-        filter: { value: r => (r.kind === "gen" ? r.out : r.ctrl.use) > 0 ? "Power flowing" : "None (0 MW)", noun: "MW",
+        filter: { value: r => (r.kind === "gen" ? r.out : r.ctrl.use) > 0 ? "Power flowing" : "None (0 MW)", noun: "",
                   all: () => [{ value: "Power flowing" }, { value: "None (0 MW)" }] }, title: "Generators: output now / capacity. Switches: power going through now / max",
         val: r => r.kind === "gen" ? r.out : r.ctrl.use,
         cell: r => r.kind === "gen" ? `${fmtNum(r.out, 1)} <span class="muted">/ ${fmtNum(r.cap, 0)}</span><br>${bar(r.cap ? r.out / r.cap : 0, "var(--s1)")}`

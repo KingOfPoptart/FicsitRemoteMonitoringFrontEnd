@@ -226,8 +226,10 @@ const bar = (frac, color) => `<span class="fill"><i style="width:${Math.max(0, M
 // cols = [{ key, label, title?, num?, val(row) -> sort value, cell(row) -> html, cls?, minW? (narrowest when fitting the panel),
 //           filter? }] — a filter row under the headers, like the Vehicles table:
 //   filter: { text: row => string, placeholder? }                         search box (all words must match)
-//   filter: { value: row => string | string[], all?: () => [{ value, label?, group? }], noun? }   multi-select dropdown;
-//           `all` lists every possible value (ones no row has are greyed out), otherwise the values present are listed
+//   filter: { value: row => string | string[], all?: () => [{ value, label?, group? }], label?: value => html, noun? }
+//           multi-select dropdown; `all` lists every possible value (ones no row has are greyed out), otherwise the
+//           values present are listed
+//   get?/set?: keep the filter's state outside the table (e.g. shared with tiles or toolbar buttons)
 // Options are counted against the other columns' filters. onFilter() is called after a filter changes.
 // Widths: measured from the content on first render, then fixed; drag a header edge to resize, double-click it
 // to fit the content. Sort and widths are remembered under storeKey.
@@ -276,23 +278,28 @@ class DataTable {
       if (!c.filter) continue;
       if (c.filter.text) {
         const inp = document.createElement("input"); inp.className = "f-input"; inp.placeholder = c.filter.placeholder || "search";
-        inp.value = this.f[c.key] || ""; th.appendChild(inp);
-        inp.addEventListener("input", () => { this.f[c.key] = inp.value; this.filtersChanged(); });
+        inp.value = this.fget(c) || ""; th.appendChild(inp);
+        inp.addEventListener("input", () => { this.fset(c, inp.value); this.filtersChanged(); });
         c._input = inp;
       } else {
         const btn = document.createElement("button"); btn.className = "f-multi"; th.appendChild(btn);
         const vals = r => { const v = c.filter.value(r); return Array.isArray(v) ? v : [v]; };
-        this.pickers.push(new MultiSelect(btn, { noun: c.filter.noun || "values", search: "Search…",
+        this.pickers.push(new MultiSelect(btn, { noun: c.filter.noun ?? "values", search: "Search…",
           options: () => {
             const rows = (this.rows || []).filter(r => this.passes(r, c.key)), n = new Map();
             for (const r of rows) for (const v of vals(r)) if (v != null && v !== "") n.set(v, (n.get(v) || 0) + 1);
             const all = c.filter.all ? c.filter.all() : [...n.keys()].map(value => ({ value }));
-            return all.map(o => ({ value: o.value, label: o.label || esc(o.value), group: o.group, n: n.get(o.value) || "", empty: !n.get(o.value) }));
+            return all.map(o => ({ value: o.value, label: o.label || (c.filter.label ? c.filter.label(o.value) : esc(o.value)), group: o.group,
+                                   n: n.get(o.value) || "", empty: !n.get(o.value) }));
           },
-          selected: () => this.f[c.key] || [], onChange: v => { this.f[c.key] = v; this.filtersChanged(); } }));
+          selected: () => this.fget(c) || [], onChange: v => { this.fset(c, v); this.filtersChanged(); } }));
       }
     }
   }
+  fget(c) { return c.filter.get ? c.filter.get() : this.f[c.key]; }
+  fset(c, v) { if (c.filter.set) c.filter.set(v); else this.f[c.key] = v; }
+  // set a column's filter from outside (a tile, a toolbar button…)
+  setFilter(key, v) { const c = this.cols.find(x => x.key === key); this.fset(c, v); if (c._input) c._input.value = v || ""; this.filtersChanged(); }
   filtersChanged() {
     try { this.storeKey && localStorage.setItem(this.storeKey + ".f", JSON.stringify(this.f)); } catch {}
     this.render(this.rows); this.onFilter && this.onFilter();
@@ -301,7 +308,7 @@ class DataTable {
   passes(r, skip) {
     for (const c of this.cols) {
       if (!c.filter || c.key === skip) continue;
-      const f = this.f[c.key];
+      const f = this.fget(c);
       if (c.filter.text) {
         if (f && !f.toLowerCase().split(/\s+/).filter(Boolean).every(w => String(c.filter.text(r)).toLowerCase().includes(w))) return false;
       } else if (f && f.length) {
@@ -312,10 +319,9 @@ class DataTable {
     return true;
   }
   get filtered() { return (this.rows || []).filter(r => this.passes(r)); }
-  hasFilters() { return Object.values(this.f).some(v => Array.isArray(v) ? v.length : v); }
+  hasFilters() { return this.cols.some(c => { if (!c.filter) return false; const v = this.fget(c); return Array.isArray(v) ? v.length : v; }); }
   clearFilters() {
-    this.f = {};
-    for (const c of this.cols) if (c._input) c._input.value = "";
+    for (const c of this.cols) if (c.filter) { this.fset(c, c.filter.text ? "" : []); if (c._input) c._input.value = ""; }
     this.filtersChanged();
   }
   saveWidths() { try { this.storeKey && localStorage.setItem(this.storeKey + ".w", JSON.stringify(this.widths)); } catch {} }
@@ -394,7 +400,10 @@ class MultiSelect {
   }
   refresh() {
     const n = this.selected().length;
-    this.btn.innerHTML = `<span>${n ? `${n} ${n === 1 ? this.noun.replace(/s$/, "") : this.noun}` : `All ${this.noun}`}</span>`;
+    // noun "" (a column whose values aren't things, e.g. ranges): "All" / "2 selected", or the one value itself
+    const one = n === 1 && !this.noun ? this.options().find(o => o.value === this.selected()[0]) : null;
+    this.btn.innerHTML = `<span>${!this.noun ? (n ? (one ? one.label.replace(/<[^>]+>/g, "").trim() : `${n} selected`) : "All")
+      : n ? `${n} ${n === 1 ? this.noun.replace(/s$/, "") : this.noun}` : `All ${this.noun}`}</span>`;
     this.btn.classList.toggle("f-active", n > 0);
     if (this.pop.classList.contains("open")) this.renderList();
   }
