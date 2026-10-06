@@ -17,7 +17,7 @@ const Power = (() => {
   let groups = [], gens = [], usage = [], hist = null, timer = null, detailTimer = null, histTimer = null, netTimer = null, loaded = false;
   const ui = (() => { try { return { range: 60, grid: "all", gq: "", ...JSON.parse(localStorage.getItem("pw.ui2") || "{}") }; } catch { return { range: 60, grid: "all", gq: "" }; } })();
   const saveUi = () => { try { localStorage.setItem("pw.ui2", JSON.stringify(ui)); } catch {} };
-  let chart, battChart, genTable, map, selGen = null;
+  let chart, battChart, genTable, swTable, map, selGen = null, selSw = null, sideShown = null;
   const root = $("tab-power");
   const mw = v => `${v < 0 ? "−" : ""}${fmtNum(Math.abs(v), Math.abs(v) < 100 ? 1 : 0)} <small>MW</small>`;
 
@@ -98,6 +98,71 @@ const Power = (() => {
     if (u.status === "fulfilled") usage = u.value;
     render();
   }
+
+  // ---- power switches: what's on each side --------------------------------------------------
+  // Each switch joins two circuits. Its sides are what each circuit can reach through the OTHER switches that are on
+  // (so a switch that's off still shows what it would connect). The side with generators is where power comes from;
+  // the other side is what the switch controls. Priority switches: 0 = "Undefined" (shed first), then 8 … 1.
+  const SIDE_COLOR = { feed: "#5fa8ef", ctrl: "#fa9549" };   // ring colours on the map: supply side blue, controlled orange
+  const prioLabel = p => p < 0 ? "–" : p === 0 ? "Undefined" : String(p);
+  const shedRank = p => p < 0 ? 99 : p === 0 ? 0 : 9 - p;   // order a short grid turns priority switches off in
+  function sideOf(start, skip) {
+    const seen = new Set([start]), queue = [start];
+    while (queue.length) {
+      const c = queue.shift();
+      for (const s of PowerNet.switches) {
+        if (s === skip || !s.IsOn || !s.circuits.includes(c)) continue;
+        for (const o of s.circuits) if (o >= 0 && !seen.has(o)) { seen.add(o); queue.push(o); }
+      }
+    }
+    return seen;
+  }
+  function sideInfo(circuits) {
+    const on = x => circuits.has((x.pi || x.PowerInfo)?.CircuitID);
+    const g = gens.filter(on), u = usage.filter(x => on(x) && (x.PowerInfo?.MaxPowerConsumed > 0) && !/Generator|Burner|Power Plant/.test(x.Name));
+    const names = {}; u.forEach(x => names[x.Name] = (names[x.Name] || 0) + 1);
+    return { circuits, gens: g, cap: g.reduce((a, x) => a + x.cap, 0), out: g.reduce((a, x) => a + x.out, 0),
+      users: u, use: u.reduce((a, x) => a + (x.PowerInfo.PowerConsumed || 0), 0), max: u.reduce((a, x) => a + (x.PowerInfo.MaxPowerConsumed || 0), 0),
+      names: Object.entries(names).sort((a, b) => b[1] - a[1]) };
+  }
+  function switchRows() {
+    return PowerNet.switches.map(s => {
+      const a = sideInfo(sideOf(s.Primary, s)), b = sideInfo(sideOf(s.Secondary, s));
+      const loop = [...a.circuits].some(c => b.circuits.has(c));   // both sides reach each other another way
+      const [feed, ctrl] = a.cap >= b.cap ? [a, b] : [b, a];
+      const grid = groups.find(gr => (gr.AssociatedCircuits || []).some(c => s.circuits.includes(c)));
+      return { id: s.ID, s, name: s.SwitchTag || s.Name || "Power Switch", priority: s.Priority, feed, ctrl, loop, grid,
+               bothFed: a.cap > 0 && b.cap > 0 };
+    });
+  }
+  const sideText = side => {
+    const parts = [];
+    if (side.gens.length) parts.push(`${side.gens.length} generator${side.gens.length === 1 ? "" : "s"} · ${fmtNum(side.out)} MW`);
+    parts.push(...side.names.slice(0, 2).map(([k, n]) => `${n} × ${k}`));
+    if (side.names.length > 2) parts.push(`+${side.names.length - 2} more types`);
+    return parts.length ? parts.map(esc).join("<br>") : `<span class="muted">nothing but wires</span>`;
+  };
+  // map: ring the supply side blue and the controlled side orange, fade everything else
+  function showSides(row) {
+    sideShown = row;
+    if (!row) { map.setEmphasis(null); return; }
+    if (!map.isOn("use")) map.setLayers({ use: true });   // consumers have to be visible to be ringed
+    const em = new Map();
+    for (const p of map.all(true)) if (p.circuits) {
+      if (p.circuits.some(c => row.ctrl.circuits.has(c))) em.set(p.id, SIDE_COLOR.ctrl);
+      else if (p.circuits.some(c => row.feed.circuits.has(c))) em.set(p.id, SIDE_COLOR.feed);
+    }
+    em.set(row.id, "#ffffff");
+    map.setEmphasis(em);
+  }
+  function switchPop(r) {
+    const list = side => side.names.map(([k, n]) => `<div class="row"><span>${esc(k)}</span><b>×${n}</b></div>`).join("") || `<div class="row muted"><span>nothing but wires</span></div>`;
+    return `<div class="head"><b style="color:#fff">${esc(r.name)}</b> · ${r.priority >= 0 ? `priority switch, group ${prioLabel(r.priority)}` : "power switch"} · ${r.s.IsOn ? "on" : "off"}</div>` +
+      popSection(`Fed from (blue) · ${fmtNum(r.feed.out)} MW from ${r.feed.gens.length} generator${r.feed.gens.length === 1 ? "" : "s"}`) + list(r.feed) +
+      popSection(`Controls (orange) · ${fmtNum(r.ctrl.use)} MW now, ${fmtNum(r.ctrl.max)} MW max`) + list(r.ctrl) +
+      (r.loop ? `<div class="row warn-text"><span>both sides are also connected another way</span></div>` : "");
+  }
+
   async function pollHistory() {
     try {
       const range = ui.range, h = await (await fetch(`/hist/power?mins=${range}`, { cache: "no-store" })).json();
@@ -185,7 +250,7 @@ const Power = (() => {
         if (other == null || seen.has(other)) continue;
         const name = s.SwitchTag || s.Name || "Power Switch";
         html += `<div class="lay-switch" style="--d:${depth + 1}"><span class="pill" style="color:${s.IsOn ? "var(--ok)" : "var(--bad)"};background:color-mix(in srgb, ${s.IsOn ? "var(--ok)" : "var(--bad)"} 14%, transparent)">${s.IsOn ? "on" : "off"}</span>
-          <b>${esc(name)}</b>${s.Priority >= 0 ? ` <span class="muted">priority ${s.Priority} switch</span>` : ` <span class="muted">switch</span>`}</div>` + branch(other, depth + 1);
+          <b>${esc(name)}</b>${s.Priority >= 0 ? ` <span class="muted">priority switch · ${s.Priority === 0 ? "Undefined (turns off first)" : `group ${s.Priority}`}</span>` : ` <span class="muted">switch</span>`}</div>` + branch(other, depth + 1);
       }
       return html;
     };
@@ -233,7 +298,13 @@ const Power = (() => {
 
     const q = ui.gq.trim().toLowerCase();
     genTable.render(gens.filter(x => onGrid(x.pi, g) && (!q || `${x.type} ${G_STATUS[x.status].label} ${x.fuel?.Name || ""}`.toLowerCase().includes(q))));
-    $("wGenCount").textContent = `${gens.filter(x => onGrid(x.pi, g)).length} generators`;
+    $("wGenCount").textContent = ui.list === "switches" ? "" : `${gens.filter(x => onGrid(x.pi, g)).length} generators`;
+    const sws = switchRows().filter(r => g.all || r.grid === g);
+    setSeg($("wListSeg"), segControl("list", [{ v: "gens", label: "Generators", n: gens.filter(x => onGrid(x.pi, g)).length },
+      { v: "switches", label: "Switches", n: sws.length }], o => (ui.list || "gens") === o.v));
+    $("wGens").hidden = ui.list === "switches"; $("wSws").hidden = ui.list !== "switches";
+    swTable.render(sws.filter(r => !q || `${r.name} ${r.feed.names.map(n => n[0]).join(" ")} ${r.ctrl.names.map(n => n[0]).join(" ")}`.toLowerCase().includes(q)));
+    if (sideShown) showSides(switchRows().find(r => r.id === sideShown.id) || null);   // keep the map highlight current
     const pt = (u, extra) => u.location && { id: u.ID || u.id, x: u.location.x, y: u.location.y, ...extra };
     map.setPoints("gens", gens.filter(x => x.raw.location).map(x => pt(x.raw, { circuits: [x.pi?.CircuitID], color: G_STATUS[x.status].color,
       label: `${x.type} · ${G_STATUS[x.status].label} · ${fmtNum(x.out, 0)} MW` })));
@@ -292,13 +363,26 @@ const Power = (() => {
         </div>
         <div class="pcol">
           <section class="card w-map"><div id="wMap"></div></section>
-          <section class="card w-gens" id="wGensCard"><div class="card-head"><h2>Generators</h2><span class="hint" id="wGenCount"></span>
-            <input class="f-input search sm" id="wGenSearch" placeholder="Filter: type, status, fuel…" value="${esc(ui.gq)}"></div>
-            <div class="table-wrap dtw tall" id="wGens"></div></section>
+          <section class="card w-gens" id="wGensCard"><div class="card-head"><span id="wListSeg"></span><span class="hint" id="wGenCount"></span>
+            <input class="f-input search sm" id="wGenSearch" placeholder="Filter: type, status, fuel, name…" value="${esc(ui.gq)}"></div>
+            <div class="table-wrap dtw tall" id="wGens"></div><div class="table-wrap dtw tall" id="wSws" hidden></div></section>
         </div>
       </div>`;
     chart = new LineChart($("wChart"), { height: 260, unit: "MW", fill: true });
     battChart = new LineChart($("wBatt"), { height: 120, unit: "%", fmt: v => fmtNum(v, 1), fill: true });
+    swTable = new DataTable($("wSws"), [
+      { key: "name", label: "Switch", minW: 130, val: r => r.name,
+        cell: r => `<span class="with-icon">${icon(r.priority >= 0 ? "Priority Power Switch" : "Power Switch")}<span>${esc(r.name)}<br><span class="muted sub">${r.priority >= 0 ? "priority switch" : "power switch"}</span></span></span>` },
+      { key: "on", label: "State", minW: 66, val: r => r.s.IsOn ? 0 : 1,
+        cell: r => `<span class="pill" style="color:${r.s.IsOn ? "var(--ok)" : "var(--bad)"};background:color-mix(in srgb, ${r.s.IsOn ? "var(--ok)" : "var(--bad)"} 14%, transparent)">${r.s.IsOn ? "on" : "off"}</span>` },
+      { key: "prio", label: "Priority", minW: 86, title: "Priority group. When power runs short, switches turn off in order: Undefined first, then 8, 7 … 1 last",
+        val: r => shedRank(r.priority), cell: r => r.priority < 0 ? `<span class="muted">–</span>` : `${prioLabel(r.priority)}<br><span class="muted sub">${r.priority === 0 ? "turns off first" : r.priority === 1 ? "turns off last" : "group " + r.priority}</span>` },
+      { key: "feed", label: "Fed from", minW: 130, title: "The side the power comes from (blue on the map)", val: r => r.feed.out, cell: r => sideText(r.feed) },
+      { key: "ctrl", label: "Controls", minW: 140, title: "What turning this switch off cuts off (orange on the map)", val: r => r.ctrl.users.length, cell: r => sideText(r.ctrl) },
+      { key: "mw", label: "MW", num: true, minW: 64, title: "Power going through the switch now (max if everything behind it ran)", val: r => r.ctrl.use,
+        cell: r => `${fmtNum(r.ctrl.use, 1)}<br><span class="muted sub">max ${fmtNum(r.ctrl.max, 0)}</span>` },
+    ], { sortKey: "prio", storeKey: "pw.swSort", empty: "No power switches on this grid.",
+         rowAttrs: r => `data-sw="${esc(r.id)}" class="${r.id === selSw ? "sel" : ""}"` });
     genTable = new DataTable($("wGens"), [
       { key: "type", label: "Generator", val: r => r.type, cell: r => `<span class="with-icon">${icon(r.type)}<span>${esc(r.type)}<br><span class="muted sub">${esc(shortId(r.id))}</span></span></span>` },
       { key: "status", label: "Status", val: r => Object.keys(G_STATUS).indexOf(r.status), cell: r => pill(r.status) },
@@ -319,8 +403,27 @@ const Power = (() => {
       ],
       fade: p => p.circuits ? !grid().all && !inGrid(p.circuits) : false,   // other grids fade
       fitTo: () => grid().all ? [] : map.all(true).filter(p => p.circuits && inGrid(p.circuits)).map(p => p.ip),
-      tooltip: p => `<div class="row"><span>${esc(p.label)}</span></div>`, hint: "click a generator row to find it",
-      onHover: p => { hl(p && p.id); if (p) scrollRowIntoView($("wGens").querySelector(`tr[data-gid="${CSS.escape(p.id)}"]`)); },
+      tooltip: p => { if (p.layer === "switches") { const r = switchRows().find(x => x.id === p.id); if (r) return switchPop(r); }
+        return `<div class="row"><span>${esc(p.label)}</span></div>`; },
+      hint: "hover a switch to see what's on each side · click a row to find it",
+      onHover: p => {
+        hl(p && p.id); if (p) scrollRowIntoView($("wGens").querySelector(`tr[data-gid="${CSS.escape(p.id)}"]`));
+        if (p && p.layer === "switches") { const r = switchRows().find(x => x.id === p.id); if (r) showSides(r); }
+        else if (!p && sideShown && (!selSw || sideShown.id !== selSw)) showSides(selSw ? switchRows().find(x => x.id === selSw) : null);
+      },
+    });
+    // switches: hover a row = show its two sides on the map; click = keep them shown and find it
+    const swRow = id => switchRows().find(r => r.id === id);
+    $("wSws").addEventListener("mousemove", e => {
+      const tr = e.target.closest("tr[data-sw]"), r = tr && swRow(tr.dataset.sw);
+      if (r) { showSides(r); showPopAt(switchPop(r), e.clientX, e.clientY); } else hideCargoPop();
+    });
+    $("wSws").addEventListener("mouseleave", () => { hideCargoPop(); showSides(selSw ? swRow(selSw) : null); });
+    $("wSws").addEventListener("click", e => {
+      const tr = e.target.closest("tr[data-sw]"); if (!tr) return;
+      selSw = selSw === tr.dataset.sw ? null : tr.dataset.sw;
+      for (const t of $("wSws").querySelectorAll("tr.sel")) t.classList.remove("sel");
+      if (selSw) { tr.classList.add("sel"); showSides(swRow(selSw)); map.fitEmphasis(); } else { showSides(null); map.fit(); }
     });
     $("wGens").addEventListener("click", e => {
       const tr = e.target.closest("tr[data-gid]"); if (!tr) return;
@@ -336,6 +439,7 @@ const Power = (() => {
       if (j) { const t = $(j.dataset.jump); t.scrollIntoView({ behavior: "smooth", block: "start" }); t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash"); return; }
       const sb = e.target.closest("[data-g]");
       if (sb && sb.dataset.g === "grid") { ui.grid = sb.dataset.v; saveUi(); render(); renderCharts(); map.draw(); map.fit(); return; }
+      if (sb && sb.dataset.g === "list") { ui.list = sb.dataset.v; saveUi(); render(); return; }
       if (sb && sb.dataset.g === "range") { ui.range = +sb.dataset.v; saveUi(); render(); pollHistory(); }
     });
     $("wGenSearch").addEventListener("input", e => { ui.gq = e.target.value; saveUi(); render(); });
