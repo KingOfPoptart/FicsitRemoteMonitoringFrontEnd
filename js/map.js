@@ -296,8 +296,10 @@ class MapView {
   renderButtons() {
     if (this.opts.layerMenu) {
       const on = this.layers.filter(l => l.on).length;
-      this.btns.innerHTML = `<button class="f-multi mv-layers${on < this.layers.length ? " f-active" : ""}" data-act="layers" title="Choose what the map shows">` +
+      // only when it changes: rebuilding the button on every refresh made clicks on it miss
+      const html = `<button class="f-multi mv-layers${on < this.layers.length ? " f-active" : ""}" data-act="layers" title="Choose what the map shows">` +
         `<span>Layers <span class="n">${on === this.layers.length ? "all" : `${on} of ${this.layers.length}`}</span></span></button>`;
+      if (this.btnsHtml !== html) { this.btns.innerHTML = html; this.btnsHtml = html; }
       if (this.menu.classList.contains("open")) this.renderMenu();
       return;
     }
@@ -309,11 +311,16 @@ class MapView {
     const groups = [...new Set(this.layers.map(l => l.group || ""))];
     const row = l => `<label class="${this.layerCount(l) ? "" : "empty"}"><input type="checkbox" data-layer="${l.key}"${l.on ? " checked" : ""}>` +
       `<span class="mv-sw">${this.swatch(l)}</span>${esc(l.label)}<span class="n">${this.layerCount(l)}</span></label>`;
-    this.menu.innerHTML = `<div class="pop-list">${groups.map(g => {
+    const html = `<div class="pop-list">${groups.map(g => {
       const ls = this.layers.filter(l => (l.group || "") === g);
       return (g && groups.length > 1 ? `<div class="pop-group" data-group="${esc(g)}" title="Show / hide all ${esc(g.toLowerCase())}">${esc(g)}</div>` : "") + ls.map(row).join("");
     }).join("")}</div>
       <div class="pop-foot"><button data-act="all">All</button><button data-act="none">None</button><button data-act="done">Done</button></div>`;
+    // only when something changed (counts, ticks): rebuilding the open menu every refresh swallowed clicks and scrolled it back
+    if (this.menuHtml === html && this.menu.childElementCount) return;
+    const list = this.menu.querySelector(".pop-list"), top = list ? list.scrollTop : 0;
+    this.menu.innerHTML = html; this.menuHtml = html;
+    const nl = this.menu.querySelector(".pop-list"); if (nl) nl.scrollTop = top;
   }
   openMenu(btn) {
     this.renderMenu(); this.menu.classList.add("open");

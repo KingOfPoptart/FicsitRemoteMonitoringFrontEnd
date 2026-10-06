@@ -81,7 +81,6 @@
   .f-active { border-color: var(--accent); color: var(--accent); }
   .f-multi { text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .f-multi::after { content: "▾"; color: var(--muted); }
-                    padding: 3px 9px; font: inherit; font-size: 12px; cursor: pointer; height: 26px; }
 
   .popover { position: fixed; z-index: 20; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
              box-shadow: 0 10px 30px #0008; padding: 6px; min-width: 190px; display: none; }
@@ -131,7 +130,8 @@
   .map-head .map-info { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: -2px; }
   button.b { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
              padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
-  button.b:hover { border-color: var(--accent); }
+  button.b:hover:not(:disabled) { border-color: var(--accent); }
+  button.b:disabled { opacity: .4; cursor: default; }
   button.b.on { border-color: var(--accent); color: var(--accent); }
   button.layer { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
   button.layer i { width: 14px; height: 3px; border-radius: 2px; opacity: .35; flex: none; }

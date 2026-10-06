@@ -64,11 +64,15 @@ const Power = (() => {
     groups.sort((a, b) => (hasGens(b) - hasGens(a)) || capOf(b) - capOf(a) || a.CircuitGroupID - b.CircuitGroupID);
   }
   // numbered only if two grids would otherwise read exactly the same
-  function gridName(g) {
-    if (groups.length <= 1) return `Main grid ${mwPair(g)}`;
-    const full = x => `${baseName(x)} ${mwPair(x)}`, same = groups.filter(x => full(x) === full(g));
-    return same.length > 1 ? `${baseName(g)} ${same.indexOf(g) + 1} ${mwPair(g)}` : full(g);
+  // grids that would share a name are numbered ("Coal 1", "Coal 2") in grid-ID order, whatever their power,
+  // so the numbers don't swap as output changes; a unique name ("Nuclear") gets none
+  function gridLabel(g) {
+    if (g.all) return "All grids";
+    if (groups.length <= 1) return "Main grid";
+    const base = baseName(g), same = groups.filter(x => baseName(x) === base).sort((a, b) => a.CircuitGroupID - b.CircuitGroupID);
+    return same.length > 1 ? `${base} ${same.indexOf(g) + 1}` : base;
   }
+  const gridName = g => `${gridLabel(g)} ${mwPair(g)}`;
 
   const onGrid = (pi, g) => pi && g && (g.all ? pi.CircuitID >= 0 : pi.CircuitGroupID === g.CircuitGroupID);
   // a switch / pole / line belongs to the selected grid if any of its circuits is one of the grid's
@@ -406,7 +410,7 @@ const Power = (() => {
                   all: () => [...Object.values(G_STATUS).map(v => ({ value: v.label, group: "Generators", label: `<i class="sw" style="background:${v.color}"></i> ${v.label}` })),
                               ...Object.values(SW_STATUS).map(v => ({ value: v.label, group: "Switches", label: `<i class="sw" style="background:${v.color}"></i> ${v.label}` }))] },
         val: r => r.kind === "gen" ? Object.keys(G_STATUS).indexOf(r.status) : 10 + (r.status === "off"), cell: pillFor },
-      { key: "grid", label: "Grid", minW: 76, filter: { value: r => r.gridG ? baseName(r.gridG) : "not connected", noun: "grids" }, val: r => r.gridG ? baseName(r.gridG) : "", cell: r => r.gridG ? esc(baseName(r.gridG)) : `<span class="muted">–</span>` },
+      { key: "grid", label: "Grid", minW: 76, filter: { value: r => r.gridG ? gridLabel(r.gridG) : "not connected", noun: "grids" }, val: r => r.gridG ? gridLabel(r.gridG) : "", cell: r => r.gridG ? esc(gridLabel(r.gridG)) : `<span class="muted">–</span>` },
       { key: "mw", label: "MW", num: true, minW: 104,
         filter: { value: r => (r.kind === "gen" ? r.out : r.ctrl.use) > 0 ? "Power flowing" : "None (0 MW)", noun: "",
                   all: () => [{ value: "Power flowing" }, { value: "None (0 MW)" }] }, title: "Generators: output now / capacity. Switches: power going through now / max",
