@@ -14,7 +14,7 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 ### Vehicles
 ![Vehicles](docs/screenshots/vehicles.png)
 - **Table of every vehicle**: factory carts, tractors, trucks, fluid trucks, explorers, Cyber Wagons, trains and drones, with status (moving, docking, stopped, driven, error), speed, next stop, route, cargo, fill level, nearest station, autopilot and driver. A filter under every column; station and cargo filters are searchable multi-selects.
-- **Live map** with smoothly moving markers. Hover a vehicle to highlight its stops; hover a station to see what's in it; click a row to follow a vehicle.
+- **Live map** with smoothly moving markers (it only redraws while something moves). Hover a vehicle to highlight its stops; hover a station to see what's in it; click a row to follow a vehicle.
 
 ### Production
 ![Production](docs/screenshots/production.png)
@@ -48,11 +48,11 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - Collectibles found (Somersloops, Mercer Spheres, power slugs) and resource nodes tapped. Click one to find the ones still out there on the map.
 
 ### Everywhere
-- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline). **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview and Logistics maps show them all.
+- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline) as arrows pointing the way they face. **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview and Logistics maps show them all.
 - Every table has its title and row count on the left, **Clear filters** on the right, and filters under the column headings.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
 - On a desktop browser each tab fits one screen; on phones the panels stack.
-- `server.py` records power (battery charge and capacity included) and production history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened, and works out the belt and pipe networks every minute.
+- `server.py` records power (battery charge and capacity included) and production history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened. It works out the belt and pipe networks every minute while a page shows them (every 5 minutes for a page in the background, not at all when nobody is looking).
 
 ## Requirements
 - Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
@@ -79,5 +79,10 @@ Options:
 
 ## Notes
 - The map image, vehicle pictures and icons aren't included because they're Coffee Stain's game art. `fetch_assets.py` gets them on your own machine.
-- `server.py` serves the page and passes API calls through to FRM (with a short cache, so several open pages don't multiply the load on the game), so the browser never has to deal with cross-origin (CORS) restrictions.
-- Code: `index.html` (page, Vehicles tab), `js/charts.js` (charts, tables, dropdowns), `js/map.js` (the shared map), and one file per other tab.
+- `server.py` serves the page and passes API calls through to FRM, so the browser never has to deal with cross-origin (CORS) restrictions.
+- **Load on the game server**: FRM answers most calls on the game thread, so the dashboard tries to ask little:
+  - each tab polls only what it shows, and maps fetch shared data (players, power network, storage, belts and pipes) only while a tab showing them is open;
+  - a page in the background (another browser tab, a minimised window) polls at most once a minute and catches up when it's shown again;
+  - `server.py` caches replies (1 s; 4 s for the big ones), so several open pages and the history recorder share requests, and the Overview reuses the recorder's machine snapshot.
+  With one page open this costs FRM about 2–3 s of work a minute; the biggest single request (`getBelts`, a few hundred ms on a large factory) runs once a minute only while belts and pipes are on screen.
+- Code: `index.html` (page, Vehicles tab), `js/poll.js` (polling), `js/charts.js` (charts, tables, dropdowns), `js/map.js` (the shared map), and one file per other tab.

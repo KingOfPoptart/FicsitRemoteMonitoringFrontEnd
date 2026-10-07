@@ -105,8 +105,9 @@ const Production = (() => {
   }
 
   // machines + per-item totals, also used by the Overview tab
-  async function snapshot() {
-    const [fac, ext, gens] = await Promise.all([getJSON("getFactory"), getJSON("getExtractor"), getJSON("getGenerators").catch(() => [])]);
+  // maxAge (s): an older copy server.py already has will do (its history recorder fetches these every 15 s)
+  async function snapshot(maxAge) {
+    const [fac, ext, gens] = await Promise.all([getJSON("getFactory", maxAge), getJSON("getExtractor", maxAge), getJSON("getGenerators", maxAge).catch(() => [])]);
     const ms = fac.map(m => fromMachine(m, false)).concat(ext.map(m => fromMachine(m, true)));
     return { machines: ms, items: aggregate(ms, gens), gens };
   }
@@ -349,7 +350,7 @@ const Production = (() => {
       { key: "clock", label: "Clock", minW: 62, filter: { value: r => pct(r.clock), noun: "" }, num: true, title: "Clock speed · power shards · Somersloops", val: r => r.clock,
         cell: r => `${pct(r.clock)}${r.shards ? `<br><span class="muted sub" title="Power shards">◆${r.shards}</span>` : ""}${r.sloops ? ` <span class="muted sub" title="Somersloops">✦${r.sloops}</span>` : ""}` },
       { key: "mw", label: "MW", minW: 58, num: true, title: "Power draw now (max)", val: r => r.mw, cell: r => `${fmtNum(r.mw, 1)}<br><span class="muted sub">max ${fmtNum(r.maxMw, 1)}</span>` },
-    ], { sortKey: "status", storeKey: "pt.machSort", onFilter: () => { render(); map.fit(); }, rowAttrs: r => `data-mid="${esc(r.id)}" class="${r.id === selMachine ? "sel" : ""}${relation(r) ? " rel-" + relation(r) : ""}"`,
+    ], { sortKey: "status", storeKey: "pt.machSort", virtual: true, onFilter: () => { render(); map.fit(); }, rowAttrs: r => `data-mid="${esc(r.id)}" class="${r.id === selMachine ? "sel" : ""}${relation(r) ? " rel-" + relation(r) : ""}"`,
          pin: r => relation(r) ? 0 : 1 });   // the clicked item's machines first, keeping the column sort among them
 
 
@@ -362,7 +363,7 @@ const Production = (() => {
       layers: [...GAME_BUILDINGS, "Other"].map(b => ({ key: "b:" + b, group: "Machines", label: b, color: "var(--ok)", size: 4, swatchHtml: b === "Other" ? "" : icon(b, "icon sm") })),
       hint: "markers follow the filters · click a machine row to find it",
       tooltip: p => { const m = machines.find(x => x.id === p.id); return m ? machinePop(m) : ""; },
-      onHover: p => { hl(p && p.id); if (p) scrollRowIntoView($("pMachines").querySelector(`tr[data-mid="${CSS.escape(p.id)}"]`)); },
+      onHover: p => { if (p) machineTable.reveal(r => r.id === p.id); hl(p && p.id); },
     });
 
     $("pSearch").addEventListener("input", e => { ui.q = e.target.value; saveUi(); render(); });
@@ -401,9 +402,9 @@ const Production = (() => {
     show() {
       if (!itemTable) init();
       poll(); pollHistory();
-      timer = timer || setInterval(() => { poll(); }, POLL_MS);
-      this.histTimer = this.histTimer || setInterval(pollHistory, 15000);
+      timer = timer || every(poll, POLL_MS);
+      this.histTimer = this.histTimer || every(pollHistory, 15000);
     },
-    hide() { clearInterval(timer); clearInterval(this.histTimer); timer = this.histTimer = null; },
+    hide() { stopPoll(timer); stopPoll(this.histTimer); timer = this.histTimer = null; },
   };
 })();

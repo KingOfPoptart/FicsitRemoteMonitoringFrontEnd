@@ -233,9 +233,14 @@ const bar = (frac, color) => `<span class="fill"><i style="width:${Math.max(0, M
 // Options are counted against the other columns' filters. onFilter() is called after a filter changes.
 // Widths: measured from the content on first render, then fixed; drag a header edge to resize, double-click it
 // to fit the content. Sort and widths are remembered under storeKey.
+// virtual: only the rows in (and near) view are in the page, with spacers for the rest — for tables of thousands of
+// rows. Rows that aren't shown can't be found with querySelector: use reveal() to scroll to one.
 class DataTable {
-  constructor(el, cols, { sortKey, dir = 1, rowAttrs = () => "", empty = "Nothing to show.", storeKey, pin = () => 0, onFilter } = {}) {
-    Object.assign(this, { el, cols, rowAttrs, empty, storeKey, pin, onFilter });
+  constructor(el, cols, { sortKey, dir = 1, rowAttrs = () => "", empty = "Nothing to show.", storeKey, pin = () => 0, onFilter, virtual = false } = {}) {
+    Object.assign(this, { el, cols, rowAttrs, empty, storeKey, pin, onFilter, virtual });
+    if (virtual) el.addEventListener("scroll", () => {
+      if (!this.vRaf) this.vRaf = requestAnimationFrame(() => { this.vRaf = 0; this.renderWindow(false); });
+    }, { passive: true });
     const load = k => { try { return k && JSON.parse(localStorage.getItem(k)); } catch { return null; } };
     const saved = load(storeKey);
     this.sort = saved && cols.some(c => c.key === saved.key) ? saved : { key: sortKey || cols[0].key, dir };
@@ -368,13 +373,48 @@ class DataTable {
       const r = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true });
       return this.pin(a) - this.pin(b) || r * this.sort.dir || String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { numeric: true });
     });
-    this.body.innerHTML = sorted.map(r => `<tr ${this.rowAttrs(r)}>${this.cols.map(c => `<td class="${c.num ? "num" : ""} ${c.cls || ""}">${c.cell(r)}</td>`).join("")}</tr>`).join("")
-      || `<tr><td colspan="${this.cols.length}" class="muted">${this.empty}</td></tr>`;
+    this.sorted = sorted;
+    if (this.virtual && sorted.length > 150) this.renderWindow(true);
+    else {
+      this.vRange = null;
+      this.body.innerHTML = sorted.map(r => this.rowHtml(r)).join("") || `<tr><td colspan="${this.cols.length}" class="muted">${this.empty}</td></tr>`;
+    }
     if (!this.measured && rows.length && this.el.clientWidth) this.measure();
     if (this.measured) this.applyWidths();
     if (this.pickers) for (const p of this.pickers) p.refresh();
   }
 }
+
+DataTable.prototype.rowHtml = function (r) {
+  return `<tr ${this.rowAttrs(r)}>${this.cols.map(c => `<td class="${c.num ? "num" : ""} ${c.cls || ""}">${c.cell(r)}</td>`).join("")}</tr>`;
+};
+// virtual tables: put the rows around the scroll position in the page (force: even if they're already there)
+DataTable.prototype.renderWindow = function (force) {
+  if (!force && !this.vRange) return;
+  const rows = this.sorted, h = this.rowH || 40, top = this.el.scrollTop - this.table.tHead.offsetHeight;
+  const first = Math.max(0, Math.floor(top / h)), last = Math.min(rows.length, Math.ceil((top + this.el.clientHeight) / h) + 1);
+  if (!force && first >= this.vRange[0] && last <= this.vRange[1]) return;   // what's in view is already there
+  const a = Math.max(0, first - 30), b = Math.min(rows.length, last + 30);   // extra either side: small scrolls don't re-render
+  const pad = px => px > 0 ? `<tr class="vpad"><td colspan="${this.cols.length}" style="height:${Math.round(px)}px;padding:0;border:0"></td></tr>` : "";
+  this.body.innerHTML = pad(a * h) + rows.slice(a, b).map(r => this.rowHtml(r)).join("") + pad((rows.length - b) * h);
+  this.vRange = [a, b];
+  const trs = this.body.querySelectorAll("tr:not(.vpad)");   // rows wrap, so learn their average height from these
+  if (trs.length > 10) {
+    const z = trs[trs.length - 1], avg = (z.offsetTop + z.offsetHeight - trs[0].offsetTop) / trs.length;
+    if (avg > 0 && Math.abs(avg - h) > 0.5) this.rowH = avg;
+  }
+};
+// scroll to the first row matching pred (rendering it first in a virtual table); returns its <tr>
+DataTable.prototype.reveal = function (pred) {
+  const i = (this.sorted || []).findIndex(pred); if (i < 0) return null;
+  if (this.vRange && (i < this.vRange[0] || i >= this.vRange[1])) {
+    this.el.scrollTop = Math.max(0, this.table.tHead.offsetHeight + i * (this.rowH || 40) - this.el.clientHeight / 2);
+    this.renderWindow(true);
+  }
+  const tr = this.body.querySelectorAll("tr:not(.vpad)")[i - (this.vRange ? this.vRange[0] : 0)];
+  scrollRowIntoView(tr);
+  return tr;
+};
 
 /**
  * Searchable multi-select dropdown, same look as the Vehicles table's filters (.f-multi button + .popover).

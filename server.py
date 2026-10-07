@@ -3,10 +3,11 @@ and records power/production history so the charts have data from before the pag
 
   python server.py [--port 8090] [--host 127.0.0.1] [--frm http://localhost:8080] [--no-history]
 
-/api/<endpoint>  ->  <FRM URL>/<endpoint>   (responses cached ~1 s, so several open pages don't multiply FRM load)
+/api/<endpoint>  ->  <FRM URL>/<endpoint>   (responses cached 1 s, big ones 4 s, so several open pages don't multiply FRM load)
 /hist/power?mins=60       power history per grid (sampled every 5 s, kept 24 h)
 /hist/production?mins=60  produced/consumed per item and generation per generator type (sampled every 15 s, kept 24 h)
-/logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks (every 60 s)
+/logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks (worked out
+                          every 60 s while a page shows them, every 5 min for a page in the background, else not at all)
 
 By default it only listens on this machine (127.0.0.1). Use --host 0.0.0.0 to reach it from other
 devices on your network. The FRM URL can also be set with the FRM_URL environment variable.
@@ -36,6 +37,10 @@ ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths"
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")
 CACHE_S = 1.0
+# Big replies are kept a little longer, so tabs, other pages and the recorder fetching them at different moments share
+# one request. 4 s, not 5: tabs poll these every 5 s and should still get a fresh copy each time.
+SLOW_CACHE_S = dict.fromkeys(("getFactory", "getExtractor", "getGenerators", "getPowerUsage", "getCables", "getPowerPoles",
+                              "getStorageInv", "getVehiclePaths", "getBelts", "getPipes", "getResourceNode"), 4.0)
 HISTORY_FILE = ROOT / "history.json"
 KEEP_S = 24 * 3600
 POWER_EVERY_S, PROD_EVERY_S, SAVE_EVERY_S = 5, 15, 60
@@ -46,8 +51,10 @@ _cache, _cache_lock = {}, threading.Lock()
 _ep_locks = {ep: threading.Lock() for ep in ALLOWED}
 
 
-def frm(endpoint, max_age=CACHE_S):
+def frm(endpoint, max_age=None):
     """(status, body bytes) for an FRM endpoint; concurrent callers share one request."""
+    if max_age is None:
+        max_age = SLOW_CACHE_S.get(endpoint, CACHE_S)
     with _ep_locks[endpoint]:
         with _cache_lock:
             hit = _cache.get(endpoint)
@@ -67,7 +74,7 @@ def frm(endpoint, max_age=CACHE_S):
         return status, body
 
 
-def frm_json(endpoint, max_age=CACHE_S):
+def frm_json(endpoint, max_age=None):
     status, body = frm(endpoint, max_age)
     if status != 200:
         raise OSError(f"{endpoint}: HTTP {status}")
@@ -257,9 +264,21 @@ HIST = History()
 # networks are worked out from geometry: segments whose ends meet, segments touching the same joiner (splitter,
 # merger, pipe junction, pump, valve) and, for belts, connected ends straight above each other (a conveyor lift,
 # which FRM doesn't list) form one network. A network feeds "production" if any end sits at a machine or
-# extractor and "power" if at a generator; other buildings it reaches are listed by name. Every minute.
-LOGI = {"json": None, "t": 0}
-LOGI_EVERY_S = 60
+# extractor and "power" if at a generator; other buildings it reaches are listed by name.
+# Only while someone is looking: getBelts / getPipes are big and FRM answers them on the game thread (a short hitch
+# on the server), so it's every minute for a page showing them, every 5 minutes for one in the background, else never.
+LOGI = {"json": None, "t": -1e9, "tried": -1e9, "fg": -1e9, "bg": -1e9}   # monotonic: last result, last try, last asked (in view / background)
+LOGI_EVERY_S, LOGI_BG_EVERY_S, LOGI_IDLE_S = 60, 300, 180
+_logi_wake = threading.Event()
+
+
+def logistics_due():
+    now = time.monotonic()
+    if now - LOGI["tried"] < 30:   # working on it, or FRM just failed: don't hammer it
+        return False
+    age = now - LOGI["t"]
+    return ((now - LOGI["fg"] < LOGI_IDLE_S and age >= LOGI_EVERY_S - 5) or
+            (now - LOGI["bg"] < LOGI_IDLE_S and age >= LOGI_BG_EVERY_S - 5))
 PIPE_FLOW = {1: 300, 2: 600}   # m³/min per pipe tier (wiki)
 
 
@@ -421,6 +440,11 @@ BELT_IPM = {1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200}   # items/min per be
 
 def logistics_worker():
     while True:
+        _logi_wake.wait(LOGI_EVERY_S)
+        _logi_wake.clear()
+        if not logistics_due():
+            continue
+        LOGI["tried"] = time.monotonic()
         try:
             fac, ext, gens = frm_json("getFactory", 30), frm_json("getExtractor", 30), frm_json("getGenerators", 30)
             seen = {m["ID"] for m in fac + ext + gens}
@@ -447,10 +471,9 @@ def logistics_worker():
                       "valves": sum("Valve" in (x.get("Name") or "") for x in pump_like)}
             LOGI["json"] = json.dumps({"belts": belts, "lifts": lifts, "pipes": pipes, "networks": bnets + pnets, "counts": counts},
                                       separators=(",", ":")).encode()
-            LOGI["t"] = time.time()
+            LOGI["t"] = time.monotonic()
         except Exception:
             pass   # FRM down or loading: keep the last result
-        time.sleep(LOGI_EVERY_S)
 
 
 def recorder():
@@ -462,7 +485,7 @@ def recorder():
             HIST.add_power(frm_json("getPower"))
             if t0 - last_prod >= PROD_EVERY_S:
                 last_prod = t0
-                fac, ext, gens = frm_json("getFactory", 3), frm_json("getExtractor", 3), frm_json("getGenerators", 3)
+                fac, ext, gens = frm_json("getFactory"), frm_json("getExtractor"), frm_json("getGenerators")
                 gen = {}
                 for g in gens:
                     gen[g["Name"]] = gen.get(g["Name"], 0) + (g.get("RegulatedDemandProd") or 0)
@@ -486,9 +509,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         path, _, query = self.path.partition("?")
         if path.startswith("/api/"):
-            return self.proxy(path[5:])
+            return self.proxy(path[5:], query)
         if path == "/logistics":
-            return self.send_body(200, LOGI["json"]) if LOGI["json"] else self.send_body(503, b'{"error":"belts and pipes not ready yet"}')
+            LOGI["bg" if "bg=1" in query else "fg"] = time.monotonic()
+            if logistics_due():
+                _logi_wake.set()
+            if not LOGI["json"]:
+                return self.send_body(503, b'{"error":"belts and pipes not ready yet"}')
+            return self.send_body(200, LOGI["json"], {"X-Age": str(int(time.monotonic() - LOGI["t"]))})
         if path in ("/hist/power", "/hist/production"):
             try:
                 mins = max(1, min(KEEP_S // 60, int(urllib.parse.parse_qs(query).get("mins", ["60"])[0])))
@@ -501,13 +529,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return super().do_GET()
         self.send_error(404)
 
-    def proxy(self, endpoint):
+    def proxy(self, endpoint, query=""):
         if endpoint not in ALLOWED:
             return self.send_error(404)
-        self.send_body(*frm(endpoint))
+        try:   # ?max_age=N: an older copy is fine (e.g. the Overview reusing what the history recorder fetched)
+            max_age = min(60.0, float(urllib.parse.parse_qs(query)["max_age"][0]))
+        except (KeyError, ValueError):
+            max_age = None
+        self.send_body(*frm(endpoint, max_age))
 
-    def send_body(self, status, body):
+    def send_body(self, status, body, headers=None):
         self.send_response(status)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))

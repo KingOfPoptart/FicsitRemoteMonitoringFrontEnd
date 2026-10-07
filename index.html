@@ -598,6 +598,7 @@
 <main id="tab-logistics" class="tab onescreen" hidden></main>
 <main id="tab-progression" class="tab onescreen" hidden></main>
 
+<script src="/js/poll.js"></script>
 <script src="/js/charts.js"></script>
 <script src="/js/map.js"></script>
 <script>
@@ -1188,8 +1189,9 @@ function renderStats() {
 }
 
 // ---- data ---------------------------------------------------------------------
-async function getJSON(ep) {
-  const r = await fetch("/api/" + ep, { cache: "no-store" });
+// maxAge (s): accept a copy server.py fetched up to that long ago instead of asking FRM again
+async function getJSON(ep, maxAge) {
+  const r = await fetch("/api/" + ep + (maxAge ? "?max_age=" + maxAge : ""), { cache: "no-store" });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error || r.status);
   return j;
@@ -1264,7 +1266,7 @@ const networkLayers = () => [
   { key: "dronePorts", group: "Stations", label: "Drone ports", swatch: "background:#f06292;width:9px;height:9px;border-radius:2px", count: () => dronePorts.length },
 ];
 const vmap = new MapView($("vehMap"), {
-  storeKey: "vt.layers", animate: true, dim: 0.35, fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
+  storeKey: "vt.layers", animate: () => mapMoving(), dim: 0.35, fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
   layerMenu: true, players: true,
   // a layer per vehicle type (picture + count), then the transport network; players are added by MapView
   layers: [...Object.keys(TYPES).map(t => ({ key: "v:" + t, group: "Vehicles", label: t, swatchHtml: typeImg(t),
@@ -1280,6 +1282,15 @@ function worldToImg(x, y) {
 }
 const toScreen = p => vmap.toScreen(p);
 
+// the map only repaints continuously while something on it moves: a vehicle gliding to its latest position, or the
+// pulsing rings round a focused vehicle and its stops
+function mapMoving() {
+  if (hoverId || followId) return true;
+  const now = performance.now();
+  for (const m of motion.values())
+    if (now - m.t0 < POLL_MS && (Math.abs(m.tx - m.fx) + Math.abs(m.ty - m.fy) > 0.01 || Math.abs(m.trot - m.frot) > 0.1)) return true;
+  return false;
+}
 function interp(m, now) {
   const t = Math.min(1, (now - m.t0) / POLL_MS);
   const d = ((m.trot - m.frot + 540) % 360) - 180;   // shortest turn
@@ -1594,7 +1605,8 @@ function showTab(tab) {
   setExpanded(null);   // leaving a tab closes any full-screen panel
   for (const [k, m] of Object.entries(mods)) k === tab ? m.show() : m.hide();
   addExpanders();
-  if (tab === "vehicles") { resize(); poll(); }
+  if (tab === "vehicles") resize();
+  wakePolls();   // catch up whatever this tab needs (its own polls, the shared map data) right away
 }
 $("tabs").addEventListener("click", e => { const b = e.target.closest("button[data-tab]"); if (b) showTab(b.dataset.tab); });
 addEventListener("hashchange", () => showTab(location.hash.slice(1)));
@@ -1602,14 +1614,16 @@ addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 // ---- boot -----------------------------------------------------------------------
 resize(); fitWorld(); renderHead(); renderLayerButtons(); applyRowHeight();
 pollStatic().then(poll);
-setInterval(poll, POLL_MS);
-setInterval(pollStatic, 60000);
+every(poll, POLL_MS, () => activeTab === "vehicles");
+// paths, rails and stations are drawn on the Vehicles and Overview maps only
+const showsNetwork = () => activeTab === "vehicles" || activeTab === "overview";
+every(pollStatic, 60000, showsNetwork);
 // station contents change constantly; refresh them faster than paths/rails
-setInterval(async () => {
+every(async () => {
   const [ts, rs] = await Promise.allSettled([getJSON("getTruckStation"), getJSON("getTrainStation")]);
   if (ts.status === "fulfilled") truckStations = ts.value;
   if (rs.status === "fulfilled") trainStations = rs.value;
-}, 3000);
+}, 3000, showsNetwork);
 </script>
 <script src="/js/production.js"></script>
 <script src="/js/power.js"></script>

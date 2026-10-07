@@ -238,8 +238,8 @@ const Progression = (() => {
     show() {
       if (!map) init();
       fast(); slow(); world();
-      if (!timers.length) timers = [setInterval(fast, 10000), setInterval(slow, 60000), setInterval(world, 300000)];
+      if (!timers.length) timers = [every(fast, 10000), every(slow, 60000), every(world, 300000)];
     },
-    hide() { timers.forEach(clearInterval); timers = []; },
+    hide() { timers.forEach(stopPoll); timers = []; },
   };
 })();

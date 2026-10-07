@@ -11,7 +11,7 @@
  *   storeKey,                       localStorage key for which layers are on
  *   tooltip(point) -> html, onHover(point|null), onClick(point),
  *   draw(ctx, now, mapView)         extra drawing between the map image and the point layers
- *   animate                         repaint every frame (moving markers) while visible
+ *   animate() -> bool               repaint continuously (~30 fps) while it says something on the map is moving
  *   fitTo() -> [image points], fitLabel   what the Fit button frames (default: the visible point layers)
  *   onPan()                         the user dragged the map
  *   hint, dim                       hint text bottom-left; darkening over the map image (0-1)
@@ -21,11 +21,13 @@
 // Players on any map: MapView({ players: true }) adds this layer, and one shared poll keeps every such map updated.
 const PLAYER_COLOR = "#22d3ee";   // cyan: nothing else on the maps uses it
 const playerLayer = () => ({ key: "players", group: "People", label: "Players", color: PLAYER_COLOR, size: 6, shape: "player", top: true });
+// A shared poll only runs while a map on the open tab uses it (see every() in poll.js).
+const onScreen = maps => [...maps].some(mv => mv.tab === activeTab);
 const Players = {
   list: [], maps: new Set(), timer: null,
   attach(mv) {
     this.maps.add(mv); this.push(mv);
-    if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 5000); }
+    if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 5000, () => onScreen(this.maps)); }
   },
   async poll() {
     try { this.list = await getJSON("getPlayer"); } catch { return; }
@@ -34,6 +36,7 @@ const Players = {
   push(mv) {   // online: solid orange + name; offline: grey, dashed outline, "(offline)"
     mv.setPoints("players", this.list.filter(p => p.location).map(p => ({ id: p.ID, x: p.location.x, y: p.location.y,
       label: `${p.Name}${p.Online ? " · online" : " · offline"}`, name: p.Online ? p.Name : `${p.Name} (offline)`,
+      rot: typeof p.location.rotation === "number" ? p.location.rotation - 90 : null,   // FRM: compass, 0 = north
       offline: !p.Online, color: p.Online ? PLAYER_COLOR : "#8c94a1" })));
   },
 };
@@ -55,10 +58,13 @@ const logisticsLayers = keep => [
 const Logistics = {
   belts: [], lifts: [], pipes: [], networks: [], counts: {}, maps: new Set(), listeners: new Set(), timer: null,
   attach(mv) { this.maps.add(mv); this.start(); },
-  start() { if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 60000); } },
+  start() { if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 60000, () => onScreen(this.maps)); } },
   async poll() {
     try {
-      const r = await fetch("/logistics", { cache: "no-store" }); if (!r.ok) throw 0;
+      // ?bg=1: only a page in the background is asking, so the server works the networks out less often
+      const r = await fetch("/logistics" + (document.hidden ? "?bg=1" : ""), { cache: "no-store" }); if (!r.ok) throw 0;
+      // an old result (nobody was looking, so the server stopped working it out): it is on it now, look again soon
+      if (+r.headers.get("X-Age") > 90 && !document.hidden) setTimeout(() => this.poll(), 10000);
       Object.assign(this, await r.json());
       this.byId = new Map(this.networks.map(n => [n.id, n]));
     } catch { if (!this.belts.length) setTimeout(() => this.poll(), 5000); return; }   // server still working it out
@@ -136,7 +142,7 @@ const powerLayers = keep => [
 ];
 const PowerNet = {
   wires: [], poles: [], switches: [], storage: [], things: [], groupOf: new Map(), maps: new Set(), listeners: new Set(), timer: null,
-  attach(mv) { this.maps.add(mv); if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 30000); } else this.push(mv); },
+  attach(mv) { this.maps.add(mv); if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 30000, () => onScreen(this.maps)); } else this.push(mv); },
   async poll() {
     const [c, p, s, u, g, w] = await Promise.allSettled(["getCables", "getPowerPoles", "getSwitches", "getPowerUsage", "getGenerators", "getPower"].map(e => getJSON(e)));
     const ok = r => r.status === "fulfilled" ? r.value : null;
@@ -205,7 +211,7 @@ const storageLayers = keep => STORAGE_ORDER.map(type => { const k = storageKind(
 const Storage = {
   list: [], cloud: [], hasBuffers: false, maps: new Set(), listeners: new Set(), timer: null, loaded: false,
   attach(mv) { this.maps.add(mv); this.start(); if (this.loaded) this.push(mv); },
-  start() { if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 10000); } },
+  start() { if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 10000, () => onScreen(this.maps)); } },
   async poll() {
     const [s, f, c, d] = await Promise.allSettled(["getStorageInv", "getFluidBuffer", "getCrateInv", "getCloudInv"].map(e => getJSON(e)));
     const ok = r => r.status === "fulfilled" ? r.value : null;
@@ -375,8 +381,16 @@ class MapView {
     if (opts.logistics) Logistics.attach(this);
     if (opts.powerNet) PowerNet.attach(this);
     if (opts.storage) Storage.attach(this);
-    if (opts.animate) {   // continuous repaint, skipped while the map isn't on screen (hidden tab)
-      const loop = () => { if (this.canvas.clientWidth) this.paint(); requestAnimationFrame(loop); };
+    if (opts.animate) {   // repaint while something moves (capped at ~30 fps), never while the map isn't on screen
+      let last = 0, was = false;
+      const loop = t => {
+        requestAnimationFrame(loop);
+        if (!this.canvas.clientWidth) return;
+        const moving = opts.animate();
+        if (moving && t - last >= 32) { last = t; this.paint(); }
+        else if (!moving && was) this.paint();   // one last frame with everything where it stopped
+        was = moving;
+      };
       requestAnimationFrame(loop);
     }
   }
@@ -425,7 +439,7 @@ class MapView {
     if (l.swatch) return `<i style="${l.swatch}"></i>`;
     const shape = { square: "", diamond: "transform:rotate(45deg) scale(.8);", ring: `background:none;border:2px solid ${l.color};border-radius:50%;`,
                     arrow: "clip-path:polygon(100% 50%,0 100%,25% 50%,0 0);width:11px;", dot: "border-radius:50%;",
-                    player: "border-radius:50%;box-shadow:0 0 0 2px #fff;width:8px;height:8px;",
+                    player: "clip-path:polygon(100% 50%,0 95%,25% 50%,0 5%);width:12px;",
                     triangle: "clip-path:polygon(50% 0,100% 100%,0 100%);width:11px;height:11px;" }[l.shape || "dot"];
     return `<i style="background:${l.color};width:9px;height:9px;display:inline-block;${shape}"></i>`;
   }
@@ -661,12 +675,16 @@ class MapView {
     else if (l.shape === "triangle") {   // a tower (Space Elevator)
       ctx.moveTo(s.x, s.y - rad * 1.5); ctx.lineTo(s.x + rad * 1.15, s.y + rad * 0.9); ctx.lineTo(s.x - rad * 1.15, s.y + rad * 0.9); ctx.closePath();
     }
-    else if (l.shape === "player") {
-      ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5; if (p.offline) ctx.setLineDash([3, 2.5]);
-      ctx.stroke(); ctx.setLineDash([]);
-      ctx.lineWidth = 1; ctx.strokeStyle = "#0d1013"; ctx.beginPath(); ctx.arc(s.x, s.y, rad + 2, 0, Math.PI * 2); ctx.stroke();
-      ctx.globalAlpha = 1; return;
+    else if (l.shape === "player") {   // a slim chevron pointing where they face (a dot if FRM gives no heading)
+      const outline = () => {
+        ctx.lineJoin = "round"; ctx.lineWidth = 4.5; ctx.strokeStyle = "#0d1013"; ctx.stroke();   // dark edge so it reads on any map colour
+        ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; if (p.offline) ctx.setLineDash([3, 2.5]);
+        ctx.stroke(); ctx.setLineDash([]); ctx.fill(); ctx.lineJoin = "miter";
+      };
+      if (p.rot == null) { ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); outline(); ctx.globalAlpha = 1; return; }
+      const a = p.rot * Math.PI / 180, pt = (x, y) => [s.x + x * Math.cos(a) - y * Math.sin(a), s.y + x * Math.sin(a) + y * Math.cos(a)];
+      ctx.moveTo(...pt(rad * 1.9, 0)); ctx.lineTo(...pt(-rad * 1.2, rad * 0.95)); ctx.lineTo(...pt(-rad * 0.45, 0)); ctx.lineTo(...pt(-rad * 1.2, -rad * 0.95)); ctx.closePath();
+      outline(); ctx.globalAlpha = 1; return;
     }
     else if (l.shape === "tank") {   // fluid buffer: a filled circle with a dark core, like the pipes
       ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke();

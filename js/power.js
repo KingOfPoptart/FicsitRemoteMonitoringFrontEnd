@@ -522,10 +522,10 @@ const Power = (() => {
     show() {
       if (!chart) init();
       poll(); pollDetail(); pollHistory();
-      timer = timer || setInterval(poll, POLL_MS);
-      detailTimer = detailTimer || setInterval(pollDetail, DETAIL_MS);
-      histTimer = histTimer || setInterval(pollHistory, 5000);
+      timer = timer || every(poll, POLL_MS);
+      detailTimer = detailTimer || every(pollDetail, DETAIL_MS);
+      histTimer = histTimer || every(pollHistory, 5000);
     },
-    hide() { [timer, detailTimer, histTimer, netTimer].forEach(clearInterval); timer = detailTimer = histTimer = netTimer = null; },
+    hide() { [timer, detailTimer, histTimer, netTimer].forEach(stopPoll); timer = detailTimer = histTimer = netTimer = null; },
   };
 })();

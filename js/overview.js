@@ -13,14 +13,15 @@ const Overview = (() => {
     if (res.some(r => r.status === "fulfilled")) setConn(true); else setConn(false, res[0].reason?.message || "error");
   }
   async function fast() {
-    await load(["getPower", "getSessionInfo", "getPlayer", "getSpaceElevator", "getHUBTerminal", "getResourceSink", "getTradingPost"]);
+    await load(["getPower", "getSessionInfo", "getSpaceElevator", "getHUBTerminal", "getResourceSink", "getTradingPost"]);
     try {
       const [w, t, dr] = await Promise.all([getJSON("getVehicles"), getJSON("getTrains").catch(() => []), getJSON("getDrone").catch(() => [])]);
       veh = w.map(fromWheeled).concat(t.map(fromTrain), dr.map(fromDrone));
     } catch {}
     render();
   }
-  async function factory() { try { prod = await Production.snapshot(); } catch {} render(); }
+  // machines and items: the copy server.py's history recorder takes every 15 s does (these replies are the biggest FRM has)
+  async function factory() { try { prod = await Production.snapshot(20); } catch {} render(); }
   // ---- Logistics card: belts and pipes, tiers, unconnected ends (data from the shared /logistics fetch)
   function renderLogistics() {
     const nets = Logistics.networks;
@@ -99,7 +100,7 @@ const Overview = (() => {
   // ---- render ------------------------------------------------------------------------------------
   function render() {
     if (!$("ovAttn")) return;
-    const s = d.getSessionInfo, players = d.getPlayer || [];
+    const s = d.getSessionInfo, players = Players.list;   // the map's shared player poll
     const online = players.filter(p => p.Online);
     $("ovSession").innerHTML = s ? `<b>${esc(s.SessionName)}</b><span class="muted"> · day ${s.PassedDays} · ${String(s.Hours).padStart(2, "0")}:${String(s.Minutes).padStart(2, "0")} ${s.IsDay ? "☀" : "☾"} · ${esc(s.TotalPlayDurationText)} played</span>
       <span class="muted"> · ${online.length ? `${online.length} online: ${online.map(p => esc(p.Name)).join(", ")}` : "nobody online"}</span>` : "";
@@ -228,8 +229,8 @@ const Overview = (() => {
     show() {
       if (!map) init();
       fast().then(powerHist); factory(); slow(); Logistics.start();
-      if (!timers.length) timers = [setInterval(fast, 3000), setInterval(factory, 10000), setInterval(slow, 60000), setInterval(powerHist, 15000)];
+      if (!timers.length) timers = [every(fast, 3000), every(factory, 15000), every(slow, 60000), every(powerHist, 15000)];
     },
-    hide() { timers.forEach(clearInterval); timers = []; },
+    hide() { timers.forEach(stopPoll); timers = []; },
   };
 })();
