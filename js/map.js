@@ -155,6 +155,75 @@ function drawPowerLines(mv, keep) {
   }
 }
 
+// Storage on any map: MapView({ storage: s => bool }) adds a layer per kind of storage (containers, boxes, fluid
+// buffers, Dimensional Depot uploaders, crates) with the ones the filter keeps. One shared poll every 10 s of
+// getStorageInv + getFluidBuffer + getCrateInv + getCloudInv (the depot's contents). getFluidBuffer, the slot counts
+// and the depot limits need the newer FRM build; without them buffers are missing and slots are estimated.
+const STORAGE_TYPES = {   // ClassName -> [name, kind, slots (when FRM doesn't say), icon]
+  Build_StorageContainerMk1_C: ["Storage Container", "items", 24],
+  Build_StorageContainerMk2_C: ["Industrial Storage Container", "items", 48],
+  Build_StoragePlayer_C: ["Personal Storage Box", "box", 25],
+  Build_StorageIntegrated_C: ["HUB Storage Box", "box", 25, "Personal Storage Box"],   // the box built into the HUB
+  Build_StorageMedkit_C: ["Medical Storage Box", "box", 25],
+  Build_StorageHazard_C: ["Hazard Storage Box", "box", 25],
+  Build_CentralStorage_C: ["Dimensional Depot Uploader", "depot", 1],
+  Build_PipeStorageTank_C: ["Fluid Buffer", "fluid"],
+  Build_IndustrialTank_C: ["Industrial Fluid Buffer", "fluid"],
+};
+const STORAGE_ORDER = [...Object.values(STORAGE_TYPES).map(t => t[0]), "Dismantle Crate", "Death Crate"];
+const STORAGE_COLOR = { items: "#b5e550", box: "#d9f99d", fluid: "#5eead4", depot: "#b5e550", crate: "#8c94a1" };   // lime: nothing else uses it
+// one layer per kind of building (shape + colour by what it holds: items, fluid, depot, crate)
+const STORAGE_SHAPE = { items: ["square", 4], box: ["square", 3], fluid: ["tank", 4.5], depot: ["diamond", 4], crate: ["ring", 4] };
+const storageKind = type => Object.values(STORAGE_TYPES).find(t => t[0] === type)?.[1] || (/Crate/.test(type) ? "crate" : "items");
+const storageKey = type => "st:" + type;
+const storageLayers = keep => STORAGE_ORDER.map(type => { const k = storageKind(type), [shape, size] = STORAGE_SHAPE[k];
+  return { key: storageKey(type), group: "Storage", label: type, color: STORAGE_COLOR[k], shape, size: type.startsWith("Industrial") ? size + 1 : size }; });
+const Storage = {
+  list: [], cloud: [], hasBuffers: false, maps: new Set(), listeners: new Set(), timer: null, loaded: false,
+  attach(mv) { this.maps.add(mv); this.start(); if (this.loaded) this.push(mv); },
+  start() { if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 10000); } },
+  async poll() {
+    const [s, f, c, d] = await Promise.allSettled(["getStorageInv", "getFluidBuffer", "getCrateInv", "getCloudInv"].map(e => getJSON(e)));
+    const ok = r => r.status === "fulfilled" ? r.value : null;
+    if (!ok(s) && !ok(f)) return;
+    const items = inv => (inv || []).map(i => ({ name: i.Name, amount: i.Amount, stack: i.MaxAmount || 1 }));
+    const used = list => list.reduce((a, i) => a + Math.ceil(i.amount / i.stack), 0);   // estimate when FRM doesn't count slots
+    const box = x => {
+      const [type, kind, slots] = STORAGE_TYPES[x.ClassName] || [x.Name || x.ClassName, "items", 0], list = items(x.Inventory);
+      const total = x.Slots ?? slots, u = x.SlotsUsed ?? used(list);
+      return { id: x.ID, cls: x.ClassName, type, kind, loc: x.location, items: list, slots: total, used: u, frac: total ? Math.min(1, u / total) : 0 };
+    };
+    const tank = x => { const [type] = STORAGE_TYPES[x.ClassName] || [x.Name, "fluid"];
+      return { id: x.ID, cls: x.ClassName, type, kind: "fluid", loc: x.location, fluid: x.Fluid || "", content: x.Content || 0, cap: x.Capacity || 0,
+               fill: x.FlowFill || 0, drain: x.FlowDrain || 0, frac: x.Capacity ? Math.min(1, (x.Content || 0) / x.Capacity) : 0,
+               items: x.Fluid && x.Content > 0.01 ? [{ name: x.Fluid, amount: x.Content, fluid: true }] : [] }; };
+    const crate = x => { const list = items(x.Inventory);
+      return { id: x.ID, cls: "crate", type: x.Type === "Death Crate" ? "Death Crate" : "Dismantle Crate", kind: "crate", loc: x.location, items: list,
+               slots: 0, used: used(list), frac: 0 }; };
+    this.hasBuffers = !!ok(f);
+    this.list = [...(ok(s) || []).map(box), ...(ok(f) || []).map(tank), ...(ok(c) || []).filter(x => x.location).map(crate)].filter(x => x.loc);
+    this.byId = new Map(this.list.map(x => [x.id, x]));
+    this.cloud = (ok(d) || []).map(i => ({ name: i.Name, amount: i.Amount, stack: i.MaxAmount, limit: i.Limit }));
+    this.loaded = true;
+    for (const mv of this.maps) this.push(mv);
+    for (const fn of this.listeners) fn();
+  },
+  push(mv) {
+    const keep = mv.opts.storage, by = {};
+    for (const l of storageLayers()) by[l.key] = [];
+    for (const s of this.list) if (keep(s)) (by[storageKey(s.type)] || (by[storageKey(s.type)] = [])).push({ id: s.id, x: s.loc.x, y: s.loc.y, label: s.type, storage: s.id, tip: () => storageTip(this.byId.get(s.id) || s) });
+    for (const [k, pts] of Object.entries(by)) mv.setPoints(k, pts);
+  },
+};
+// how full a storage is, as text: "12 / 24 slots" or "1,234 / 2,400 m³"
+const storageFill = s => s.kind === "fluid" ? `${fmtNum(s.content, s.content < 10 ? 1 : 0)} / ${fmtNum(s.cap)} m³` : s.slots ? `${fmtNum(s.used)} / ${fmtNum(s.slots)} slots` : `${fmtNum(s.used)} stacks`;
+const storageTip = s => !s ? "" :
+  `<div class="head"><span class="with-icon">${icon(STORAGE_TYPES[s.cls]?.[3] || s.type)}<b style="color:#fff">${esc(s.type)}</b></span>` +
+  `${storageFill(s)}${s.kind !== "crate" ? ` · ${Math.round(s.frac * 100)}% full` : ""}` +
+  (s.kind === "fluid" && (s.fill > 0.05 || s.drain > 0.05) ? `<br>filling ${fmtRate(s.fill)} · draining ${fmtRate(s.drain)} m³/min` : "") + `</div>` +
+  (s.items.length ? s.items.slice(0, 8).map(i => `<div class="row"><span class="with-icon">${icon(i.name, "icon sm")}${esc(i.name)}</span><b>${fmtNum(i.amount, i.fluid ? 1 : 0)}${i.fluid ? " m³" : ""}</b></div>`).join("") +
+    (s.items.length > 8 ? `<div class="row muted"><span>+${s.items.length - 8} more</span></div>` : "") : `<div class="row muted"><span>empty</span></div>`);
+
 // Right-click any map: "open this spot in another tab's map". The view (centre in image coords + zoom) waits in
 // MapView.pending until that tab's map exists and has a size (tabs build their maps on first show).
 const MapCtx = {
@@ -194,6 +263,7 @@ class MapView {
   constructor(el, opts) {
     this.opts = opts;
     this.layers = [...opts.layers, ...(opts.powerNet ? powerLayers(opts.powerNet) : []), ...(opts.logistics ? logisticsLayers(opts.logistics) : []),
+                   ...(opts.storage ? storageLayers(opts.storage) : []),
                    ...(opts.players ? [playerLayer()] : [])];
     this.points = {}; this.hoverId = null; this.focus = null; this.fitted = false;
     this.tab = el.closest("main.tab")?.id.replace(/^tab-/, ""); MapView.all.push(this);
@@ -267,7 +337,7 @@ class MapView {
       const seg = !p && hit ? hit.seg : null, netId = seg ? seg.n : null;
       if ((p && p.id) !== this.hoverId) { this.hoverId = p ? p.id : null; opts.onHover && opts.onHover(p); this.draw(); }
       if (netId !== this.hoverNet) { this.hoverNet = netId; opts.onNetHover && opts.onNetHover(netId); this.draw(); }
-      const tip = p ? (p.layer === "players" || !opts.tooltip ? p.label && `<div class="row"><span>${esc(p.label)}</span></div>` : opts.tooltip(p))
+      const tip = p ? (p.tip ? p.tip() : p.layer === "players" || !opts.tooltip ? p.label && `<div class="row"><span>${esc(p.label)}</span></div>` : opts.tooltip(p))
                     : seg && netTooltip(Logistics.byId?.get(netId), seg);
       if (tip) showPopAt(tip, e.clientX, e.clientY); else hideCargoPop();
       this.canvas.style.cursor = p || seg ? "pointer" : "";
@@ -280,6 +350,7 @@ class MapView {
     if (opts.players) Players.attach(this);
     if (opts.logistics) Logistics.attach(this);
     if (opts.powerNet) PowerNet.attach(this);
+    if (opts.storage) Storage.attach(this);
     if (opts.animate) {   // continuous repaint, skipped while the map isn't on screen (hidden tab)
       const loop = () => { if (this.canvas.clientWidth) this.paint(); requestAnimationFrame(loop); };
       requestAnimationFrame(loop);
@@ -567,6 +638,10 @@ class MapView {
       ctx.stroke(); ctx.setLineDash([]);
       ctx.lineWidth = 1; ctx.strokeStyle = "#0d1013"; ctx.beginPath(); ctx.arc(s.x, s.y, rad + 2, 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1; return;
+    }
+    else if (l.shape === "tank") {   // fluid buffer: a filled circle with a dark core, like the pipes
+      ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#0d1013"; ctx.beginPath(); ctx.arc(s.x, s.y, rad * 0.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; return;
     }
     else if (l.shape === "ring") { ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.globalAlpha = alpha; ctx.lineWidth = 2; ctx.strokeStyle = cssColor(p.color || l.color); ctx.stroke(); ctx.globalAlpha = 1; return; }
     else ctx.arc(s.x, s.y, rad, 0, Math.PI * 2);

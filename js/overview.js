@@ -208,7 +208,7 @@ const Overview = (() => {
     map = new MapView($("ovMap"), {
       // dropdown sections: Factory, Transport, Stations, People (players are added by MapView)
       // everything: every belt and pipe, the whole power network (new storeKey = all layers start enabled)
-      storeKey: "ov.map2", layerMenu: true, players: true, logistics: () => true, powerNet: () => true, layers: [
+      storeKey: "ov.map2", layerMenu: true, players: true, logistics: () => true, powerNet: () => true, storage: () => true, layers: [
         // told apart by shape (and colour where status isn't the point): machines = small dots coloured by status,
         // generators = amber diamonds (red when out of fuel/water), vehicles = heading arrows, players = labelled dots on top
         { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6 },

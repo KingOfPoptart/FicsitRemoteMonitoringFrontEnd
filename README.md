@@ -9,7 +9,7 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 ### Overview (home)
 - **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), unconnected belt/pipe ends, milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
 - **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), vehicles (per type, stuck ones by name), logistics (belt and pipe totals by tier) and progression (Space Elevator and HUB parts).
-- **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
+- **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), every storage container, fluid buffer and Dimensional Depot uploader, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
 
 ### Vehicles
 ![Vehicles](docs/screenshots/vehicles.png)
@@ -37,6 +37,13 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - Hover a belt or pipe on any map to see its tier and speed and its network; click one (or a row) to highlight the whole network.
 - FRM doesn't say what a belt or pipe connects to, so `server.py` works the networks out from geometry (ends that meet, shared splitters/mergers/junctions/pumps, conveyor lifts), and a network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
 
+![Logistics: storage](docs/screenshots/logistics-storage.png)
+- **Storage** view (the Show switch at the top): every Storage Container, Industrial Storage Container, Personal / Medical / Hazard Storage Box (and the HUB's), Fluid Buffer, Industrial Fluid Buffer, Dimensional Depot Uploader and dismantle / death crate.
+- Totals: slots used across containers, m³ stored across fluid buffers, depot items at their limit, and how many are full or empty (click those to list them).
+- **Storage table**: type, contents, how full (slots used, or m³ of the tank), amount stored, and each fluid buffer's fill / drain rate, with a filter under every column. Click a row to fly the map to it.
+- **Dimensional Depot**: every uploaded item against its limit. An uploader counts as full only when the depot can't take any more of its item.
+- The map has one layer per kind of storage building; hover one to see what's inside.
+
 ### Progression
 ![Progression](docs/screenshots/progression.png)
 - Space Elevator phase with each part's delivered amount, how many are in storage, how fast the factory makes them and time to finish; the HUB's active milestone; milestones per tier; MAM research; alternate recipes, AWESOME Shop and coupons.
@@ -52,7 +59,7 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 ## Requirements
 - Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
 - Python 3.9+ (standard library only; [Pillow](https://pypi.org/project/pillow/) is optional, for resizing pictures).
-- For route, next-stop, live-position and speed data, FRM needs the vehicle fixes from [porisius/FicsitRemoteMonitoring#310](https://github.com/porisius/FicsitRemoteMonitoring/pull/310). With an FRM build that lacks them, the dashboard still runs, but vehicles show no routes and stay frozen whenever no player is nearby. Power poles, wall outlets and power towers on the maps also need that pull request's `getPowerPoles` endpoint; without it, the power lines and switches still show.
+- For route, next-stop, live-position and speed data, FRM needs the vehicle fixes from [porisius/FicsitRemoteMonitoring#310](https://github.com/porisius/FicsitRemoteMonitoring/pull/310). With an FRM build that lacks them, the dashboard still runs, but vehicles show no routes and stay frozen whenever no player is nearby. Power poles, wall outlets and power towers on the maps also need that pull request's `getPowerPoles` endpoint; without it, the power lines and switches still show. Fluid buffers, exact storage slot counts and Dimensional Depot limits need its `getFluidBuffer` endpoint and storage fields; without them, fluid buffers are missing, slots used are estimated from stack sizes and the depot shows amounts only.
 
 ## Setup
 ```sh

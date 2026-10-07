@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).parent
 ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths", "getTrains", "getTrainStation",
            "getTrainRails", "getDrone", "getDroneStation",
            "getFactory", "getExtractor", "getGenerators", "getPower", "getPowerUsage", "getSwitches", "getSessionInfo",
-           "getBelts", "getSplitterMerger", "getStorageInv", "getPipes", "getPipeJunctions", "getPump",
+           "getBelts", "getSplitterMerger", "getStorageInv", "getFluidBuffer", "getCrateInv", "getPipes", "getPipeJunctions", "getPump",
            "getCables", "getPowerPoles",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}

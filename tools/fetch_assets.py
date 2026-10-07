@@ -40,6 +40,7 @@ ICON_BUILDINGS = [
     "Empty Platform", "Drone Port", "Dimensional Depot Uploader", "Space Elevator", "The HUB", "Radar Tower",
     "Hypertube Entrance", "Craft Bench", "Equipment Workshop", "Lookout Tower", "Blueprint Designer",
     "Power Switch", "Priority Power Switch",
+    "Medical Storage Box", "Hazard Storage Box",
     "Geyser",   # resource node type (geothermal), listed with the ores on the Progression tab
 ]
 icon_slug = lambda name: re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")   # same rule as the page's iconSlug()

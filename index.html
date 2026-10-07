@@ -324,6 +324,9 @@
     #wUnits td { white-space: normal; line-height: 1.35; }   /* wrap long fuel / controls text instead of cutting it */
     #tab-logistics .pgrid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
     #tab-logistics .lg-tiers { flex: 0 0 auto; max-height: 30%; } #tab-logistics .lg-nets { flex: 1; } #tab-logistics .lg-map { flex: 1; }
+    #tab-logistics .lg-store { flex: 1.6; } #tab-logistics .lg-depot { flex: 1; }
+    #tab-logistics[data-view="nets"] .lg-s, #tab-logistics[data-view="storage"] .lg-n { display: none !important; }
+    #lgStore td { white-space: normal; line-height: 1.35; } #lgStore .nowrap { white-space: nowrap; }
     #tab-power .w-map { flex: 1.7; }   /* map on the right, with the grid layout and breakdowns under it */
     .onescreen .card-body { flex: 1; min-height: 0; overflow-y: auto; }
     #tab-progression .pgrid { grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 1.35fr); }
