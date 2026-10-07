@@ -46,12 +46,14 @@ const PIPE_COLOR = { 1: "#2dd4bf", 2: "#99f6e4" };   // teal, drawn as hollow tu
 const logisticsLayers = keep => [
   ...[1, 2, 3, 4, 5, 6].map(t => ({ key: "belt" + t, group: "Belts", label: `Mk.${t} belts`, swatch: `background:${BELT_COLOR[t]}`,
     count: () => Logistics.belts.filter(b => b.t === t && keep(b)).length })),
+  { key: "lifts", group: "Belts", label: "Conveyor lifts", swatch: `background:${BELT_COLOR[4]};height:10px;width:10px;border-radius:2px;outline:1px solid #0d1013`,
+    count: () => Logistics.lifts.filter(keep).length },
   ...[1, 2].map(t => ({ key: "pipe" + t, group: "Pipes", label: `Mk.${t} pipes`,
     swatch: `background:linear-gradient(${PIPE_COLOR[t]} 0 30%, #0d1013 30% 70%, ${PIPE_COLOR[t]} 70%);height:6px`,
     count: () => Logistics.pipes.filter(b => b.t === t && keep(b)).length })),
 ];
 const Logistics = {
-  belts: [], pipes: [], networks: [], counts: {}, maps: new Set(), listeners: new Set(), timer: null,
+  belts: [], lifts: [], pipes: [], networks: [], counts: {}, maps: new Set(), listeners: new Set(), timer: null,
   attach(mv) { this.maps.add(mv); this.start(); },
   start() { if (!this.timer) { this.poll(); this.timer = setInterval(() => this.poll(), 60000); } },
   async poll() {
@@ -87,16 +89,37 @@ function drawLogistics(mv, keep, hi, hover) {
   };
   for (const id of hi) outline(id, "#fa9549");                  // picked
   if (hover && !hi.includes(hover)) outline(hover, "#ffffff");   // under the mouse
+  // conveyor lifts: belt pieces that go straight up, so a marker on top of the belts (belt colour by tier, ↕)
+  if (mv.isOn("lifts")) {
+    const r = Math.max(3.5, Math.min(7.5, w * 2.6));
+    for (const l of Logistics.lifts) {
+      if (!keep(l)) continue;
+      const q = mv.toScreen(l.ip || (l.ip = worldToImg(l.x, l.y)));
+      if (q.x < -10 || q.y < -10 || q.x > mv.canvas.clientWidth + 10 || q.y > mv.canvas.clientHeight + 10) continue;
+      const on = hi.includes(l.n) || hover === l.n;
+      ctx.globalAlpha = hi.length && !on ? 0.4 : 1;
+      ctx.fillStyle = BELT_COLOR[l.t] || BELT_COLOR[1]; ctx.strokeStyle = on ? (hi.includes(l.n) ? "#fa9549" : "#ffffff") : "#0d1013"; ctx.lineWidth = on ? 2.5 : 1.5;
+      ctx.beginPath(); ctx.roundRect(q.x - r, q.y - r, r * 2, r * 2, r * 0.35); ctx.fill(); ctx.stroke();
+      if (r >= 4.5) {   // ↕ arrow
+        const a = r * 0.62, h = r * 0.32;
+        ctx.strokeStyle = "#0d1013"; ctx.lineWidth = 1.4; ctx.beginPath();
+        ctx.moveTo(q.x, q.y - a); ctx.lineTo(q.x, q.y + a);
+        ctx.moveTo(q.x - h, q.y - a + h); ctx.lineTo(q.x, q.y - a); ctx.lineTo(q.x + h, q.y - a + h);
+        ctx.moveTo(q.x - h, q.y + a - h); ctx.lineTo(q.x, q.y + a); ctx.lineTo(q.x + h, q.y + a - h); ctx.stroke();
+      }
+    }
+  }
   ctx.globalAlpha = 1;
 }
 
 // tooltip for a belt / pipe: the piece itself, then its whole network
 const netTooltip = (n, seg) => !n ? "" :
-  `<div class="head"><b style="color:#fff">Mk.${seg ? seg.t : "?"} ${n.kind === "belt" ? "conveyor belt" : "pipeline"}</b>` +
+  `<div class="head"><b style="color:#fff">Mk.${seg ? seg.t : "?"} ${seg?.h != null ? "conveyor lift" : n.kind === "belt" ? "conveyor belt" : "pipeline"}</b>` +
   ` · ${n.kind === "belt" ? `${({ 1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200 })[seg?.t] || "?"} items/min` : `${({ 1: 300, 2: 600 })[seg?.t] || "?"} m³/min`}<br>` +
+  (seg?.h != null ? `${fmtNum(seg.h, 1)} m ${seg.up ? "up" : "down"}<br>` : "") +
   `part of a ${n.kind} network · ${n.p && n.w ? "production + power" : n.p ? "production" : n.w ? "power" : "other"} · ${n.len >= 1000 ? (n.len / 1000).toFixed(1) + " km" : n.len + " m"}</div>` +
   (Object.entries(n.touches).slice(0, 5).map(([k, c]) => `<div class="row"><span>${esc(k)}</span><b>×${c}</b></div>`).join("") || `<div class="row muted"><span>connects to nothing found</span></div>`) +
-  `<div class="row muted"><span>${n.segs} pieces · bottleneck ${n.cap ? n.cap + (n.kind === "pipe" ? " m³" : "") + "/min" : "–"}${n.open ? ` · ${n.open} open ends` : ""}</span></div>`;
+  `<div class="row muted"><span>${n.segs} piece${n.segs === 1 ? "" : "s"}${n.lifts ? ` + ${n.lifts} lift${n.lifts > 1 ? "s" : ""}` : ""} · bottleneck ${n.cap ? n.cap + (n.kind === "pipe" ? " m³" : "") + "/min" : "–"}${n.open ? ` · ${n.open} open ends` : ""}</span></div>`;
 
 // The power network on any map: MapView({ powerNet: circuits => bool }) adds power lines, poles, wall outlets,
 // towers, switches and power storage, keeping the ones whose circuit(s) the filter accepts (all, or one grid).
@@ -379,6 +402,11 @@ class MapView {
         const d = Math.hypot(ix - (a.x + t * dx), iy - (a.y + t * dy));
         if (d < bd) { bd = d; best = b; }
       }
+    }
+    if (this.isOn("lifts")) for (const l of Logistics.lifts) {   // a lift marker wins over the belt under it
+      if (!keep(l)) continue;
+      const q = l.ip || (l.ip = worldToImg(l.x, l.y)), d = Math.hypot(ix - q.x, iy - q.y) * 0.5;
+      if (d < bd) { bd = d; best = l; }
     }
     return best && { seg: best, d: bd * this.view.s };   // distance in screen px
   }

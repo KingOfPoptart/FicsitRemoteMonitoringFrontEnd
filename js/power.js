@@ -206,7 +206,7 @@ const Power = (() => {
         <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - cap)} MW over capacity if everything runs at once</span>` : unk ? "if every machine ran at once" : "if every machine ran at once — fits"}</div></div>
       <div class="tile click${headroom < 0 ? " bad" : ""}" data-jump="wChartCard" title="Show power over time"><div class="t-label">Headroom</div><div class="t-val">${headroom == null ? `<span class="muted">–</span>` : mw(headroom)}</div>
         <div class="t-sub">${headroom == null ? "unknown without capacity" : headroom >= 0 ? "capacity − consumption" : hasBatt && g.BatteryPercent > 0 ? `<span class="bad-text">⚠ over capacity — batteries are covering it</span>` : `<span class="bad-text">⚠ over capacity</span>`}</div></div>
-      <div class="tile click" data-jump="${hasBatt ? "wBattCard" : "wChartCard"}" title="Show battery charge over time"><div class="t-label">Batteries</div>${hasBatt ? `<div class="t-val">${pct(g.BatteryPercent)} <small>of ${fmtNum(g.BatteryCapacity)} MWh</small></div>
+      <div class="tile click" data-jump="wChartCard" title="Show battery charge over time"><div class="t-label">Batteries</div>${hasBatt ? `<div class="t-val">${pct(g.BatteryPercent)} <small>of ${fmtNum(g.BatteryCapacity)} MWh</small></div>
         <div class="t-sub">${bar(g.BatteryPercent / 100, "var(--s3)")}${flow < -0.05 ? `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}` : g.BatteryPercent >= 99.95 ? "full" : flow < 0.05 ? "idle" : flow > 0 ? `charging ${fmtNum(flow, 1)} MW · full in ${esc(g.BatteryTimeFull)}` : `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}`}</div>`
         : `<div class="t-val muted">none</div><div class="t-sub">no Power Storage on this grid</div>`}</div>`;
     const tot = k => groups.reduce((a, x) => a + x[k], 0);
@@ -326,16 +326,45 @@ const Power = (() => {
       if (hs.length) {
         h = {};
         for (const k of ["prod", "cons", "cap", "max"]) h[k] = Array.from({ length: n }, (_, i) => hs.some(x => x[k][i] != null) ? hs.reduce((a, x) => a + (x[k][i] || 0), 0) : null);
-        h.batt = Array.from({ length: n }, (_, i) => { const w = hs.filter(x => x.batt[i] != null); return w.length ? w.reduce((a, x) => a + x.batt[i], 0) / w.length : null; });
       }
     }
+    // stored charge, MWh: each grid's battery % × its Power Storage capacity at that time (the server records it;
+    // older samples without it use today's capacity), added up
+    const capOf = id => groups.find(x => String(x.CircuitGroupID) === String(id))?.BatteryCapacity || 0;
+    const ids = g.all ? Object.keys(hist.groups) : [String(g.CircuitGroupID)];
+    const stored = Array.from({ length: hist.t.length }, (_, i) => { let any = false, sum = 0;
+      for (const id of ids) { const x = hist.groups[id], v = x?.batt?.[i], c = x?.battCap?.[i] ?? capOf(id);
+        if (v != null && c) { any = true; sum += v / 100 * c; } }
+      return any ? sum : null; });
     const s = (key, name, color, extra) => ({ key, name, color, values: h ? h[key] : [], ...extra });
     chart.update(h ? { t: hist.t, interval: hist.interval, series: [
       s("cap", "Capacity", "var(--s3)"), s("prod", "Production", "var(--s1)"),
       s("cons", "Consumption", "var(--s2)", { area: true }), s("max", "Max consumption", "var(--s4)", { dash: true }),
     ] } : null);
-    $("wBattCard").style.display = g.BatteryCapacity > 0 ? "" : "none";
-    if (g.BatteryCapacity > 0) battChart.update(h ? { t: hist.t, interval: hist.interval, yMax: 100, series: [s("batt", "Battery charge", "var(--s3)", { area: true })] } : null);
+    $("wBatt").style.display = g.BatteryCapacity > 0 ? "" : "none";
+    if (g.BatteryCapacity > 0) battChart.update(h ? { t: hist.t, interval: hist.interval, yMax: g.BatteryCapacity,
+      series: [{ key: "stored", name: `Stored charge (of ${fmtNum(g.BatteryCapacity)} MWh)`, color: "var(--s3)", values: stored, area: true }] } : null);
+  }
+
+  // FRM's battery times are "HH:MM:SS" ("00:00:00" when not filling / draining)
+  const hms = t => { const [h, m, sec] = String(t || "0:0:0").split(":").map(Number); const v = (h || 0) * 3600 + (m || 0) * 60 + (sec || 0);
+    return v ? fmtDur(v / 60) : "–"; };
+  // the battery readout beside the graphs, like the in-game Power Storage panel: gauge, time until full / empty,
+  // stored charge and charge rate
+  function renderBattery(g) {
+    const el = $("wBattPanel"), has = g.BatteryCapacity > 0;
+    el.style.display = has ? "" : "none";
+    if (!has) return;
+    const pctV = Math.max(0, Math.min(100, g.BatteryPercent || 0)), rate = (g.BatteryInput || 0) - (g.BatteryOutput || 0);
+    const draining = rate < -0.05, lit = Math.ceil(pctV / 20 - 1e-9);   // 5 segments, like the game
+    const segs = [4, 3, 2, 1, 0].map(i => `<i class="${i < lit ? "on" : ""}${draining ? " drain" : ""}"></i>`).join("");
+    el.innerHTML = `
+      <div class="bp-gauge" title="${fmtNum(pctV, 1)}% charged">${segs}<b>${Math.round(pctV)}%</b></div>
+      <div class="bp-stats">
+        <div><span>${draining ? "Time until empty" : "Time until full"}</span><b>${draining ? hms(g.BatteryTimeEmpty) : rate > 0.05 ? hms(g.BatteryTimeFull) : "–"}</b></div>
+        <div><span>Stored charge</span><b>${fmtNum(pctV / 100 * g.BatteryCapacity, 1)} <small>/ ${fmtNum(g.BatteryCapacity)} MWh</small></b></div>
+        <div><span>Charge rate</span><b class="${draining ? "bad-text" : rate > 0.05 ? "ok-text" : ""}">${rate > 0.05 ? "+" : ""}${draining ? "−" : ""}${fmtNum(Math.abs(rate), Math.abs(rate) < 100 ? 1 : 0)} <small>MW</small></b></div>
+      </div>`;
   }
 
   function render() {
@@ -344,7 +373,7 @@ const Power = (() => {
       return;
     }
     const g = grid();
-    renderGrids(); renderTiles(g); renderBreakdowns(g); renderLayout(g);
+    renderGrids(); renderTiles(g); renderBattery(g); renderBreakdowns(g); renderLayout(g);
     if (!chart.data) renderCharts();
     setSeg($("wRange"), segControl("range", RANGES.map(([l, v]) => ({ v, label: l })), o => ui.range === o.v));
   }
@@ -380,8 +409,8 @@ const Power = (() => {
       <div class="tiles compact" id="wTiles"></div>
       <div class="pgrid">
         <div class="pcol">
-          <section class="card w-chart" id="wChartCard"><div class="card-head"><h2>Power over time</h2><span class="hint">like the in-game power graph · hover for values</span></div><div id="wChart"></div></section>
-          <section class="card w-batt" id="wBattCard"><div class="card-head"><h2>Battery charge</h2><span class="hint">% of total Power Storage</span></div><div id="wBatt"></div></section>
+          <section class="card w-chart" id="wChartCard"><div class="card-head"><h2>Power &amp; batteries</h2><span class="hint">like the in-game power graph · hover for values</span></div>
+            <div class="w-pb"><div class="w-graphs"><div id="wChart"></div><div id="wBatt"></div></div><div class="w-battpanel" id="wBattPanel"></div></div></section>
           <section class="card w-gens" id="wGensCard"><div class="card-head"><h2>Generators &amp; switches</h2><span class="hint" id="wUnitCount"></span>
               <button class="b" id="wUnitClear">Clear filters</button></div>
             <div class="table-wrap dtw tall" id="wUnits"></div></section>
@@ -397,7 +426,7 @@ const Power = (() => {
         </div>
       </div>`;
     chart = new LineChart($("wChart"), { height: 260, unit: "MW", fill: true });
-    battChart = new LineChart($("wBatt"), { height: 120, unit: "%", fmt: v => fmtNum(v, 1), fill: true });
+    battChart = new LineChart($("wBatt"), { height: 96, unit: "MWh", fmt: v => fmtNum(v, v < 100 ? 1 : 0), fill: true });
     const pillFor = r => { const st = unitStatus(r); return `<span class="pill" style="color:${st.color};background:color-mix(in srgb, ${st.color} 14%, transparent)" title="${st.title}">${st.label}</span>`; };
     unitTable = new DataTable($("wUnits"), [
       { key: "name", label: "Name", minW: 140, val: r => (r.kind === "gen" ? "0" : "1") + r.name,

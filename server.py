@@ -6,7 +6,7 @@ and records power/production history so the charts have data from before the pag
 /api/<endpoint>  ->  <FRM URL>/<endpoint>   (responses cached ~1 s, so several open pages don't multiply FRM load)
 /hist/power?mins=60       power history per grid (sampled every 5 s, kept 24 h)
 /hist/production?mins=60  produced/consumed per item and generation per generator type (sampled every 15 s, kept 24 h)
-/logistics                every belt and pipe (tier, production / power) and their networks (every 60 s)
+/logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks (every 60 s)
 
 By default it only listens on this machine (127.0.0.1). Use --host 0.0.0.0 to reach it from other
 devices on your network. The FRM URL can also be set with the FRM_URL environment variable.
@@ -16,6 +16,7 @@ Run tools/fetch_assets.py once first to get the map image, vehicle pictures and 
 import argparse
 import http.server
 import json
+import math
 import os
 import pathlib
 import re
@@ -29,7 +30,7 @@ ROOT = pathlib.Path(__file__).parent
 ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths", "getTrains", "getTrainStation",
            "getTrainRails", "getDrone", "getDroneStation",
            "getFactory", "getExtractor", "getGenerators", "getPower", "getPowerUsage", "getSwitches", "getSessionInfo",
-           "getBelts", "getSplitterMerger", "getStorageInv", "getFluidBuffer", "getCrateInv", "getPipes", "getPipeJunctions", "getPump",
+           "getBelts", "getLifts", "getSplitterMerger", "getStorageInv", "getFluidBuffer", "getCrateInv", "getPipes", "getPipeJunctions", "getPump",
            "getCables", "getPowerPoles",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}
@@ -128,7 +129,7 @@ class History:
     def __init__(self):
         self.lock = threading.Lock()
         self.session = None
-        self.power = []   # [t, {groupId: [prod, cons, cap, maxCons, batteryPct, battIn, battOut, fuse]}]
+        self.power = []   # [t, {groupId: [prod, cons, cap, maxCons, batteryPct, battIn, battOut, fuse, battCapMWh]}]
         self.prod = []    # [t, {item: [p, c]}, {genType: MW}]
 
     def load(self):
@@ -169,7 +170,8 @@ class History:
             return
         row = {str(g["CircuitGroupID"]): [r(g["PowerProduction"]), r(g["PowerConsumed"]), r(g["PowerCapacity"]),
                                           r(g["PowerMaxConsumed"]), r(g["BatteryPercent"]), r(g["BatteryInput"]),
-                                          r(g["BatteryOutput"]), 1 if g.get("FuseTriggered") else 0] for g in groups}
+                                          r(g["BatteryOutput"]), 1 if g.get("FuseTriggered") else 0,
+                                          r(g.get("BatteryCapacity"))] for g in groups}   # MWh, so stored charge = % x this
         # one value reading 0 for a grid that's running (no fuse) is a glitch too: keep its previous value
         # (production, consumption, capacity, max consumption, battery %)
         for k, v in row.items():
@@ -207,14 +209,16 @@ class History:
                 row = {}
                 for k in keys:
                     vals = [s[1][k] for s in b if k in s[1]]
-                    row[k] = [round(sum(v[i] for v in vals) / len(vals), 2) for i in range(7)] + [max(v[7] for v in vals)]
+                    caps = [v[8] for v in vals if len(v) > 8]   # older samples have no battery capacity
+                    row[k] = ([round(sum(v[i] for v in vals) / len(vals), 2) for i in range(7)] + [max(v[7] for v in vals)]
+                              + ([round(sum(caps) / len(caps), 2)] if caps else []))
                 merged.append([b[-1][0], row])
             rows = merged
         groups = {}
         for i, (t, row) in enumerate(rows):
             for k, v in row.items():
                 g = groups.setdefault(k, {f: [None] * len(rows) for f in
-                                          ("prod", "cons", "cap", "max", "batt", "battIn", "battOut", "fuse")})
+                                          ("prod", "cons", "cap", "max", "batt", "battIn", "battOut", "fuse", "battCap")})
                 for f, x in zip(g, v):
                     g[f][i] = x
         return {"session": self.session, "interval": POWER_EVERY_S * step, "t": [r[0] for r in rows], "groups": groups}
@@ -290,10 +294,10 @@ def _tier(name):
     return int(name.rsplit(".", 1)[-1]) if "Mk." in name and name.rsplit(".", 1)[-1].isdigit() else 1
 
 
-def networks(kind, segs, joiners, buildings, lifts, storage=frozenset()):
-    """segs: belts or pipes; joiners: splitters/mergers or junctions/pumps/valves;
+def networks(kind, segs, joiners, buildings, storage=frozenset()):
+    """segs: belts (conveyor lifts included: they're belt pieces that go up) or pipes; joiners: splitters/mergers or junctions/pumps/valves;
     buildings: [(category 'p'|'w'|'o', name, id, box)]; storage: IDs of storage buildings, listed per network
-    as "st" so the page can link a network to its storage. Returns (segments, networks)."""
+    as "st" so the page can link a network to its storage. Returns (segments, lifts, networks)."""
     parent = list(range(len(segs)))
 
     def find(i):
@@ -305,49 +309,74 @@ def networks(kind, segs, joiners, buildings, lifts, storage=frozenset()):
     def union(a, b):
         parent[find(a)] = find(b)
 
-    ends = [(i, s[k], s.get(c)) for i, s in enumerate(segs) for k, c in (("location0", "Connected0"), ("location1", "Connected1"))]
-    grid = {}   # ends at the same spot (within 20 cm)
-    for i, q, _ in ends:
-        grid.setdefault((round(q["x"] / 50), round(q["y"] / 50), round(q["z"] / 50)), []).append((i, q))
-    for i, q, _ in ends:
-        gx, gy, gz = round(q["x"] / 50), round(q["y"] / 50), round(q["z"] / 50)
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    for j, r in grid.get((gx + dx, gy + dy, gz + dz), ()):
-                        if j != i and abs(q["x"] - r["x"]) < 20 and abs(q["y"] - r["y"]) < 20 and abs(q["z"] - r["z"]) < 20:
-                            union(i, j)
-    jgrid, first = _BoxGrid([(n, _box(x, 60)) for n, x in enumerate(joiners)]), {}
-    for i, q, _ in ends:   # segments touching the same joiner
-        for n in jgrid.hits(q):
-            if n in first:
-                union(first[n], i)
-            else:
-                first[n] = i
-    if lifts:   # conveyor lifts: connected ends vertically above each other
-        col = {}
-        for i, q, c in ends:
-            if c:
-                col.setdefault((round(q["x"] / 60), round(q["y"] / 60)), []).append((i, q))
-        for lst in col.values():
-            for a in range(len(lst)):
-                for b in range(a + 1, len(lst)):
-                    (i, q), (j, r) = lst[a], lst[b]
-                    if i != j and abs(q["x"] - r["x"]) < 30 and abs(q["y"] - r["y"]) < 30 and abs(q["z"] - r["z"]) > 150:
-                        union(i, j)
-    bgrid = _BoxGrid([((cat, name, bid), box) for cat, name, bid, box in buildings])
-    touch = {}   # network -> {(cat, name, id)}
-    for i, q, _ in ends:
-        for tag in bgrid.hits(q):
+    touch = {}   # network root -> {(cat, name, id)}
+    if segs and all("ConnectedTo0" in s for s in segs):
+        # newer FRM says what each end is plugged into: follow that (exact; lifts, splitters, machines…)
+        seg_at = {s.get("ID"): i for i, s in enumerate(segs)}
+        joiner_ids = {x.get("ID") for x in joiners}
+        by_id = {bid: (cat, name, bid) for cat, name, bid, _ in buildings}
+        first, ends_to = {}, []
+        for i, s in enumerate(segs):
+            for k in ("ConnectedTo0", "ConnectedTo1"):
+                to = s.get(k)
+                if not to:
+                    continue
+                if to in seg_at:
+                    union(i, seg_at[to])
+                elif to in by_id:
+                    ends_to.append((i, by_id[to]))
+                elif to in joiner_ids or "Passthrough" in to or "Hole" in to:
+                    # a splitter / merger / junction / pump / valve, or a floor or wall hole: the pieces on it are one network
+                    if to in first:
+                        union(first[to], i)
+                    else:
+                        first[to] = i
+                # anything else (a building this page doesn't list) ends the line, like a machine does
+        for i, tag in ends_to:
             touch.setdefault(find(i), set()).add(tag)
+    else:   # older FRM: work it out from where the ends are
+        ends = [(i, s[k], s.get(c)) for i, s in enumerate(segs) for k, c in (("location0", "Connected0"), ("location1", "Connected1"))]
+        grid = {}   # ends at the same spot (within 20 cm)
+        for i, q, _ in ends:
+            grid.setdefault((round(q["x"] / 50), round(q["y"] / 50), round(q["z"] / 50)), []).append((i, q))
+        for i, q, _ in ends:
+            gx, gy, gz = round(q["x"] / 50), round(q["y"] / 50), round(q["z"] / 50)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        for j, r in grid.get((gx + dx, gy + dy, gz + dz), ()):
+                            if j != i and abs(q["x"] - r["x"]) < 20 and abs(q["y"] - r["y"]) < 20 and abs(q["z"] - r["z"]) < 20:
+                                union(i, j)
+        jgrid, first = _BoxGrid([(n, _box(x, 60)) for n, x in enumerate(joiners)]), {}
+        for i, q, _ in ends:   # segments touching the same joiner
+            for n in jgrid.hits(q):
+                if n in first:
+                    union(first[n], i)
+                else:
+                    first[n] = i
+        # lifts: FRM reports their ends on the lift's centre line, so join each to the nearest belt end at that height
+        lift_ends = [(i, q) for i, q, c in ends if c and _is_lift(segs[i])]
+        belt_ends = [(i, q) for i, q, c in ends if c and not _is_lift(segs[i])]
+        for i, q in lift_ends:
+            near = [(math.hypot(q["x"] - r["x"], q["y"] - r["y"]), j) for j, r in belt_ends
+                    if abs(q["z"] - r["z"]) < 50 and abs(q["x"] - r["x"]) < 450 and abs(q["y"] - r["y"]) < 450]
+            if near:
+                union(i, min(near)[1])
+        bgrid = _BoxGrid([((cat, name, bid), box) for cat, name, bid, box in buildings])
+        for i, q, _ in ends:
+            for tag in bgrid.hits(q):
+                touch.setdefault(find(i), set()).add(tag)
     # per-network summary
     nets = {}
     for i, s in enumerate(segs):
         r = find(i)
-        n = nets.setdefault(r, {"id": f"{kind[0]}{r}", "kind": kind, "segs": 0, "len": 0.0, "tiers": {}, "open": 0,
+        n = nets.setdefault(r, {"id": f"{kind[0]}{r}", "kind": kind, "segs": 0, "lifts": 0, "len": 0.0, "tiers": {}, "open": 0,
                                 "x0": 1e12, "y0": 1e12, "x1": -1e12, "y1": -1e12})
         t = _tier(s.get("Name"))
-        n["segs"] += 1
+        if _is_lift(s):
+            n["lifts"] += 1
+        else:
+            n["segs"] += 1
         n["len"] += (s.get("Length") or 0) / 100   # metres
         n["tiers"][t] = n["tiers"].get(t, 0) + 1
         n["open"] += (not s.get("Connected0")) + (not s.get("Connected1"))
@@ -367,13 +396,24 @@ def networks(kind, segs, joiners, buildings, lifts, storage=frozenset()):
                   "cap": (BELT_IPM.get(slowest) if kind == "belt" else PIPE_FLOW.get(slowest)),
                   "box": [round(n.pop("x0")), round(n.pop("y0")), round(n.pop("x1")), round(n.pop("y1"))]})
         out_nets.append(n)
-    out = []
+    out, lifts = [], []
     for i, s in enumerate(segs):
         n = nets[find(i)]
+        if _is_lift(s):   # drawn as a marker on the map, not a line
+            at = s.get("location") or s["location0"]
+            lifts.append({"id": s.get("ID"), "t": _tier(s.get("Name")), "x": round(at["x"]), "y": round(at["y"]),
+                          "h": round(abs(s["location1"]["z"] - s["location0"]["z"]) / 100, 1),
+                          "up": s["location1"]["z"] > s["location0"]["z"],   # items go from end 0 to end 1
+                          "p": n["p"], "w": n["w"], "n": n["id"]})
+            continue
         pts = s.get("SplineData") or [s["location0"], s["location1"]]
         out.append({"t": _tier(s.get("Name")), "pts": [[round(q["x"]), round(q["y"])] for q in pts],
                     "p": n["p"], "w": n["w"], "n": n["id"]})
-    return out, out_nets
+    return out, lifts, out_nets
+
+
+def _is_lift(s):
+    return "Lift" in (s.get("ClassName") or s.get("Name") or "")
 
 
 BELT_IPM = {1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200}   # items/min per belt tier (wiki)
@@ -397,15 +437,15 @@ def logistics_worker():
             buildings = ([("p", m["Name"], m["ID"], _box(m, 80)) for m in fac + ext] +
                          [("w", g["Name"], g["ID"], _box(g, 80)) for g in gens] +
                          [("o", b["Name"], b["ID"], _box(b, 80)) for b in other if b.get("location") and b.get("Name")])
-            belts, bnets = networks("belt", frm_json("getBelts", 30), frm_json("getSplitterMerger", 30), buildings, True, storage)
+            belts, lifts, bnets = networks("belt", frm_json("getBelts", 30) + frm_json("getLifts", 30), frm_json("getSplitterMerger", 30), buildings, storage)
             pump_like = [x for x in frm_json("getPump", 30)]
-            pipes, pnets = networks("pipe", frm_json("getPipes", 30), frm_json("getPipeJunctions", 30) + pump_like, buildings, False, storage)
+            pipes, _, pnets = networks("pipe", frm_json("getPipes", 30), frm_json("getPipeJunctions", 30) + pump_like, buildings, storage)
             counts = {"splitters": sum("Splitter" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
                       "mergers": sum("Merger" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
                       "junctions": len(frm_json("getPipeJunctions", 30)),
                       "pumps": sum("Pump" in (x.get("Name") or "") for x in pump_like),
                       "valves": sum("Valve" in (x.get("Name") or "") for x in pump_like)}
-            LOGI["json"] = json.dumps({"belts": belts, "pipes": pipes, "networks": bnets + pnets, "counts": counts},
+            LOGI["json"] = json.dumps({"belts": belts, "lifts": lifts, "pipes": pipes, "networks": bnets + pnets, "counts": counts},
                                       separators=(",", ":")).encode()
             LOGI["t"] = time.time()
         except Exception:

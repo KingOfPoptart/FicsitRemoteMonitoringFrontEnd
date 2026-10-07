@@ -199,7 +199,7 @@
   .t-val small { font-size: 13px; font-weight: 400; color: var(--muted); }
   .t-sub { color: var(--muted); font-size: 12px; }
   .tile.bad { border-color: #ef5f5f66; }
-  .warn-text { color: var(--warn); } .bad-text { color: var(--bad); }
+  .warn-text { color: var(--warn); } .bad-text { color: var(--bad); } .ok-text { color: var(--ok); }
   @media (max-width: 600px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .t-val { font-size: 20px; } }
   .small { font-size: 12px; margin: 8px 0 0; }
   .banner.bad { background: #ef5f5f1a; border-color: #ef5f5f66; color: var(--bad); margin: 0 0 12px; font-weight: 600; }
@@ -318,11 +318,25 @@
     #tab-production .detail-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
     #tab-production .detail-lists { grid-template-columns: 1fr; }
     #tab-power .pgrid { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }   /* the table side gets more room */
-    #tab-power .w-chart { flex: 1; } #tab-power .w-batt { flex: 0 0 132px; } #tab-power .w-gens { flex: 1.5; }
+    #tab-power .w-chart { flex: 1.25; } #tab-power .w-gens { flex: 1.5; }
+    #tab-power .w-pb { flex: 1; min-height: 0; display: flex; gap: 14px; }
+    #tab-power .w-graphs { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    #tab-power #wChart { flex: 2.4; } #tab-power #wBatt { flex: 1; }
+    .w-battpanel { flex: 0 0 210px; display: flex; gap: 12px; padding-left: 14px; border-left: 1px solid var(--line); align-items: stretch; }
+    .bp-gauge { display: flex; flex-direction: column; gap: 3px; width: 46px; }
+    .bp-gauge i { flex: 1; min-height: 8px; border-radius: 3px; background: var(--panel-3); border: 1px solid var(--line); }
+    .bp-gauge i.on { background: var(--s3); border-color: transparent; } .bp-gauge i.on.drain { background: var(--warn); }
+    .bp-gauge b { text-align: center; font-size: 15px; padding-top: 3px; }
+    .bp-stats { flex: 1; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
+    .bp-stats > div { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+    .bp-stats > div:last-child { border-bottom: none; }
+    .bp-stats span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .bp-stats b { font-size: 17px; font-weight: 600; } .bp-stats b small { font-size: 12px; font-weight: 400; color: var(--muted); }
     #tab-power .w-break { flex: 1; overflow-y: auto; } #tab-power .w-layout { flex: 0 1 auto; max-height: 30%; }
     .sw-feed { color: var(--muted); font-size: 12px; } .sw-ctrl { font-size: 12px; }
     #wUnits td { white-space: normal; line-height: 1.35; }   /* wrap long fuel / controls text instead of cutting it */
     #tab-logistics .pgrid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+    .sw-lift { display: inline-block; width: 10px; height: 10px; border-radius: 2px; outline: 1px solid #0d1013; flex: none; }
     #tab-logistics .lg-nets, #tab-logistics .lg-store { flex: 1; } #tab-logistics .lg-map { flex: 2.2; }
     #tab-logistics .lg-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; }
     #tab-logistics .lg-row > .card { margin: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 10px 12px; }

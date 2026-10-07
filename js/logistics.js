@@ -1,4 +1,4 @@
-// Logistics tab: every conveyor belt and pipe, grouped into networks (worked out by server.py from geometry), and
+// Logistics tab: every conveyor belt (conveyor lifts included) and pipe, grouped into networks (worked out by server.py from geometry), and
 // every storage building (containers, boxes, fluid buffers, Dimensional Depot uploaders, crates - the shared Storage
 // poll in map.js), linked: server.py lists the storage each network reaches, so picking a network lights up its
 // storage and picking a storage lights up the belts and pipes into it. Beside one map, with segments by tier and the
@@ -89,7 +89,7 @@ const LogisticsTab = (() => {
     const atLimit = cloud.filter(i => i.limit && i.amount >= i.limit).length, uploaders = list.filter(s => s.kind === "depot").length;
     const fullOn = ui.fill.length === 1 && ui.fill[0] === "Full";
     $("lgTiles").innerHTML = `
-      <div class="tile"><div class="t-label">Conveyor belts</div><div class="t-val">${fmtNum(segs("belt"))}</div><div class="t-sub">${km(len("belt"))} in ${count("belt")} networks · ${fmtNum(c.splitters || 0)} splitters · ${fmtNum(c.mergers || 0)} mergers</div></div>
+      <div class="tile"><div class="t-label">Conveyor belts</div><div class="t-val">${fmtNum(segs("belt"))}</div><div class="t-sub">${km(len("belt"))} in ${count("belt")} networks · ${fmtNum(Logistics.lifts.length)} lifts · ${fmtNum(c.splitters || 0)} splitters · ${fmtNum(c.mergers || 0)} mergers</div></div>
       <div class="tile"><div class="t-label">Pipes</div><div class="t-val">${fmtNum(segs("pipe"))}</div><div class="t-sub">${km(len("pipe"))} in ${count("pipe")} networks · ${fmtNum(c.junctions || 0)} junctions · ${fmtNum(c.pumps || 0)} pumps · ${fmtNum(c.valves || 0)} valves</div></div>
       <div class="tile click${ui.open.length ? " on" : ""}" data-open title="Show only networks with an end that isn't connected to anything"><div class="t-label">Unconnected ends</div><div class="t-val">${fmtNum(open)}</div>
         <div class="t-sub">in ${nets.filter(n => n.open).length} networks · click to list them</div></div>
@@ -101,6 +101,9 @@ const LogisticsTab = (() => {
     const rows = [...[1, 2, 3, 4, 5, 6].map(t => ["belt", t]), ...[1, 2].map(t => ["pipe", t])].filter(([k, t]) => segs(k, t))
       .map(([k, t]) => { const n = segs(k, t), col = (k === "belt" ? BELT_COLOR : PIPE_COLOR)[t];
         return { label: `<span class="with-icon"><i class="sw-line" style="background:${col}"></i>Mk.${t} ${k}s</span>`, value: n, text: `<b>${fmtNum(n)}</b>`, color: col }; });
+    const lift = t => Logistics.lifts.filter(l => l.t === t).length;   // lifts after the belts
+    rows.splice(rows.findIndex(r => /pipes/.test(r.label)) >>> 0, 0, ...[1, 2, 3, 4, 5, 6].filter(lift).map(t => ({ value: lift(t), text: `<b>${fmtNum(lift(t))}</b>`, color: BELT_COLOR[t],
+      label: `<span class="with-icon"><i class="sw-lift" style="background:${BELT_COLOR[t]}"></i>Mk.${t} lifts</span>` })));
     hbars($("lgTiers"), rows);
     // the depot: each item against its upload limit (bars are per item, since limits differ by stack size)
     const depot = [...cloud].sort((a, b) => (b.limit ? b.amount / b.limit : 0) - (a.limit ? a.amount / a.limit : 0) || b.amount - a.amount || a.name.localeCompare(b.name));
@@ -145,14 +148,17 @@ const LogisticsTab = (() => {
         </div>
       </div>`;
     table = new DataTable($("lgNets"), [
-      { key: "kind", label: "Kind", minW: 92, filter: { value: r => r.kind, noun: "kinds", all: () => [{ value: "belt", label: "Belts" }, { value: "pipe", label: "Pipes" }] }, val: r => r.kind, cell: r => `<span class="with-icon"><i class="sw-line" style="background:${(r.kind === "belt" ? BELT_COLOR : PIPE_COLOR)[Math.max(...Object.keys(r.tiers).map(Number))]}"></i>${r.kind === "belt" ? "Belts" : "Pipes"}</span>` },
-      { key: "feeds", label: "Feeds", minW: 96, val: r => feeds(r),
+      { key: "kind", label: "Kind", minW: 86, filter: { value: r => r.kind, noun: "kinds", all: () => [{ value: "belt", label: "Belts" }, { value: "pipe", label: "Pipes" }] }, val: r => r.kind, cell: r => `<span class="with-icon"><i class="sw-line" style="background:${(r.kind === "belt" ? BELT_COLOR : PIPE_COLOR)[Math.max(...Object.keys(r.tiers).map(Number))]}"></i>${r.kind === "belt" ? "Belts" : "Pipes"}</span>` },
+      { key: "feeds", label: "Feeds", minW: 90, val: r => feeds(r),
         filter: { value: r => feeds(r), noun: "feeds", all: () => Object.entries(FEEDS).map(([k, [l, c]]) => ({ value: k, label: `<i class="sw" style="background:${c}"></i> ${l}` })) }, cell: r => { const [l, c, t] = FEEDS[feeds(r)]; return `<span class="pill" style="color:${c};background:color-mix(in srgb, ${c} 14%, transparent)"${t ? ` title="${t}"` : ""}>${l}</span>`; } },
-      { key: "touches", label: "Connects", minW: 160, title: "Buildings at the ends of this network, storage included",
+      { key: "touches", label: "Connects", minW: 140, title: "Buildings at the ends of this network, storage included",
         filter: { value: r => Object.keys(r.touches), noun: "buildings", label: v => icon(v, "icon sm") + esc(v) }, val: r => Object.keys(r.touches)[0] || "",
         cell: r => { const e = Object.entries(r.touches); return e.length ? e.slice(0, 3).map(([k, n]) => `${n} × ${esc(k)}`).join("<br>") + (e.length > 3 ? `<br><span class="muted sub">+${e.length - 3} more</span>` : "") : `<span class="muted">nothing found</span>`; } },
       { key: "len", label: "Length", num: true, minW: 74, val: r => r.len, cell: r => km(r.len) },
-      { key: "segs", label: "Pieces", num: true, minW: 66, title: "Belt or pipe segments", val: r => r.segs, cell: r => fmtNum(r.segs) },
+      { key: "segs", label: "Pieces", num: true, minW: 60, title: "Belt or pipe segments", val: r => r.segs, cell: r => fmtNum(r.segs) },
+      { key: "lifts", label: "Lifts", num: true, minW: 54, title: "Conveyor lifts in this network (belt pieces that go up or down)", val: r => r.lifts || 0,
+        filter: { value: r => r.kind === "pipe" ? "Pipes" : r.lifts ? "Has lifts" : "None", noun: "", all: () => [{ value: "Has lifts" }, { value: "None" }, { value: "Pipes", label: "Pipes (no lifts)" }], ord: true },
+        cell: r => r.kind === "pipe" ? `<span class="muted">–</span>` : r.lifts ? fmtNum(r.lifts) : `<span class="muted">0</span>` },
       { key: "tiers", label: "Tiers", minW: 90, filter: { value: r => tierKeys(r), noun: "tiers", all: () => [...[1, 2, 3, 4, 5, 6].map(t => `belt:${t}`), ...[1, 2].map(t => `pipe:${t}`)].map(k => { const [kind, t] = k.split(":");
                   return { value: k, group: kind === "belt" ? "Belts" : "Pipes", label: `<i class="sw-line" style="background:${(kind === "belt" ? BELT_COLOR : PIPE_COLOR)[t]}"></i> Mk.${t} ${kind}s` }; }) }, val: r => Math.min(...Object.keys(r.tiers).map(Number)), cell: r => esc(tierText(r)) },
       { key: "cap", label: "Bottleneck", num: true, minW: 96, filter: { value: r => capText(r), noun: "" }, title: "Most this network can carry: its slowest tier", val: r => r.cap || 0, cell: r => capText(r) },

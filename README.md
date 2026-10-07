@@ -25,21 +25,22 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 ### Power
 ![Power](docs/screenshots/power.png)
 - **All grids** together or one grid at a time. Grids are named after what powers them, biggest share first, with used / max: "Nuclear 200/2,000 MW", "Coal 1", "Coal 2"; grids with no generators come last.
-- The in-game power graph's numbers (capacity, production, consumption, max consumption) plus headroom, batteries and fuse state, with history charts.
+- The in-game power graph's numbers (capacity, production, consumption, max consumption) plus headroom, batteries and fuse state.
+- **Power & batteries**: the power graph with a stored-charge graph (MWh) under it on the same time axis, beside a battery readout like the in-game Power Storage panel: charge gauge and %, time until full (or empty while draining), stored charge (e.g. 3,300 / 3,300 MWh) and charge rate.
 - **Generators & switches** in one table, with a filter under every column: each generator's output, fuel and water; each power switch's state, priority group (Undefined turns off first, then 8 … 1), what it's fed from and what it controls. Hover a switch to see its two sides on the map (supply blue, controlled orange).
 - **Grid layout**: each grid's sections, following the switches out from the generators.
 - Generation by generator type and consumption by building type, beside a map of the power network: lines, poles, wall outlets, towers, switches and power storage, with the selected grid bright and the rest faded.
 
 ### Logistics
 ![Logistics](docs/screenshots/logistics.png)
-- Every conveyor belt and pipe, grouped into **networks** (belts or pipes that connect to each other), and every **storage** building: Storage Container, Industrial Storage Container, Personal / Medical / Hazard Storage Box (and the HUB's), Fluid Buffer, Industrial Fluid Buffer, Dimensional Depot Uploader and dismantle / death crate.
-- Totals: belts and pipes (with splitters/mergers and junctions/pumps/valves), unconnected ends, slots used across containers, m³ stored across fluid buffers, depot items at their limit, and full storage (click those to list them).
-- **Networks table**: what each network feeds (production, power), the buildings it connects (storage included), its length, tier mix and bottleneck (the slowest tier), and open ends.
+- Every conveyor belt and pipe, grouped into **networks** (belts or pipes that connect to each other; conveyor lifts are belt pieces that go up or down, so a line keeps going through them), and every **storage** building: Storage Container, Industrial Storage Container, Personal / Medical / Hazard Storage Box (and the HUB's), Fluid Buffer, Industrial Fluid Buffer, Dimensional Depot Uploader and dismantle / death crate.
+- Totals: belts and pipes (with lifts, splitters/mergers and junctions/pumps/valves), unconnected ends, slots used across containers, m³ stored across fluid buffers, depot items at their limit, and full storage (click those to list them).
+- **Networks table**: what each network feeds (production, power), the buildings it connects (storage included), its length, pieces, lifts, tier mix and bottleneck (the slowest tier, lifts included), and open ends.
 - **Storage table**: type, contents, how full (slots used, or m³ of the tank), amount stored, each fluid buffer's fill / drain rate, and the belts and pipes into it.
 - The two are **linked**: click a network (in the table or on the map) and the storage it reaches is pinned to the top of the Storage table and ringed on the map; click a storage and the belts and pipes into it are pinned and drawn on the map. Every column of both tables has a filter, and the map follows them.
-- Under the map: segments by tier, and every **Dimensional Depot** item against its limit (an uploader counts as full only when the depot can't take any more of its item).
-- Hover a belt, pipe or storage on any map to see it; the maps have one layer per kind of storage building.
-- FRM doesn't say what a belt or pipe connects to, so `server.py` works the networks out from geometry (ends that meet, shared splitters/mergers/junctions/pumps, conveyor lifts), and a network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
+- Under the map: belt, lift and pipe pieces by tier, and every **Dimensional Depot** item against its limit (an uploader counts as full only when the depot can't take any more of its item).
+- Hover a belt, pipe, lift or storage on any map to see it. Lifts are drawn as small squares in their belt tier's colour with a ↕, on top of the belts; the maps have one layer per kind of storage building.
+- `server.py` works the networks out by following what each belt, lift and pipe end is plugged into (FRM's `ConnectedTo0` / `ConnectedTo1`), through splitters/mergers, junctions/pumps/valves and floor holes. With an FRM build that doesn't report those, it falls back to geometry (ends that meet, each lift joined to the nearest belt end at its height). A network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
 
 ### Progression
 ![Progression](docs/screenshots/progression.png)
@@ -51,12 +52,12 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - Every table has its title and row count on the left, **Clear filters** on the right, and filters under the column headings.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
 - On a desktop browser each tab fits one screen; on phones the panels stack.
-- `server.py` records power and production history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened, and works out the belt and pipe networks every minute.
+- `server.py` records power (battery charge and capacity included) and production history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened, and works out the belt and pipe networks every minute.
 
 ## Requirements
 - Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
 - Python 3.9+ (standard library only; [Pillow](https://pypi.org/project/pillow/) is optional, for resizing pictures).
-- For route, next-stop, live-position and speed data, FRM needs the vehicle fixes from [porisius/FicsitRemoteMonitoring#310](https://github.com/porisius/FicsitRemoteMonitoring/pull/310). With an FRM build that lacks them, the dashboard still runs, but vehicles show no routes and stay frozen whenever no player is nearby. Power poles, wall outlets and power towers on the maps also need that pull request's `getPowerPoles` endpoint; without it, the power lines and switches still show. Fluid buffers, exact storage slot counts and Dimensional Depot limits need its `getFluidBuffer` endpoint and storage fields; without them, fluid buffers are missing, slots used are estimated from stack sizes and the depot shows amounts only.
+- For route, next-stop, live-position and speed data, FRM needs the vehicle fixes from [porisius/FicsitRemoteMonitoring#310](https://github.com/porisius/FicsitRemoteMonitoring/pull/310). With an FRM build that lacks them, the dashboard still runs, but vehicles show no routes and stay frozen whenever no player is nearby. Power poles, wall outlets and power towers on the maps also need that pull request's `getPowerPoles` endpoint; without it, the power lines and switches still show. Fluid buffers, exact storage slot counts and Dimensional Depot limits need its `getFluidBuffer` endpoint and storage fields; without them, fluid buffers are missing, slots used are estimated from stack sizes and the depot shows amounts only. Exact belt / lift / pipe networks need its `ConnectedTo0` / `ConnectedTo1` fields; without them, networks are worked out from positions and some lines through conveyor lifts come out split.
 
 ## Setup
 ```sh
