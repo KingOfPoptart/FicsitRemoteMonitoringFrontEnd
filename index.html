@@ -323,9 +323,11 @@
     .sw-feed { color: var(--muted); font-size: 12px; } .sw-ctrl { font-size: 12px; }
     #wUnits td { white-space: normal; line-height: 1.35; }   /* wrap long fuel / controls text instead of cutting it */
     #tab-logistics .pgrid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
-    #tab-logistics .lg-tiers { flex: 0 0 auto; max-height: 30%; } #tab-logistics .lg-nets { flex: 1; } #tab-logistics .lg-map { flex: 1; }
-    #tab-logistics .lg-store { flex: 1.6; } #tab-logistics .lg-depot { flex: 1; }
-    #tab-logistics[data-view="nets"] .lg-s, #tab-logistics[data-view="storage"] .lg-n { display: none !important; }
+    #tab-logistics .lg-nets, #tab-logistics .lg-store { flex: 1; } #tab-logistics .lg-map { flex: 2.2; }
+    #tab-logistics .lg-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; }
+    #tab-logistics .lg-row > .card { margin: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 10px 12px; }
+    #tab-logistics table.dt tr.link { background: color-mix(in srgb, var(--accent) 7%, transparent); }   /* linked to the selected row in the other table */
+    #tab-logistics table.dt tr.link td:first-child { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
     #lgStore td { white-space: normal; line-height: 1.35; } #lgStore .nowrap { white-space: nowrap; }
     #tab-power .w-map { flex: 1.7; }   /* map on the right, with the grid layout and breakdowns under it */
     .onescreen .card-body { flex: 1; min-height: 0; overflow-y: auto; }

@@ -40,7 +40,7 @@ const Players = {
 
 // Belts and pipes on any map: MapView({ logistics: seg => bool }) adds a layer per belt tier (Mk.1-Mk.6) and pipe
 // tier (Mk.1-Mk.2) and draws the segments the filter keeps (all, production lines, power lines). One shared fetch
-// of /logistics (the server works out the networks). opts.highlight() -> network id draws that network on top.
+// of /logistics (the server works out the networks). opts.highlight() -> network id(s) draws those networks on top.
 const BELT_COLOR = { 1: "#4d6a85", 2: "#5d89b3", 3: "#6fa6dc", 4: "#8fc0f1", 5: "#b6d6f7", 6: "#dfecfb" };   // faster = brighter
 const PIPE_COLOR = { 1: "#2dd4bf", 2: "#99f6e4" };   // teal, drawn as hollow tubes; belts are solid blue lines
 const logisticsLayers = keep => [
@@ -65,6 +65,7 @@ const Logistics = {
   },
 };
 function drawLogistics(mv, keep, hi, hover) {
+  hi = hi == null ? [] : [].concat(hi);   // highlighted network id(s)
   const ctx = mv.ctx, v = mv.view, w = Math.max(1.3, Math.min(3, 1.4 * Math.sqrt(v.s / 0.3)));   // stays visible zoomed out
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   const path = segs => { for (const b of segs) { const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y)));
@@ -73,9 +74,9 @@ function drawLogistics(mv, keep, hi, hover) {
     for (const t of Object.keys(colors)) {
       if (!mv.isOn(kind + t)) continue;
       const segs = list.filter(b => b.t === +t && keep(b));
-      ctx.globalAlpha = hi ? 0.35 : 0.95; ctx.strokeStyle = colors[t]; ctx.lineWidth = width; ctx.beginPath(); path(segs); ctx.stroke();
+      ctx.globalAlpha = hi.length ? 0.35 : 0.95; ctx.strokeStyle = colors[t]; ctx.lineWidth = width; ctx.beginPath(); path(segs); ctx.stroke();
       if (kind === "pipe") {   // hollow tube: a dark core down the middle
-        ctx.globalAlpha = hi ? 0.35 : 0.85; ctx.strokeStyle = "#0d1013"; ctx.lineWidth = Math.max(0.8, width * 0.38); ctx.beginPath(); path(segs); ctx.stroke();
+        ctx.globalAlpha = hi.length ? 0.35 : 0.85; ctx.strokeStyle = "#0d1013"; ctx.lineWidth = Math.max(0.8, width * 0.38); ctx.beginPath(); path(segs); ctx.stroke();
       }
     }
   }
@@ -84,8 +85,8 @@ function drawLogistics(mv, keep, hi, hover) {
     ctx.globalAlpha = 1; ctx.strokeStyle = "rgba(13,16,19,.9)"; ctx.lineWidth = w + 5; ctx.beginPath(); path(segs); ctx.stroke();
     ctx.strokeStyle = color; ctx.lineWidth = w + 2; ctx.beginPath(); path(segs); ctx.stroke();
   };
-  if (hi) outline(hi, "#fa9549");                        // picked
-  if (hover && hover !== hi) outline(hover, "#ffffff");   // under the mouse
+  for (const id of hi) outline(id, "#fa9549");                  // picked
+  if (hover && !hi.includes(hover)) outline(hover, "#ffffff");   // under the mouse
   ctx.globalAlpha = 1;
 }
 

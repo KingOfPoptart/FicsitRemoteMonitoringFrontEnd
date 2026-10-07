@@ -290,9 +290,10 @@ def _tier(name):
     return int(name.rsplit(".", 1)[-1]) if "Mk." in name and name.rsplit(".", 1)[-1].isdigit() else 1
 
 
-def networks(kind, segs, joiners, buildings, lifts):
+def networks(kind, segs, joiners, buildings, lifts, storage=frozenset()):
     """segs: belts or pipes; joiners: splitters/mergers or junctions/pumps/valves;
-    buildings: [(category 'p'|'w'|'o', name, id, box)]. Returns (segments, networks)."""
+    buildings: [(category 'p'|'w'|'o', name, id, box)]; storage: IDs of storage buildings, listed per network
+    as "st" so the page can link a network to its storage. Returns (segments, networks)."""
     parent = list(range(len(segs)))
 
     def find(i):
@@ -362,6 +363,7 @@ def networks(kind, segs, joiners, buildings, lifts):
         slowest = min(n["tiers"])
         n.update({"p": any(c == "p" for c, _, _ in t), "w": any(c == "w" for c, _, _ in t), "len": round(n["len"]),
                   "touches": dict(sorted(names.items(), key=lambda kv: -kv[1])),
+                  "st": sorted(bid for _, _, bid in t if bid in storage),
                   "cap": (BELT_IPM.get(slowest) if kind == "belt" else PIPE_FLOW.get(slowest)),
                   "box": [round(n.pop("x0")), round(n.pop("y0")), round(n.pop("x1")), round(n.pop("y1"))]})
         out_nets.append(n)
@@ -384,14 +386,20 @@ def logistics_worker():
             seen = {m["ID"] for m in fac + ext + gens}
             # other buildings a network can reach (storage, stations, sinks…), not the belt/pipe parts themselves
             parts = ("Pipeline", "Pipe", "Junction", "Pump", "Valve", "Conveyor", "Splitter", "Merger", "Lift")
-            other = [b for b in frm_json("getPowerUsage", 30) + frm_json("getStorageInv", 30)
+            try:
+                buffers = frm_json("getFluidBuffer", 30)   # needs a newer FRM build
+            except (OSError, ValueError):
+                buffers = []
+            store = frm_json("getStorageInv", 30) + buffers
+            storage = frozenset(b["ID"] for b in store if b.get("ID"))
+            other = [b for b in frm_json("getPowerUsage", 30) + store
                      if b.get("ID") not in seen and not any(w in (b.get("Name") or "") for w in parts)]
             buildings = ([("p", m["Name"], m["ID"], _box(m, 80)) for m in fac + ext] +
                          [("w", g["Name"], g["ID"], _box(g, 80)) for g in gens] +
                          [("o", b["Name"], b["ID"], _box(b, 80)) for b in other if b.get("location") and b.get("Name")])
-            belts, bnets = networks("belt", frm_json("getBelts", 30), frm_json("getSplitterMerger", 30), buildings, True)
+            belts, bnets = networks("belt", frm_json("getBelts", 30), frm_json("getSplitterMerger", 30), buildings, True, storage)
             pump_like = [x for x in frm_json("getPump", 30)]
-            pipes, pnets = networks("pipe", frm_json("getPipes", 30), frm_json("getPipeJunctions", 30) + pump_like, buildings, False)
+            pipes, pnets = networks("pipe", frm_json("getPipes", 30), frm_json("getPipeJunctions", 30) + pump_like, buildings, False, storage)
             counts = {"splitters": sum("Splitter" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
                       "mergers": sum("Merger" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
                       "junctions": len(frm_json("getPipeJunctions", 30)),

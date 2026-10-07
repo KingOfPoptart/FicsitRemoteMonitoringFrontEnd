@@ -32,17 +32,14 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 
 ### Logistics
 ![Logistics](docs/screenshots/logistics.png)
-- Every conveyor belt and pipe, grouped into **networks** (belts or pipes that connect to each other), with totals, segments by tier, splitters/mergers and junctions/pumps/valves, and unconnected ends.
-- **Networks table**: what each network feeds (production, power), the buildings it connects, its length, tier mix and bottleneck (the slowest tier), and open ends, with a filter under the columns.
-- Hover a belt or pipe on any map to see its tier and speed and its network; click one (or a row) to highlight the whole network.
+- Every conveyor belt and pipe, grouped into **networks** (belts or pipes that connect to each other), and every **storage** building: Storage Container, Industrial Storage Container, Personal / Medical / Hazard Storage Box (and the HUB's), Fluid Buffer, Industrial Fluid Buffer, Dimensional Depot Uploader and dismantle / death crate.
+- Totals: belts and pipes (with splitters/mergers and junctions/pumps/valves), unconnected ends, slots used across containers, m³ stored across fluid buffers, depot items at their limit, and full storage (click those to list them).
+- **Networks table**: what each network feeds (production, power), the buildings it connects (storage included), its length, tier mix and bottleneck (the slowest tier), and open ends.
+- **Storage table**: type, contents, how full (slots used, or m³ of the tank), amount stored, each fluid buffer's fill / drain rate, and the belts and pipes into it.
+- The two are **linked**: click a network (in the table or on the map) and the storage it reaches is pinned to the top of the Storage table and ringed on the map; click a storage and the belts and pipes into it are pinned and drawn on the map. Every column of both tables has a filter, and the map follows them.
+- Under the map: segments by tier, and every **Dimensional Depot** item against its limit (an uploader counts as full only when the depot can't take any more of its item).
+- Hover a belt, pipe or storage on any map to see it; the maps have one layer per kind of storage building.
 - FRM doesn't say what a belt or pipe connects to, so `server.py` works the networks out from geometry (ends that meet, shared splitters/mergers/junctions/pumps, conveyor lifts), and a network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
-
-![Logistics: storage](docs/screenshots/logistics-storage.png)
-- **Storage** view (the Show switch at the top): every Storage Container, Industrial Storage Container, Personal / Medical / Hazard Storage Box (and the HUB's), Fluid Buffer, Industrial Fluid Buffer, Dimensional Depot Uploader and dismantle / death crate.
-- Totals: slots used across containers, m³ stored across fluid buffers, depot items at their limit, and how many are full or empty (click those to list them).
-- **Storage table**: type, contents, how full (slots used, or m³ of the tank), amount stored, and each fluid buffer's fill / drain rate, with a filter under every column. Click a row to fly the map to it.
-- **Dimensional Depot**: every uploaded item against its limit. An uploader counts as full only when the depot can't take any more of its item.
-- The map has one layer per kind of storage building; hover one to see what's inside.
 
 ### Progression
 ![Progression](docs/screenshots/progression.png)
