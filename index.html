@@ -230,7 +230,7 @@
   table.dt tr.sort-row th { border-bottom: 2px solid var(--line); }
   table.dt tr.sort-row:has(+ tr.filter-row) th { border-bottom: none; }
   table.dt tr.filter-row th { position: sticky; top: var(--head1); z-index: 2; cursor: default; text-transform: none; letter-spacing: 0; }
-  table.dt .f-multi .sw, .popover .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  table.dt .f-multi .sw, table.dt td .sw, .popover .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   table.dt.fixed td { overflow: hidden; text-overflow: ellipsis; }
   table.dt td { padding: 5px 10px; vertical-align: middle; }
   table.dt tr.sel { background: var(--accent-dim); }
@@ -340,9 +340,11 @@
     #tab-logistics .lg-nets, #tab-logistics .lg-store { flex: 1; } #tab-logistics .lg-map { flex: 2.2; }
     #tab-logistics .lg-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; }
     #tab-logistics .lg-row > .card { margin: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 10px 12px; }
-    #tab-logistics table.dt tr.link { background: color-mix(in srgb, var(--accent) 7%, transparent); }   /* linked to the selected row in the other table */
-    #tab-logistics table.dt tr.link td:first-child { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+    #tab-logistics table.dt tr.link, #tab-inventory table.dt tr.link { background: color-mix(in srgb, var(--accent) 7%, transparent); }   /* linked to the selected row in the other table */
+    #tab-logistics table.dt tr.link td:first-child, #tab-inventory table.dt tr.link td:first-child { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
     #lgStore td { white-space: normal; line-height: 1.35; } #lgStore .nowrap { white-space: nowrap; }
+    #tab-inventory .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+    #tab-inventory .iv-players, #tab-inventory .iv-depot { flex: 1; }
     #tab-power .w-map { flex: 1.7; }   /* map on the right, with the grid layout and breakdowns under it */
     .onescreen .card-body { flex: 1; min-height: 0; overflow-y: auto; }
     #tab-progression .pgrid { grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 1.35fr); }
@@ -544,7 +546,7 @@
 <header>
   <h1><span>FICSIT</span> Monitor</h1>
   <nav class="tabs" id="tabs">
-    <button data-tab="overview">Overview</button><button data-tab="vehicles">Vehicles</button><button data-tab="production">Production</button><button data-tab="power">Power</button><button data-tab="logistics">Logistics</button><button data-tab="progression">Progression</button>
+    <button data-tab="overview">Overview</button><button data-tab="vehicles">Vehicles</button><button data-tab="production">Production</button><button data-tab="power">Power</button><button data-tab="logistics">Logistics</button><button data-tab="inventory">Inventory</button><button data-tab="progression">Progression</button>
   </nav>
   <div class="stats" id="statsOv" data-for="overview" hidden></div>
   <div class="stats" id="stats" data-for="vehicles"></div>
@@ -552,6 +554,7 @@
   <div class="stats" id="statsPower" data-for="power" hidden></div>
   <div class="stats" id="statsProg" data-for="progression" hidden></div>
   <div class="stats" id="statsLogi" data-for="logistics" hidden></div>
+  <div class="stats" id="statsInv" data-for="inventory" hidden></div>
   <div class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
 </header>
 
@@ -596,6 +599,7 @@
 <main id="tab-production" class="tab onescreen" hidden></main>
 <main id="tab-power" class="tab onescreen" hidden></main>
 <main id="tab-logistics" class="tab onescreen" hidden></main>
+<main id="tab-inventory" class="tab onescreen" hidden></main>
 <main id="tab-progression" class="tab onescreen" hidden></main>
 
 <script src="/js/poll.js"></script>
@@ -1576,8 +1580,8 @@ document.addEventListener("click", e => {
 addEventListener("keydown", e => { if (e.key === "Escape" && document.querySelector(".xp-on")) setExpanded(null); });
 
 // ---- tabs -----------------------------------------------------------------------
-// #overview / #vehicles / #production / #power / #progression in the URL, so a tab can be bookmarked; the last one is remembered
-const TABS = { overview: "Overview", vehicles: "Vehicles", production: "Production", power: "Power", logistics: "Logistics", progression: "Progression" };
+// #overview / #vehicles / #production / #power / #logistics / #inventory / #progression in the URL, so a tab can be bookmarked; the last one is remembered
+const TABS = { overview: "Overview", vehicles: "Vehicles", production: "Production", power: "Power", logistics: "Logistics", inventory: "Inventory", progression: "Progression" };
 let activeTab = (() => {
   const h = location.hash.slice(1); if (TABS[h]) return h;
   try { const t = localStorage.getItem("ft.tab"); return TABS[t] ? t : "overview"; } catch { return "overview"; }
@@ -1601,7 +1605,7 @@ function showTab(tab) {
   setHdr();
   $("banner").hidden = tab !== "vehicles";
   hideCargoPop(); closePopover();
-  const mods = { overview: Overview, production: Production, power: Power, logistics: LogisticsTab, progression: Progression };
+  const mods = { overview: Overview, production: Production, power: Power, logistics: LogisticsTab, inventory: InventoryTab, progression: Progression };
   setExpanded(null);   // leaving a tab closes any full-screen panel
   for (const [k, m] of Object.entries(mods)) k === tab ? m.show() : m.hide();
   addExpanders();
@@ -1630,6 +1634,7 @@ every(async () => {
 <script src="/js/progression.js"></script>
 <script src="/js/overview.js"></script>
 <script src="/js/logistics.js"></script>
+<script src="/js/inventory.js"></script>
 <script>itemsReady.then(() => showTab(activeTab));</script>
 </body>
 </html>

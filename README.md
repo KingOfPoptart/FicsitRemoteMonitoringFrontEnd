@@ -42,6 +42,11 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - Hover a belt, pipe, lift or storage on any map to see it. Lifts are drawn as small squares in their belt tier's colour with a ↕, on top of the belts; the maps have one layer per kind of storage building.
 - `server.py` works the networks out by following what each belt, lift and pipe end is plugged into (FRM's `ConnectedTo0` / `ConnectedTo1`), through splitters/mergers, junctions/pumps/valves and floor holes. With an FRM build that doesn't report those, it falls back to geometry (ends that meet, each lift joined to the nearest belt end at its height). A network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
 
+### Inventory
+- **Player inventory**: what every player is carrying, one row per player and item, with the amount, the stacks it takes, and how many of that item the Dimensional Depot holds. Players who are online come first.
+- **Dimensional Depot**: every item in the depot with its amount, limit, how full it is, stacks, and how many players are carrying right now. Click "At the limit" to list the items that can't take any more uploads.
+- The two are **linked**: click an item in either table and it is marked in both, pinned to the top of the other one. Every column has a filter under it.
+
 ### Progression
 ![Progression](docs/screenshots/progression.png)
 - Space Elevator phase with each part's delivered amount, how many are in storage, how fast the factory makes them and time to finish; the HUB's active milestone; milestones per tier; MAM research; alternate recipes, AWESOME Shop and coupons.

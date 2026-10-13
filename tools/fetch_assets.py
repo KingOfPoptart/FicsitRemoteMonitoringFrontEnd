@@ -43,6 +43,8 @@ ICON_BUILDINGS = [
     "Medical Storage Box", "Hazard Storage Box",
     "Geyser",   # resource node type (geothermal), listed with the ores on the Progression tab
 ]
+# things a player can carry that items.json doesn't list (Inventory tab)
+ICON_EXTRA = ["FICSIT Coupon", "Hard Drive"]
 icon_slug = lambda name: re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")   # same rule as the page's iconSlug()
 
 
@@ -97,7 +99,7 @@ def fetch_images():
 
 def fetch_icons():
     items = [i["name"] for i in json.loads((ROOT / "items.json").read_text(encoding="utf-8"))]
-    download({ROOT / "img" / "icons" / f"{icon_slug(n)}.png": f"{n}.png" for n in items + ICON_BUILDINGS}, 64, "item/building icons")
+    download({ROOT / "img" / "icons" / f"{icon_slug(n)}.png": f"{n}.png" for n in items + ICON_BUILDINGS + ICON_EXTRA}, 64, "item/building icons")
 
 
 if __name__ == "__main__":
