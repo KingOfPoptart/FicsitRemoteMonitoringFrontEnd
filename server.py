@@ -35,6 +35,8 @@ ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths"
            "getCables", "getPowerPoles",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}
+# Never forwarded to FRM (comma-separated in $FRM_BLOCK): for an endpoint that crashes the game on a mismatched mod build.
+BLOCKED = set(filter(None, os.environ.get("FRM_BLOCK", "").split(",")))
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")
 CACHE_S = 1.0
 # Big replies are kept a little longer, so tabs, other pages and the recorder fetching them at different moments share
@@ -53,6 +55,8 @@ _ep_locks = {ep: threading.Lock() for ep in ALLOWED}
 
 def frm(endpoint, max_age=None):
     """(status, body bytes) for an FRM endpoint; concurrent callers share one request."""
+    if endpoint in BLOCKED:
+        return 503, b'{"error":"endpoint blocked (FRM_BLOCK)"}'
     if max_age is None:
         max_age = SLOW_CACHE_S.get(endpoint, CACHE_S)
     with _ep_locks[endpoint]:
@@ -481,7 +485,8 @@ def recorder():
     while True:
         t0 = time.monotonic()
         try:
-            HIST.check_session(frm_json("getSessionInfo", 30).get("SessionName"))
+            if "getSessionInfo" not in BLOCKED:
+                HIST.check_session(frm_json("getSessionInfo", 30).get("SessionName"))
             HIST.add_power(frm_json("getPower"))
             if t0 - last_prod >= PROD_EVERY_S:
                 last_prod = t0
