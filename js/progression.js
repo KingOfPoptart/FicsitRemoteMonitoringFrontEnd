@@ -59,7 +59,7 @@ const Progression = (() => {
     render();
   }
   const fast = () => load(["getSpaceElevator", "getHUBTerminal", "getResourceSink", "getProdStats", "getWorldInv", "getCloudInv"]);
-  const slow = () => load(["getSchematics", "getResearchTrees", "getTradingPost", "getSessionInfo"]);
+  const slow = () => load(["getSchematics", "getResearchTrees", "getTradingPost", "getSessionInfo", "getRecipes"]);
   const world = () => load(["getArtifacts", "getPowerSlug", "getResourceNode"]);
 
   const rateOf = name => (data.getProdStats || []).find(p => p.Name === name)?.CurrentProd || 0;
@@ -114,8 +114,11 @@ const Progression = (() => {
     const [alt, altN] = count("Alternate"), [shop, shopN] = count("Resource Sink"), [mam, mamN] = count("M.A.M.");
     const sink = data.getResourceSink?.[0];
     const trees = (data.getResearchTrees || []).filter(t => t.Nodes.length);
+    // machine recipes only (not build-gun / workbench ones); Unlocked needs FRM 1.5.5+
+    const rec = (data.getRecipes || []).filter(r => typeof r.Unlocked === "boolean" && (r.ProducedIn || []).some(c => /^Build_/.test(c) && !/WorkBench/i.test(c)));
     return `
       <div class="kv">
+        ${rec.length ? `<div><span class="muted">Machine recipes</span><b>${rec.filter(r => r.Unlocked).length} <small class="muted">of ${rec.length}</small></b><span class="muted sub">unlocked · ${rec.filter(r => r.Unlocked && /^Alternate:/i.test(r.Name)).length} alternates</span></div>` : ""}
         <div><span class="muted">Alternate recipes</span><b>${alt} <small class="muted">of ${altN}</small></b><span class="muted sub">from hard drives (MAM)</span></div>
         <div><span class="muted">AWESOME Shop</span><b>${shop} <small class="muted">of ${shopN}</small></b><span class="muted sub">items bought</span></div>
         <div><span class="muted">MAM research</span><b>${mam} <small class="muted">of ${mamN}</small></b><span class="muted sub">nodes researched</span></div>

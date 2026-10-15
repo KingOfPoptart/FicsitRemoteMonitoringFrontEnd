@@ -18,6 +18,7 @@ const Production = (() => {
   const WASTE = { "Uranium Fuel Rod": ["Uranium Waste", 50], "Plutonium Fuel Rod": ["Plutonium Waste", 10] };
 
   let machines = [], items = new Map(), loaded = false, timer = null;
+  let recipes = [], recipeTimer = null;   // machine recipes from FRM getRecipes (Unlocked needs FRM 1.5.5+)
   let selected = "";   // the item clicked in the Items table (details + highlighted machines); "" = none
   const ui = (() => { const d = { mode: "all", range: 60, bld: [], st: [], items: [], q: "" };
     try { return { ...d, ...JSON.parse(localStorage.getItem("pt.ui") || "{}") }; } catch { return d; } })();
@@ -111,6 +112,20 @@ const Production = (() => {
     const ms = fac.map(m => fromMachine(m, false)).concat(ext.map(m => fromMachine(m, true)));
     return { machines: ms, items: aggregate(ms, gens), gens };
   }
+  // FRM ProducedIn class -> building name; recipes made anywhere else (build gun, workbench, equipment workshop) aren't production recipes
+  const RECIPE_BUILDINGS = { Build_SmelterMk1_C: "Smelter", Build_FoundryMk1_C: "Foundry", Build_ConstructorMk1_C: "Constructor",
+    Build_AssemblerMk1_C: "Assembler", Build_ManufacturerMk1_C: "Manufacturer", Build_OilRefinery_C: "Refinery", Build_Packager_C: "Packager",
+    Build_Blender_C: "Blender", Build_HadronCollider_C: "Particle Accelerator", Build_Converter_C: "Converter", Build_QuantumEncoder_C: "Quantum Encoder" };
+  async function pollRecipes() {
+    try {
+      recipes = (await getJSON("getRecipes")).map(r => ({ name: r.Name, building: (r.ProducedIn || []).map(c => RECIPE_BUILDINGS[c]).find(Boolean),
+        unlocked: r.Unlocked, alt: /^Alternate:/i.test(r.Name || ""),
+        ins: (r.Ingredients || []).map(i => ({ name: i.Name, rate: i.FactoryRate })), outs: (r.Products || []).map(p => ({ name: p.Name, rate: p.FactoryRate })) }))
+        .filter(r => r.building);
+      if (selected) renderDetail();
+    } catch {}
+  }
+
   const isShort = it => it.net < -Math.max(0.01, it.prod * 0.015);
   const count = groups => [...groups.values()].reduce((a, g) => a + g.n, 0);
 
@@ -229,10 +244,29 @@ const Production = (() => {
 
   }
 
+  // every machine recipe that makes the item: in use (by how many machines), unlocked or still locked
+  function recipeList(name) {
+    const list = recipes.filter(r => r.outs.some(o => o.name === name));
+    if (!list.length) return "";
+    const used = new Map();
+    for (const m of machines) if (m.recipe) used.set(m.recipe, (used.get(m.recipe) || 0) + 1);
+    const known = list.some(r => typeof r.unlocked === "boolean");   // FRM before 1.5.5 doesn't say
+    const rank = r => used.get(r.name) ? 0 : r.unlocked ? 1 : known && !r.unlocked ? 3 : 2;
+    const pill = r => used.get(r.name) ? `<span class="pill" style="color:var(--ok);background:#3ecf8e22">${used.get(r.name)} in use</span>`
+      : r.unlocked ? `<span class="pill" style="color:var(--info);background:#5fa8ef22">unlocked</span>`
+      : known ? `<span class="pill" style="color:var(--muted);background:#8c94a122">locked</span>` : "";
+    const io = l => l.map(x => `${fmtRate(x.rate)} ${esc(x.name)}`).join(" + ");
+    const unl = list.filter(r => r.unlocked).length;
+    return `<h3>Recipes${known ? ` <span class="muted sub">${unl} of ${list.length} unlocked</span>` : ""}</h3>
+      <div class="glist">${list.sort((a, b) => rank(a) - rank(b) || a.alt - b.alt || a.name.localeCompare(b.name)).map(r => `<div class="g${known && !r.unlocked ? " muted" : ""}">${icon(r.building, "icon sm")}
+        <span class="g-name">${esc(r.name)} <span class="muted">· ${esc(r.building)}</span><br><span class="muted sub">${io(r.ins) || "–"} → ${io(r.outs)} per min</span></span>
+        <span class="g-val">${pill(r)}</span></div>`).join("")}</div>`;
+  }
+
   function renderDetail() {
     const it = items.get(selected);
     $("pDetailTitle").innerHTML = selected ? `${icon(selected)}<span>${esc(selected)}</span>` : "Item details";
-    if (!it) { $("pDetailBody").innerHTML = `<p class="muted">${selected ? `No machine makes or uses ${esc(selected)} right now.` : "Click an item in the Items table to see where it's made and used, and to highlight those machines."}</p>`; return; }
+    if (!it) { $("pDetailBody").innerHTML = `<p class="muted">${selected ? `No machine makes or uses ${esc(selected)} right now.` : "Click an item in the Items table to see where it's made and used, and to highlight those machines."}</p>${selected ? recipeList(selected) : ""}`; return; }
     const u = unitOf(it.name);
     const lines = (g, verb) => {
       const rows = [...g.values()].sort((a, b) => b.cur - a.cur);
@@ -245,7 +279,8 @@ const Production = (() => {
         <div><span class="muted">Consuming</span><b>${fmtRate(it.cons)}</b> <span class="muted">${u}</span></div>
         <div><span class="muted">Net</span><b>${netCell(it)}</b> <span class="muted">${u}</span></div>
         <div><span class="muted">Capacity</span><b>${fmtRate(it.maxProd)}</b> <span class="muted">${u}</span></div></div>
-      <div class="detail-lists"><div><h3>Made by</h3>${lines(it.producers, "makes")}</div><div><h3>Used by</h3>${lines(it.consumers, "uses")}</div></div>`;
+      <div class="detail-lists"><div><h3>Made by</h3>${lines(it.producers, "makes")}</div><div><h3>Used by</h3>${lines(it.consumers, "uses")}</div></div>
+      ${recipeList(it.name)}`;
   }
 
   function render() {
@@ -404,7 +439,8 @@ const Production = (() => {
       poll(); pollHistory();
       timer = timer || every(poll, POLL_MS);
       this.histTimer = this.histTimer || every(pollHistory, 15000);
+      if (!recipeTimer) { pollRecipes(); recipeTimer = every(pollRecipes, 300000); }   // unlocks change rarely
     },
-    hide() { stopPoll(timer); stopPoll(this.histTimer); timer = this.histTimer = null; },
+    hide() { stopPoll(timer); stopPoll(this.histTimer); stopPoll(recipeTimer); timer = this.histTimer = recipeTimer = null; },
   };
 })();

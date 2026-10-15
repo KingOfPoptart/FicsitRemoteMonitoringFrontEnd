@@ -34,7 +34,8 @@ ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths"
            "getBelts", "getLifts", "getSplitterMerger", "getStorageInv", "getFluidBuffer", "getCrateInv", "getPipes", "getPipeJunctions", "getPump",
            "getCables", "getPowerPoles",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
-           "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode"}
+           "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode",
+           "getRecipes"}
 # Never forwarded to FRM (comma-separated in $FRM_BLOCK): for an endpoint that crashes the game on a mismatched mod build.
 BLOCKED = set(filter(None, os.environ.get("FRM_BLOCK", "").split(",")))
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")
