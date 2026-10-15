@@ -23,6 +23,8 @@ const PLAYER_COLOR = "#22d3ee";   // cyan: nothing else on the maps uses it
 const playerLayer = () => ({ key: "players", group: "People", label: "Players", color: PLAYER_COLOR, size: 6, shape: "player", top: true });
 // A shared poll only runs while a map on the open tab uses it (see every() in poll.js).
 const onScreen = maps => [...maps].some(mv => mv.tab === activeTab);
+// FRM 1.5.5+ getPlayer pitch = where the player is looking (-90 down .. 90 up); older FRM always sent 0
+const lookLabel = p => typeof p !== "number" || p === 0 ? "" : Math.abs(p) < 5 ? " · looking ahead" : ` · looking ${p > 0 ? "up" : "down"} ${Math.round(Math.abs(p))}°`;
 const Players = {
   list: [], maps: new Set(), timer: null,
   attach(mv) {
@@ -35,7 +37,7 @@ const Players = {
   },
   push(mv) {   // online: solid orange + name; offline: grey, dashed outline, "(offline)"
     mv.setPoints("players", this.list.filter(p => p.location).map(p => ({ id: p.ID, x: p.location.x, y: p.location.y,
-      label: `${p.Name}${p.Online ? " · online" : " · offline"}`, name: p.Online ? p.Name : `${p.Name} (offline)`,
+      label: `${p.Name}${p.Online ? " · online" + lookLabel(p.location.pitch) : " · offline"}`, name: p.Online ? p.Name : `${p.Name} (offline)`,
       rot: typeof p.location.rotation === "number" ? p.location.rotation - 90 : null,   // FRM: compass, 0 = north
       offline: !p.Online, color: p.Online ? PLAYER_COLOR : "#8c94a1" })));
   },
