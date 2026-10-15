@@ -79,14 +79,24 @@ const Power = (() => {
   const inGrid = circuits => { const g = grid(); return !!g && (circuits || []).some(c => (g.AssociatedCircuits || []).includes(c)); };
   const energy = name => gameItems.find(i => i.name === name)?.energy;
 
+  // % water in a generator's tank. FRM 1.5.5+ reports it as Supplement.PercentFull (with Capacity); before that
+  // PercentFull followed the burn cycle instead, so read the water stack in FuelInventory.
+  function waterPct(g) {
+    const s = g.Supplement;
+    if (!s || !s.Name || s.Name === "N/A") return null;
+    if (s.Capacity > 0) return s.PercentFull;
+    const w = (g.FuelInventory || []).find(f => f.Name === s.Name);
+    return w && w.MaxAmount > 0 ? w.Amount / w.MaxAmount * 100 : null;
+  }
+
   function genStatus(g) {
     if (g.PowerInfo?.FuseTriggered) return "fuse";
     if ((g.RegulatedDemandProd || 0) > 0 || /GeoThermal/i.test(g.ClassName)) return "running";
     if (g.FuelResource === "None" || /AlienPower/i.test(g.ClassName)) return "standby";
     const fuel = (g.FuelInventory || []).filter(f => f.Amount > 0 && energy(f.Name));
     if (!fuel.length) return "nofuel";
-    const s = g.Supplement;
-    if (s && s.Name && s.Name !== "N/A" && s.PercentFull < 10) return "nowater";
+    const water = waterPct(g);
+    if (water != null && water < 10) return "nowater";
     return (g.DynamicProdCapacity || 0) > 0 ? "standby" : "lowfuel";
   }
   function fromGen(g) {
@@ -94,7 +104,7 @@ const Power = (() => {
     const burn = fuel && g.RegulatedDemandProd ? g.RegulatedDemandProd * 60 / energy(fuel.Name) : 0;
     return { id: g.ID, type: g.Name, status: genStatus(g), out: g.RegulatedDemandProd || 0, cap: g.ProductionCapacity || 0,
       load: g.LoadPercentage || 0, clock: g.CurrentPotential ?? 100, shards: g.PowerShards || 0, fuel, burn,
-      sup: g.Supplement && g.Supplement.Name !== "N/A" ? g.Supplement : null, pi: g.PowerInfo, raw: g };
+      sup: g.Supplement && g.Supplement.Name !== "N/A" ? g.Supplement : null, water: waterPct(g), pi: g.PowerInfo, raw: g };
   }
 
   async function poll() {
@@ -457,7 +467,7 @@ const Power = (() => {
                   : `${r.feed.names.map(n => n[0]).join(" ")} ${r.ctrl.names.map(n => n[0]).join(" ")}` }, title: "Generators: fuel and water. Switches: what they're fed from → what they control",
         val: r => r.kind === "gen" ? (r.fuel ? r.fuel.Amount : -1) : r.ctrl.users.length,
         cell: r => r.kind === "gen"
-          ? (r.fuel ? `<span class="with-icon">${icon(r.fuel.Name, "icon sm")}<span>${fmtRate(r.fuel.Amount)} ${esc(r.fuel.Name)}${r.burn ? ` · burning ${fmtRate(r.burn)}/min` : ""}${r.sup ? `<br><span class="muted sub">water ${pct(r.sup.PercentFull)} · ${fmtRate(r.sup.CurrentConsumed)} m³/min</span>` : ""}</span></span>` : `<span class="muted">–</span>`)
+          ? (r.fuel ? `<span class="with-icon">${icon(r.fuel.Name, "icon sm")}<span>${fmtRate(r.fuel.Amount)} ${esc(r.fuel.Name)}${r.burn ? ` · burning ${fmtRate(r.burn)}/min` : ""}${r.sup ? `<br><span class="muted sub">water ${pct(r.water)} · ${fmtRate(r.sup.CurrentConsumed)} m³/min</span>` : ""}</span></span>` : `<span class="muted">–</span>`)
           : `<span class="sw-feed">fed from: ${sideText(r.feed).replace(/<br>/g, ", ")}</span><br><span class="sw-ctrl">controls: ${sideText(r.ctrl).replace(/<br>/g, ", ")}</span>` },
       { key: "prio", label: "Clock · priority", minW: 92,
         filter: { value: r => r.kind === "gen" ? `Clock ${Math.round(r.clock)}%` : r.priority < 0 ? "Not a priority switch" : `Priority ${prioLabel(r.priority)}`, noun: "values" }, title: "Generators: clock speed and power shards. Priority switches: group (Undefined turns off first, then 8 … 1)",
