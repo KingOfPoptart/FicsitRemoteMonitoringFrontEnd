@@ -6,6 +6,8 @@ and records power/production history so the charts have data from before the pag
 /api/<endpoint>  ->  <FRM URL>/<endpoint>   (responses cached 1 s, big ones 4 s, so several open pages don't multiply FRM load)
 /hist/power?mins=60       power history per grid (sampled every 5 s, kept 24 h)
 /hist/production?mins=60  produced/consumed per item and generation per generator type (sampled every 15 s, kept 24 h)
+/hist/sink?mins=60        AWESOME Sink points per minute (from the running total, sampled every 15 s, kept 24 h)
+/sinks                    each AWESOME Sink and the machines whose belts lead into it (worked out at most once a minute)
 /logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks (worked out
                           every 60 s while a page shows them, every 5 min for a page in the background, else not at all)
 
@@ -35,7 +37,7 @@ ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths"
            "getCables", "getPowerPoles",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode",
-           "getRecipes"}
+           "getRecipes", "getResourceSinkBuilding", "getExplorationSink", "getSinkList"}
 # Never forwarded to FRM (comma-separated in $FRM_BLOCK): for an endpoint that crashes the game on a mismatched mod build.
 BLOCKED = set(filter(None, os.environ.get("FRM_BLOCK", "").split(",")))
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")
@@ -143,18 +145,20 @@ class History:
         self.session = None
         self.power = []   # [t, {groupId: [prod, cons, cap, maxCons, batteryPct, battIn, battOut, fuse, battCapMWh]}]
         self.prod = []    # [t, {item: [p, c]}, {genType: MW}]
+        self.sink = []    # [t, total standard points, total DNA points]
 
     def load(self):
         try:
             d = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
             self.session, self.power, self.prod = d.get("session"), d.get("power", []), d.get("prod", [])
+            self.sink = d.get("sink", [])
             self.trim()
         except (OSError, ValueError):
             pass
 
     def save(self):
         with self.lock:
-            data = json.dumps({"session": self.session, "power": self.power, "prod": self.prod}, separators=(",", ":"))
+            data = json.dumps({"session": self.session, "power": self.power, "prod": self.prod, "sink": self.sink}, separators=(",", ":"))
         tmp = HISTORY_FILE.with_suffix(".tmp")
         tmp.write_text(data, encoding="utf-8")
         os.replace(tmp, HISTORY_FILE)
@@ -163,12 +167,13 @@ class History:
         cut = time.time() - KEEP_S
         self.power = [s for s in self.power if s[0] >= cut]
         self.prod = [s for s in self.prod if s[0] >= cut]
+        self.sink = [s for s in self.sink if s[0] >= cut]
 
     def check_session(self, name):
         """A different save was loaded: its history doesn't belong on the same chart."""
         with self.lock:
             if name and name != self.session:
-                self.session, self.power, self.prod = name, [], []
+                self.session, self.power, self.prod, self.sink = name, [], [], []
 
     def add_power(self, groups):
         r = lambda v: round(v or 0, 2)
@@ -200,6 +205,29 @@ class History:
         with self.lock:
             self.prod.append([round(time.time()), {k: [round(p, 3), round(c, 3)] for k, (p, c) in totals.items()},
                               {k: round(v, 2) for k, v in gen.items()}])
+
+    def add_sink(self, total, dna):
+        with self.lock:
+            self.sink.append([round(time.time()), total, dna])
+
+    def sink_json(self, mins):
+        """points/min over the minute before each sample (the sink takes items in bursts: a 15 s step is too jumpy)"""
+        with self.lock:
+            rows = list(self.sink)
+        out, j = [], 0
+        for i, (t, p, d) in enumerate(rows):
+            while j < i - 1 and t - rows[j + 1][0] >= 60:
+                j += 1
+            t0, p0, d0 = rows[j]
+            # a gap (server down) or the total going back (save reloaded): no reading
+            ok = j < i and 50 <= t - t0 <= 180 and p >= p0 and d >= d0
+            out.append([t, round((p - p0) / (t - t0) * 60) if ok else None, round((d - d0) / (t - t0) * 60) if ok else None])
+        rows, step = self.window(out, mins)
+        if step != 1:
+            avg = lambda vs: round(sum(vs) / len(vs)) if vs else None
+            rows = [[b[-1][0], avg([s[1] for s in b if s[1] is not None]), avg([s[2] for s in b if s[2] is not None])] for b in rows]
+        return {"session": self.session, "interval": PROD_EVERY_S * step, "t": [r[0] for r in rows],
+                "points": [r[1] for r in rows], "dna": [r[2] for r in rows]}
 
     @staticmethod
     def window(rows, mins, max_points=720):
@@ -481,6 +509,85 @@ def logistics_worker():
             pass   # FRM down or loading: keep the last result
 
 
+# ---- AWESOME Sinks: what feeds each one --------------------------------------------------------
+# Newer FRM says what each belt end is plugged into, so from each sink the belts are followed back (through
+# splitters, mergers, lifts and floor holes) to the machines, storage and stations they start at. Belts don't report
+# their flow, so a machine's output is what it could send: anything split off on the way goes elsewhere too.
+SINKS = {"json": None, "t": -1e9}
+_sinks_lock = threading.Lock()
+SINK_EVERY_S = 60
+PASS_THROUGH = ("Splitter", "Merger", "Passthrough", "Hole")
+
+
+def sink_feeds():
+    sinks = frm_json("getResourceSinkBuilding", 30)
+    belts = frm_json("getBelts", 30) + frm_json("getLifts", 30)
+    base = lambda s: {"id": s["ID"], "x": round(s["location"]["x"]), "y": round(s["location"]["y"]),
+                      "on": bool((s.get("PowerInfo") or {}).get("PowerConsumed"))}
+    if belts and "ConnectedTo0" not in belts[0]:   # older FRM: no way to tell what a belt is plugged into
+        return {"sinks": [{**base(s), "inputs": 0, "feeds": [], "other": [], "loose": 0} for s in sinks], "traced": False}
+    fac = {m["ID"]: m for m in frm_json("getFactory", 30) + frm_json("getExtractor", 30)}
+    points = {i["ClassName"]: i["Points"] for i in frm_json("getSinkList", 300)}
+    named = {}   # storage / stations a belt can start at: name and what's in them
+    for ep in ("getStorageInv", "getTruckStation", "getTrainStation"):
+        try:
+            for b in frm_json(ep, 30):
+                inv = b.get("Inventory") or [i for p in b.get("CargoInventory") or [] for i in p.get("Inventory") or []]
+                named[b.get("ID")] = (b.get("Name"), inv)
+        except (OSError, ValueError):
+            pass
+    by_id = {b["ID"]: b for b in belts}
+    into = {}   # building -> belts whose output end is plugged into it
+    for b in belts:
+        if b.get("ConnectedTo1"):
+            into.setdefault(b["ConnectedTo1"], []).append(b["ID"])
+    out = []
+    for s in sinks:
+        seen, sources, loose = set(), {}, 0
+        stack = [(i, False) for i in into.get(s["ID"], [])]
+        while stack:
+            bid, via = stack.pop()
+            if bid in seen:
+                continue
+            seen.add(bid)
+            if bid in by_id:
+                up = by_id[bid].get("ConnectedTo0")
+                if up:
+                    stack.append((up, via))
+                else:
+                    loose += 1
+            elif any(w in bid for w in PASS_THROUGH):   # via = some of it is split off to somewhere else on the way
+                stack += [(i, via or "Splitter" in bid) for i in into.get(bid, [])]
+            else:
+                sources[bid] = sources.get(bid, False) or via
+        feeds, other = [], []
+        for src, via in sources.items():
+            m = fac.get(src)
+            if m:
+                for p in m.get("production") or []:
+                    if ITEMS.get(p["Name"], {}).get("kind") == "fluid":   # a refinery's fluid output goes down a pipe, not this belt
+                        continue
+                    feeds.append({"src": src, "building": m.get("Name"), "recipe": m.get("Recipe"), "item": p["Name"],
+                                  "rate": round(p.get("CurrentProd") or 0, 3), "max": round(p.get("MaxProd") or 0, 3),
+                                  "pts": points.get(p.get("ClassName"), 0), "split": via,
+                                  "x": round(m["location"]["x"]), "y": round(m["location"]["y"])})
+            else:
+                name, inv = named.get(src, (re.sub(r"^Build_|_C_\d+$", "", src).replace("_", " "), []))
+                top = sorted((i for i in inv if i.get("Amount")), key=lambda i: -i["Amount"])[:3]
+                other.append({"src": src, "name": name,
+                              "holds": [{"item": i["Name"], "n": i["Amount"], "pts": points.get(i.get("ClassName"), 0)} for i in top]})
+        out.append({**base(s), "inputs": len(into.get(s["ID"], [])), "feeds": feeds, "other": other, "loose": loose})
+    return {"sinks": out, "traced": True}
+
+
+def sinks_json():
+    with _sinks_lock:
+        if not SINKS["json"] or time.monotonic() - SINKS["t"] >= SINK_EVERY_S:
+            SINKS["json"] = json.dumps(sink_feeds(), separators=(",", ":")).encode()
+            SINKS["t"] = time.monotonic()
+        return SINKS["json"]
+
+
 def recorder():
     last_prod = last_save = 0
     while True:
@@ -496,6 +603,11 @@ def recorder():
                 for g in gens:
                     gen[g["Name"]] = gen.get(g["Name"], 0) + (g.get("RegulatedDemandProd") or 0)
                 HIST.add_prod(production_totals(fac, ext, gens), gen)
+                try:
+                    dna = frm_json("getExplorationSink")[0].get("TotalPoints", 0)
+                except (OSError, ValueError, IndexError):
+                    dna = 0
+                HIST.add_sink(frm_json("getResourceSink")[0]["TotalPoints"], dna)
         except Exception:   # FRM down, a session loading, a cut-off or odd reply: just a gap in the chart
             pass
         if t0 - last_save >= SAVE_EVERY_S:
@@ -523,12 +635,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not LOGI["json"]:
                 return self.send_body(503, b'{"error":"belts and pipes not ready yet"}')
             return self.send_body(200, LOGI["json"], {"X-Age": str(int(time.monotonic() - LOGI["t"]))})
-        if path in ("/hist/power", "/hist/production"):
+        if path == "/sinks":
+            try:
+                return self.send_body(200, sinks_json())
+            except Exception as e:   # FRM down or loading
+                return self.send_body(502, json.dumps({"error": str(e)}).encode())
+        if path in ("/hist/power", "/hist/production", "/hist/sink"):
             try:
                 mins = max(1, min(KEEP_S // 60, int(urllib.parse.parse_qs(query).get("mins", ["60"])[0])))
             except ValueError:
                 mins = 60
-            data = HIST.power_json(mins) if path == "/hist/power" else HIST.prod_json(mins)
+            data = (HIST.power_json(mins) if path == "/hist/power" else HIST.prod_json(mins) if path == "/hist/production"
+                    else HIST.sink_json(mins))
             return self.send_body(200, json.dumps(data, separators=(",", ":")).encode())
         if (path in ("/", "/index.html", "/items.json", "/map.avif") or re.fullmatch(r"/js/[a-z0-9-]+\.js", path)
                 or re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path)):
@@ -568,7 +686,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith(("/api/", "/hist/")):  # polling would flood the console
+        if not self.path.startswith(("/api/", "/hist/", "/sinks")):  # polling would flood the console
             super().log_message(fmt, *args)
 
 

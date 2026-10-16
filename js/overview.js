@@ -3,7 +3,7 @@
 "use strict";
 
 const Overview = (() => {
-  let d = {}, prod = null, veh = [], timers = [], map, chart;
+  let d = {}, prod = null, veh = [], timers = [], map, chart, sinks = null;
   const root = $("tab-overview");
   const VEH_COLOR = { moving: "#5fcf80", docking: "#5fa8ef", stopped: "#c5cad3", driven: "#c39cf7", error: "#ef5f5f" };
 
@@ -40,6 +40,8 @@ const Overview = (() => {
   Logistics.listeners.add(() => render());
 
   async function slow() { await load(["getSchematics"]); render(); }
+  // AWESOME Sinks: what feeds them (server.py traces the belts at most once a minute)
+  async function sinkData() { try { sinks = (await Sink.sinks()).sinks; } catch {} render(); }
   async function powerHist() {
     try {
       const h = await (await fetch("/hist/power?mins=60", { cache: "no-store" })).json();
@@ -92,6 +94,8 @@ const Overview = (() => {
     if (cost.length && cost.every(c => c.RemainingCost === 0)) add("ok", `HUB milestone "${hub.ActiveMilestone.Name}" is paid — ready to unlock`, "progression");
     else if (hub && !hub.HasActiveMilestone) add("info", "No milestone selected in the HUB terminal", "progression");
     const sink = d.getResourceSink?.[0];
+    const dark = (sinks || []).filter(s => !s.on).length;
+    if (dark) add("warn", `${dark} AWESOME Sink${dark > 1 ? "s have" : " has"} no power`, "sink");
     if (sink?.NumCoupon >= 10) add("info", `${sink.NumCoupon} FICSIT Coupons to spend in the AWESOME Shop`, "progression");
     const order = { bad: 0, warn: 1, ok: 2, info: 3 };
     return out.sort((a, b) => order[a.level] - order[b.level]);
@@ -168,6 +172,20 @@ const Overview = (() => {
         ${se.done ? "" : se.parts.map(pt => partRow(pt.name, pt.done, pt.total)).join("")}` : ""}
       ${m ? `<h3>HUB · ${esc(m.Name)}</h3>${(m.Cost || []).map(c => partRow(c.Name, total(c) - left(c), total(c))).join("")}` : `<h3>HUB</h3><p class="muted">No milestone selected.</p>`}`;
 
+    // ---- Sink: points per minute, the next coupon, what earns the most
+    const rs = d.getResourceSink?.[0];
+    if (rs && $("ovSink")) {
+      const avg = Sink.avg(rs), cost = Sink.cost(rs), perHour = avg && cost ? avg * 60 / cost : null;
+      const items = sinks ? Sink.byItem(sinks).sort((a, b) => b.ptsMin - a.ptsMin) : [];
+      const tot = items.reduce((a, i) => a + i.ptsMin, 0);
+      $("ovSink").innerHTML = `<div class="big">${Sink.k(avg)} <small>points/min</small></div>
+        <div class="t-sub">10-minute average · ${Sink.k(Sink.now(rs))} in the last minute</div>
+        <div class="t-sub">${bar(rs.Percent, SINK_COLOR)}next coupon in ${Sink.dur(Sink.minsToNext(rs))}</div>
+        <div class="t-sub">${fmtNum(rs.NumCoupon)} to print${perHour ? ` · about ${fmtNum(perHour, perHour < 10 ? 1 : 0)} coupons an hour` : ""}</div>
+        ${items.length ? `<h3>Most points <span class="muted">what the feeding machines could send</span></h3>${items.slice(0, 5).map(i =>
+          `<div class="part"><span class="with-icon">${icon(i.item, "icon sm")}<span>${esc(i.item)}</span></span>${bar(tot ? i.ptsMin / tot : 0, SINK_COLOR)}<span class="muted">${i.split ? "≤ " : ""}${Sink.k(i.ptsMin)}/min</span></div>`).join("")}` : ""}`;
+    }
+
     renderLogistics();
     $("statsOv").innerHTML = (gs.length ? `<span class="stat"><b>${fmtNum(tot("PowerConsumed"))}</b>/ ${fmtNum(tot("PowerCapacity"))} MW</span>` : "") +
       (prod ? `<span class="stat"><b>${prod.machines.filter(m => m.status === "running" || m.status === "partial").length}</b>machines working</span>` : "") +
@@ -185,6 +203,8 @@ const Overview = (() => {
     }
     map.setPoints("veh", veh.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tab: "vehicles" })));
     map.setPoints("hub", (d.getTradingPost || []).map(o => pt(o, { label: o.Name })).filter(Boolean));
+    if (sinks) map.setPoints("sinks", sinks.map(s => ({ id: s.id, x: s.x, y: s.y, color: s.on ? SINK_COLOR : "var(--bad)", tab: "sink",
+      label: `AWESOME Sink · ${s.feeds.length ? `up to ${Sink.k(Sink.feedPts(s))} points/min` : "nothing traced in"}${s.on ? "" : " · no power"}` })));
     map.setPoints("elevator", (d.getSpaceElevator || []).map(o => pt(o, { label: o.Name })).filter(Boolean));
   }
 
@@ -197,10 +217,11 @@ const Overview = (() => {
           <div class="ov-cards">
             <a class="card link ov-card ov-power" href="#power"><div class="card-head"><h2>Power</h2><span class="hint">→</span></div>
               <div class="ov-power-side"><div id="ovPower"></div><div class="figs" id="ovPowerFigs"></div></div><div id="ovChart"></div></a>
-            <a class="card link ov-card" href="#production"><div class="card-head"><h2>Production</h2><span class="hint">→</span></div><div class="ov-body" id="ovProd"><p class="muted">Loading…</p></div></a>
-            <a class="card link ov-card" href="#vehicles"><div class="card-head"><h2>Vehicles</h2><span class="hint">→</span></div><div class="ov-body" id="ovVeh"></div></a>
-            <a class="card link ov-card" href="#logistics"><div class="card-head"><h2>Logistics</h2><span class="hint">→</span></div><div class="ov-body" id="ovLogi"><p class="muted">Working out belts and pipes…</p></div></a>
-            <a class="card link ov-card" href="#progression"><div class="card-head"><h2>Progression</h2><span class="hint">→</span></div><div class="ov-body" id="ovProg"></div></a>
+            <a class="card link ov-card ov-prod" href="#production"><div class="card-head"><h2>Production</h2><span class="hint">→</span></div><div class="ov-body" id="ovProd"><p class="muted">Loading…</p></div></a>
+            <a class="card link ov-card ov-veh" href="#vehicles"><div class="card-head"><h2>Vehicles</h2><span class="hint">→</span></div><div class="ov-body" id="ovVeh"></div></a>
+            <a class="card link ov-card ov-logi" href="#logistics"><div class="card-head"><h2>Logistics</h2><span class="hint">→</span></div><div class="ov-body" id="ovLogi"><p class="muted">Working out belts and pipes…</p></div></a>
+            <a class="card link ov-card ov-sink" href="#sink"><div class="card-head"><h2>AWESOME Sink</h2><span class="hint">→</span></div><div class="ov-body" id="ovSink"><p class="muted">Loading…</p></div></a>
+            <a class="card link ov-card ov-prog" href="#progression"><div class="card-head"><h2>Progression</h2><span class="hint">→</span></div><div class="ov-body" id="ovProg"></div></a>
           </div>
         </div>
         <section class="card sticky ov-world"><div class="card-head"><h2>World</h2><span class="hint">click a marker to open it in its tab</span></div><div id="ovMap"></div></section>
@@ -216,6 +237,7 @@ const Overview = (() => {
         { key: "gens", group: "Factory", label: "Generators", color: "#e879f9", size: 5, shape: "diamond" },   // fuchsia; red = not running
         { key: "hub", group: "Factory", label: "The HUB", color: "#fa9549", size: 6.5, shape: "square" },
         { key: "elevator", group: "Factory", label: "Space Elevator", color: "#fa9549", size: 8, shape: "triangle" },
+        { key: "sinks", group: "Factory", label: "AWESOME Sinks", color: SINK_COLOR, size: 6, shape: "drain" },   // red = no power
         { key: "veh", group: "Transport", label: "Vehicles", color: "#5fcf80", size: 5, shape: "arrow" },
         ...networkLayers(),
       ],
@@ -228,8 +250,8 @@ const Overview = (() => {
   return {
     show() {
       if (!map) init();
-      fast().then(powerHist); factory(); slow(); Logistics.start();
-      if (!timers.length) timers = [every(fast, 3000), every(factory, 15000), every(slow, 60000), every(powerHist, 15000)];
+      fast().then(powerHist); sinkData(); factory(); slow(); Logistics.start();
+      if (!timers.length) timers = [every(fast, 3000), every(factory, 15000), every(slow, 60000), every(powerHist, 15000), every(sinkData, 60000)];
     },
     hide() { timers.forEach(stopPoll); timers = []; },
   };

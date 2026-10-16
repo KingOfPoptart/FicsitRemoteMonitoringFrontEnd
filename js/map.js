@@ -288,7 +288,7 @@ const MapCtx = {
     requestAnimationFrame(() => { for (const m of MapView.all) m.applyPending(); });   // a map that already exists and kept its size
   },
 };
-const MAP_TABS = ["overview", "vehicles", "production", "power", "logistics", "progression"];
+const MAP_TABS = ["overview", "vehicles", "production", "power", "logistics", "sink", "progression"];
 
 class MapView {
   static all = []; static pending = null;
@@ -440,6 +440,7 @@ class MapView {
     if (l.swatchHtml) return l.swatchHtml;
     if (l.swatch) return `<i style="${l.swatch}"></i>`;
     const shape = { square: "", diamond: "transform:rotate(45deg) scale(.8);", ring: `background:none;border:2px solid ${l.color};border-radius:50%;`,
+                    drain: `background:radial-gradient(${l.color} 0 22%, #0d1013 23% 45%, ${l.color} 46%);border-radius:50%;`,
                     arrow: "clip-path:polygon(100% 50%,0 100%,25% 50%,0 0);width:11px;", dot: "border-radius:50%;",
                     player: "clip-path:polygon(100% 50%,0 95%,25% 50%,0 5%);width:12px;",
                     triangle: "clip-path:polygon(50% 0,100% 100%,0 100%);width:11px;height:11px;" }[l.shape || "dot"];
@@ -691,6 +692,12 @@ class MapView {
     else if (l.shape === "tank") {   // fluid buffer: a filled circle with a dark core, like the pipes
       ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.fillStyle = "#0d1013"; ctx.beginPath(); ctx.arc(s.x, s.y, rad * 0.4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; return;
+    }
+    else if (l.shape === "drain") {   // AWESOME Sink: a dark disc with a coloured rim and centre, like a plughole
+      const c = cssColor(p.color || l.color);
+      ctx.fillStyle = "#0d1013"; ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = Math.max(1.5, rad * 0.35); ctx.strokeStyle = c; ctx.beginPath(); ctx.arc(s.x, s.y, rad * 0.8, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(s.x, s.y, rad * 0.28, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; return;
     }
     else if (l.shape === "ring") { ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.globalAlpha = alpha; ctx.lineWidth = 2; ctx.strokeStyle = cssColor(p.color || l.color); ctx.stroke(); ctx.globalAlpha = 1; return; }
     else ctx.arc(s.x, s.y, rad, 0, Math.PI * 2);
