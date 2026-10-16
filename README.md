@@ -1,15 +1,15 @@
 # Ficsit Remote Monitoring – FICSIT Monitor
 
-A live web dashboard for a Satisfactory world: how the factory is doing at a glance, every vehicle, every production machine, the power grid, every conveyor belt and pipe, and your progression. It reads data from the [Ficsit Remote Monitoring](https://github.com/porisius/FicsitRemoteMonitoring) (FRM) mod's web API.
+A live web dashboard for a Satisfactory world: how the factory is doing at a glance, every vehicle, every production machine, the power grid, every conveyor belt and pipe, what players and the Dimensional Depot hold, FICSIT Coupon income, and your progression. It reads data from the [Ficsit Remote Monitoring](https://github.com/porisius/FicsitRemoteMonitoring) (FRM) mod's web API.
 
 ![Overview](docs/screenshots/overview.png)
 
 ## Tabs
 
 ### Overview (home)
-- **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), unconnected belt/pipe ends, milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
-- **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), vehicles (per type, stuck ones by name), logistics (belt and pipe totals by tier) and progression (Space Elevator and HUB parts).
-- **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), every storage container, fluid buffer and Dimensional Depot uploader, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
+- **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), unconnected belt/pipe ends, AWESOME Sinks without power, milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
+- **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), progression (Space Elevator and HUB parts), vehicles (per type, stuck ones by name), logistics (belt and pipe totals by tier) and the AWESOME Sink (points per minute, time to the next coupon, the items earning the most).
+- **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, AWESOME Sinks, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), every storage container, fluid buffer and Dimensional Depot uploader, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
 
 ### Vehicles
 ![Vehicles](docs/screenshots/vehicles.png)
@@ -43,9 +43,18 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - `server.py` works the networks out by following what each belt, lift and pipe end is plugged into (FRM's `ConnectedTo0` / `ConnectedTo1`), through splitters/mergers, junctions/pumps/valves and floor holes. With an FRM build that doesn't report those, it falls back to geometry (ends that meet, each lift joined to the nearest belt end at its height). A network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
 
 ### Inventory
+![Inventory](docs/screenshots/inventory.png)
 - **Player inventory**: what every player is carrying, one row per player and item, with the amount, the stacks it takes, and how many of that item the Dimensional Depot holds. Players who are online come first.
 - **Dimensional Depot**: every item in the depot with its amount, limit, how full it is, stacks, and how many players are carrying right now. Click "At the limit" to list the items that can't take any more uploads.
 - The two are **linked**: click an item in either table and it is marked in both, pinned to the top of the other one. Every column has a filter under it.
+
+### Sink
+![Sink](docs/screenshots/sink.png)
+- FICSIT Coupon income: points per minute in the last minute and over 10 minutes (the in-game sink graph's numbers), time until the next coupon and how far along it is, coupons waiting to be printed, total points and DNA points.
+- **Points per minute** over 10 minutes to 24 hours, from `server.py`'s own record of the sink's running total.
+- **What's being sunk**: every item reaching an AWESOME Sink, how fast it's made, its points, points per minute and share, and the machines and recipes making it.
+- **Sinks**: each sink named after what feeds it most, the items it gets, belts into it, storage or stations it's fed from, belts that start at nothing, and power. Click one (in the table or on the map) to see only its items and ring the machines feeding it.
+- `server.py` follows the belts back from each sink (through splitters, mergers, lifts and floor holes) to the machines, storage and stations they start at; this needs FRM's `ConnectedTo0` / `ConnectedTo1` fields. Belts don't report their flow, so an item's points per minute is what its machines make: where a splitter on the way sends some of it elsewhere it's marked ≤, and the tab shows it beside what the sinks actually take in.
 
 ### Progression
 ![Progression](docs/screenshots/progression.png)
@@ -57,7 +66,7 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 - Every table has its title and row count on the left, **Clear filters** on the right, and filters under the column headings.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
 - On a desktop browser each tab fits one screen; on phones the panels stack.
-- `server.py` records power (battery charge and capacity included) and production history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened. It works out the belt and pipe networks every minute while a page shows them (every 5 minutes for a page in the background, not at all when nobody is looking).
+- `server.py` records power (battery charge and capacity included), production and sink points history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened. It works out the belt and pipe networks every minute while a page shows them (every 5 minutes for a page in the background, not at all when nobody is looking).
 
 ## Requirements
 - Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
@@ -78,7 +87,7 @@ Options:
 - `--frm http://<host>:8080`, or set `FRM_URL`, if FRM runs on another machine.
 - `--host 0.0.0.0` to open the dashboard from other devices on your network.
 - `--port` to use a port other than 8090.
-- `--no-history` to not record power/production history.
+- `--no-history` to not record power, production and sink history.
 
 `items.json` (every item in the game, with fuel energy values) is included. To regenerate it after a game update, run `python tools/generate_items.py --game-dir "<Satisfactory install>"`.
 
