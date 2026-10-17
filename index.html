@@ -1277,7 +1277,7 @@ const networkLayers = () => [
 ];
 const vmap = new MapView($("vehMap"), {
   storeKey: "vt.layers", animate: () => mapMoving(), dim: 0.35, fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
-  layerMenu: true, players: true,
+  layerMenu: true, players: true, hypertubes: () => true,
   // a layer per vehicle type (picture + count), then the transport network; players are added by MapView
   layers: [...Object.keys(TYPES).map(t => ({ key: "v:" + t, group: "Vehicles", label: t, swatchHtml: typeImg(t),
             count: () => vehicles.filter(v => v.type === t).length })), ...networkLayers()],

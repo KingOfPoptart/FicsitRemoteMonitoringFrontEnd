@@ -256,6 +256,54 @@ const storageTip = s => !s ? "" :
   (s.items.length ? s.items.slice(0, 8).map(i => `<div class="row"><span class="with-icon">${icon(i.name, "icon sm")}${esc(i.name)}</span><b>${fmtNum(i.amount, i.fluid ? 1 : 0)}${i.fluid ? " m³" : ""}</b></div>`).join("") +
     (s.items.length > 8 ? `<div class="row muted"><span>+${s.items.length - 8} more</span></div>` : "") : `<div class="row muted"><span>empty</span></div>`);
 
+// Hypertubes on any map: MapView({ hypertubes: net => bool }) adds the tubes (hollow, like glass), their entrances
+// and the open ends a ride shoots out of (an arrow the way it points). One shared fetch of /hypertubes (server.py
+// works out the networks) every 30 s.
+const TUBE_COLOR = "#e2e8f0";   // silver-white glass
+const hypertubeLayers = keep => [
+  { key: "tubes", group: "Hypertubes", label: "Hypertubes", swatch: `background:linear-gradient(${TUBE_COLOR} 0 30%, #0d1013 30% 70%, ${TUBE_COLOR} 70%);height:6px`,
+    count: () => Hyper.tubes.filter(t => keep(t.n)).length },
+  { key: "hents", group: "Hypertubes", label: "Hypertube entrances", color: TUBE_COLOR, size: 4.5, shape: "ring" },
+  { key: "hexits", group: "Hypertubes", label: "Open ends (launch points)", color: TUBE_COLOR, size: 5, shape: "arrow" },
+];
+const Hyper = {
+  tubes: [], entrances: [], networks: [], junctions: 0, loaded: false, maps: new Set(), listeners: new Set(), timer: null,
+  attach(mv) { this.maps.add(mv); this.start(); if (this.loaded) this.push(mv); },
+  start() { if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 30000, () => onScreen(this.maps)); } },
+  async poll() {
+    try { const r = await fetch("/hypertubes", { cache: "no-store" }); if (!r.ok) throw 0; Object.assign(this, await r.json()); }
+    catch { return; }
+    this.byId = new Map(this.networks.map(n => [n.id, n]));
+    this.loaded = true;
+    for (const mv of this.maps) this.push(mv);
+    for (const f of this.listeners) f();
+  },
+  push(mv) {
+    const keep = mv.opts.hypertubes;
+    mv.setPoints("hents", this.entrances.filter(e => keep(e.n)).map(e => ({ id: e.id, x: e.x, y: e.y, net: e.n,
+      color: e.fuse || !e.mw ? "var(--bad)" : TUBE_COLOR, tip: () => entranceTip(e) })));
+    mv.setPoints("hexits", this.networks.filter(n => keep(n.id)).flatMap(n => n.exits.map((x, i) => ({ id: `${n.id}:x${i}`, x: x.x, y: x.y, net: n.id,
+      rot: x.heading - 90, tip: () => exitTip(x) }))));
+  },
+};
+const tubeLen = m => m >= 1000 ? `${fmtNum(m / 1000, 1)} km` : `${fmtNum(m)} m`;
+const launchAngle = p => p == null ? "–" : Math.abs(p) < 3 ? "level" : `${fmtNum(Math.abs(p))}° ${p > 0 ? "up" : "down"}`;
+const entranceTip = e => `<div class="head"><b style="color:#fff">Hypertube Entrance</b> · ${e.fuse ? `<span class="bad-text">fuse blown</span>` : e.mw ? "powered" : `<span class="bad-text">no power</span>`}</div>` +
+  `<div class="row"><span>Power</span><b>${fmtNum(e.mw, 1)} / ${fmtNum(e.max, 1)} MW</b></div><div class="row"><span>Height</span><b>${fmtNum(e.z / 100)} m</b></div>`;
+const exitTip = x => `<div class="head"><b style="color:#fff">Open tube end</b> · rides shoot out here</div>` +
+  `<div class="row"><span>Points</span><b>${launchAngle(x.pitch)}</b></div><div class="row"><span>Height</span><b>${fmtNum(x.z / 100)} m</b></div>`;
+function drawHypertubes(mv, keep) {
+  if (!mv.isOn("tubes") || !Hyper.tubes.length) return;
+  const ctx = mv.ctx, w = Math.max(1.6, Math.min(4, 1.8 * Math.sqrt(mv.view.s / 0.3)));
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const path = list => { for (const t of list) { const ip = t.ip || (t.ip = t.pts.map(([x, y]) => worldToImg(x, y)));
+    ip.forEach((q, i) => { const s = mv.toScreen(q); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); }); } };
+  const list = Hyper.tubes.filter(t => keep(t.n));
+  ctx.globalAlpha = 0.95; ctx.strokeStyle = TUBE_COLOR; ctx.lineWidth = w * 2.2; ctx.beginPath(); path(list); ctx.stroke();
+  ctx.strokeStyle = "#0d1013"; ctx.lineWidth = Math.max(0.8, w * 0.8); ctx.beginPath(); path(list); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
 // Right-click any map: "open this spot in another tab's map". The view (centre in image coords + zoom) waits in
 // MapView.pending until that tab's map exists and has a size (tabs build their maps on first show).
 const MapCtx = {
@@ -295,7 +343,7 @@ class MapView {
   constructor(el, opts) {
     this.opts = opts;
     this.layers = [...opts.layers, ...(opts.powerNet ? powerLayers(opts.powerNet) : []), ...(opts.logistics ? logisticsLayers(opts.logistics) : []),
-                   ...(opts.storage ? storageLayers(opts.storage) : []),
+                   ...(opts.storage ? storageLayers(opts.storage) : []), ...(opts.hypertubes ? hypertubeLayers(opts.hypertubes) : []),
                    ...(opts.players ? [playerLayer()] : [])];
     this.points = {}; this.hoverId = null; this.focus = null; this.fitted = false;
     this.tab = el.closest("main.tab")?.id.replace(/^tab-/, ""); MapView.all.push(this);
@@ -383,6 +431,7 @@ class MapView {
     if (opts.logistics) Logistics.attach(this);
     if (opts.powerNet) PowerNet.attach(this);
     if (opts.storage) Storage.attach(this);
+    if (opts.hypertubes) Hyper.attach(this);
     if (opts.animate) {   // repaint while something moves (capped at ~30 fps), never while the map isn't on screen
       let last = 0, was = false;
       const loop = t => {
@@ -596,6 +645,7 @@ class MapView {
     }
     if (this.opts.powerNet) { ctx.save(); drawPowerLines(this, this.opts.powerNet); ctx.restore(); }
     if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.(), this.hoverNet); ctx.restore(); }   // under everything else
+    if (this.opts.hypertubes) { ctx.save(); drawHypertubes(this, this.opts.hypertubes); ctx.restore(); }
     if (this.opts.draw) { ctx.save(); this.opts.draw(ctx, performance.now(), this); ctx.restore(); }
     const marked = [], emph = [], top = [];
     for (const l of this.layers) {

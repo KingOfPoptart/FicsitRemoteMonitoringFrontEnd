@@ -8,6 +8,7 @@ and records power/production history so the charts have data from before the pag
 /hist/production?mins=60  produced/consumed per item and generation per generator type (sampled every 15 s, kept 24 h)
 /hist/sink?mins=60        AWESOME Sink points per minute (from the running total, sampled every 15 s, kept 24 h)
 /sinks                    each AWESOME Sink and the machines whose belts lead into it (worked out at most once a minute)
+/hypertubes               tube networks, entrances (power) and the open ends rides shoot out of (at most every 30 s)
 /logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks (worked out
                           every 60 s while a page shows them, every 5 min for a page in the background, else not at all)
 
@@ -37,7 +38,8 @@ ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths"
            "getCables", "getPowerPoles",
            "getProdStats", "getSpaceElevator", "getHUBTerminal", "getTradingPost", "getSchematics", "getResearchTrees",
            "getResourceSink", "getPlayer", "getWorldInv", "getCloudInv", "getArtifacts", "getPowerSlug", "getResourceNode",
-           "getRecipes", "getResourceSinkBuilding", "getExplorationSink", "getSinkList"}
+           "getRecipes", "getResourceSinkBuilding", "getExplorationSink", "getSinkList",
+           "getHypertube", "getHyperEntrance", "getHyperJunctions"}
 # Never forwarded to FRM (comma-separated in $FRM_BLOCK): for an endpoint that crashes the game on a mismatched mod build.
 BLOCKED = set(filter(None, os.environ.get("FRM_BLOCK", "").split(",")))
 FRM = os.environ.get("FRM_URL", "http://localhost:8080").rstrip("/")
@@ -45,7 +47,7 @@ CACHE_S = 1.0
 # Big replies are kept a little longer, so tabs, other pages and the recorder fetching them at different moments share
 # one request. 4 s, not 5: tabs poll these every 5 s and should still get a fresh copy each time.
 SLOW_CACHE_S = dict.fromkeys(("getFactory", "getExtractor", "getGenerators", "getPowerUsage", "getCables", "getPowerPoles",
-                              "getStorageInv", "getVehiclePaths", "getBelts", "getPipes", "getResourceNode"), 4.0)
+                              "getStorageInv", "getVehiclePaths", "getBelts", "getPipes", "getResourceNode", "getHypertube"), 4.0)
 HISTORY_FILE = ROOT / "history.json"
 KEEP_S = 24 * 3600
 POWER_EVERY_S, PROD_EVERY_S, SAVE_EVERY_S = 5, 15, 60
@@ -588,6 +590,125 @@ def sinks_json():
         return SINKS["json"]
 
 
+# ---- hypertubes: networks, entrances, launch points --------------------------------------------
+# FRM lists tubes (curve + both ends), entrances (with power) and junctions, but not what connects to what, so
+# networks come from geometry like the belts: tube ends that meet, ends at the same entrance or junction, and ends
+# a few metres apart with nothing else near (a wall / floor hole between them). A tube end touching nothing is where
+# a ride shoots you out - the muzzle of a hypertube cannon - so those are listed with the angle they point at.
+HYPER = {"json": None, "t": -1e9}
+_hyper_lock = threading.Lock()
+HYPER_EVERY_S = 30
+
+
+def _d3(a, b):
+    return math.sqrt((a["x"] - b["x"]) ** 2 + (a["y"] - b["y"]) ** 2 + (a["z"] - b["z"]) ** 2)
+
+
+def hyper_build():
+    tubes = frm_json("getHypertube", 30)
+    ents = frm_json("getHyperEntrance", 30)
+    try:
+        juncs = frm_json("getHyperJunctions", 30)
+    except (OSError, ValueError):
+        juncs = []
+    T, E = len(tubes), len(ents)
+    parent = list(range(T + E + len(juncs)))   # tubes, then entrances, then junctions
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a, b):
+        parent[find(a)] = find(b)
+    ends = [(i, k, t[k]) for i, t in enumerate(tubes) for k in ("location0", "location1")]
+    grid = {}
+    for n, (i, k, q) in enumerate(ends):
+        grid.setdefault((int(q["x"] // 500), int(q["y"] // 500)), []).append(n)
+
+    def near(q, r):   # end indexes within r cm of q (r <= 500)
+        gx, gy = int(q["x"] // 500), int(q["y"] // 500)
+        return [n for dx in (-1, 0, 1) for dy in (-1, 0, 1) for n in grid.get((gx + dx, gy + dy), ()) if _d3(ends[n][2], q) <= r]
+    used = [False] * len(ends)
+    for n, (i, k, q) in enumerate(ends):   # ends that meet
+        for m in near(q, 60):
+            if m != n:
+                union(i, ends[m][0]); used[n] = used[m] = True
+    for e, x in enumerate(ents):   # the tube plugged into an entrance
+        for m in near(x["location"], 300):
+            union(T + e, ends[m][0]); used[m] = True
+    for j, x in enumerate(juncs):
+        spots = [x["location"]] + [x[k] for k in ("location0", "location1") if x.get(k)]
+        for m in {m for s in spots for m in near(s, 200)}:
+            union(T + E + j, ends[m][0]); used[m] = True
+    # two loose ends a few metres apart: a floor or wall hole between them
+    for n, (i, k, q) in enumerate(ends):
+        if used[n]:
+            continue
+        cand = [(_d3(ends[m][2], q), m) for m in near(q, 500) if m != n and not used[m] and ends[m][0] != i]
+        if cand:
+            m = min(cand)[1]
+            union(i, ends[m][0]); used[n] = used[m] = True
+    nets, out_tubes = {}, []
+    for i, t in enumerate(tubes):
+        pts = list(t.get("SplineData") or [t["location0"], t["location1"]])
+        # FRM samples the curve every 75 cm and can stop short of the far end: put both ends on
+        a, b = (t["location0"], t["location1"]) if _d3(pts[0], t["location0"]) <= _d3(pts[0], t["location1"]) else (t["location1"], t["location0"])
+        if _d3(pts[0], a) > 5:
+            pts.insert(0, a)
+        if _d3(pts[-1], b) > 5:
+            pts.append(b)
+        tubes[i]["SplineData"] = pts   # the open-end direction below uses the same points
+        length = sum(_d3(pts[j - 1], pts[j]) for j in range(1, len(pts))) / 100
+        r = find(i)
+        n = nets.setdefault(r, {"id": f"h{r}", "tubes": 0, "len": 0.0, "ents": [], "juncs": 0, "exits": [],
+                                "z0": 1e12, "z1": -1e12, "box": [1e12, 1e12, -1e12, -1e12]})
+        n["tubes"] += 1
+        n["len"] += length
+        for q in pts:
+            n["z0"], n["z1"] = min(n["z0"], q["z"]), max(n["z1"], q["z"])
+            b = n["box"]
+            b[0], b[1], b[2], b[3] = min(b[0], q["x"]), min(b[1], q["y"]), max(b[2], q["x"]), max(b[3], q["y"])
+        out_tubes.append({"n": n["id"], "len": round(length, 1), "pts": [[round(q["x"]), round(q["y"]), round(q["z"])] for q in pts]})
+    for n, (i, k, q) in enumerate(ends):   # open ends: which way a ride leaves (outwards along the tube's last bit)
+        if used[n]:
+            continue
+        pts = tubes[i].get("SplineData") or [tubes[i]["location0"], tubes[i]["location1"]]
+        if len(pts) < 2:
+            continue
+        a, b = (pts[1], pts[0]) if _d3(pts[0], q) <= _d3(pts[-1], q) else (pts[-2], pts[-1])
+        dx, dy, dz = b["x"] - a["x"], b["y"] - a["y"], b["z"] - a["z"]
+        nets[find(i)]["exits"].append({"x": round(q["x"]), "y": round(q["y"]), "z": round(q["z"]),
+                                       "pitch": round(math.degrees(math.atan2(dz, math.hypot(dx, dy) or 1e-9)), 1),
+                                       "heading": round((math.degrees(math.atan2(dy, dx)) + 90) % 360)})   # compass, like FRM
+    out_ents = []
+    for e, x in enumerate(ents):
+        r = find(T + e)
+        p = x.get("PowerInfo") or {}
+        l = x["location"]
+        out_ents.append({"id": x["ID"], "x": round(l["x"]), "y": round(l["y"]), "z": round(l["z"]),
+                         "n": nets[r]["id"] if r in nets else None, "mw": p.get("PowerConsumed") or 0,
+                         "max": p.get("MaxPowerConsumed") or 0, "fuse": bool(p.get("FuseTriggered")), "circuit": p.get("CircuitID")})
+        if r in nets:
+            nets[r]["ents"].append(x["ID"])
+    for j in range(len(juncs)):
+        r = find(T + E + j)
+        if r in nets:
+            nets[r]["juncs"] += 1
+    for n in nets.values():
+        n.update({"len": round(n["len"]), "z0": round(n["z0"] / 100, 1), "z1": round(n["z1"] / 100, 1), "box": [round(v) for v in n["box"]]})
+    return {"tubes": out_tubes, "entrances": out_ents, "networks": list(nets.values()), "junctions": len(juncs)}
+
+
+def hyper_data():
+    with _hyper_lock:
+        if not HYPER["json"] or time.monotonic() - HYPER["t"] >= HYPER_EVERY_S:
+            HYPER["json"] = json.dumps(hyper_build(), separators=(",", ":")).encode()
+            HYPER["t"] = time.monotonic()
+        return HYPER["json"]
+
+
 def recorder():
     last_prod = last_save = 0
     while True:
@@ -640,6 +761,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self.send_body(200, sinks_json())
             except Exception as e:   # FRM down or loading
                 return self.send_body(502, json.dumps({"error": str(e)}).encode())
+        if path == "/hypertubes":
+            try:
+                return self.send_body(200, hyper_data())
+            except Exception as e:   # FRM down or loading
+                return self.send_body(502, json.dumps({"error": str(e)}).encode())
         if path in ("/hist/power", "/hist/production", "/hist/sink"):
             try:
                 mins = max(1, min(KEEP_S // 60, int(urllib.parse.parse_qs(query).get("mins", ["60"])[0])))
@@ -686,7 +812,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith(("/api/", "/hist/", "/sinks")):  # polling would flood the console
+        if not self.path.startswith(("/api/", "/hist/", "/sinks", "/hypertubes")):  # polling would flood the console
             super().log_message(fmt, *args)
 
 

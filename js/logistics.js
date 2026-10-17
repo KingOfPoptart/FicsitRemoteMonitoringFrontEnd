@@ -195,7 +195,7 @@ const LogisticsTab = (() => {
          pin: r => picked && linkedSt().has(r.id) ? 0 : 1,
          rowAttrs: r => `data-st="${esc(r.id)}" class="${r.id === pickedSt ? "sel" : picked && linkedSt().has(r.id) ? "link" : ""}"` });
     map = new MapView($("lgMap"), {
-      storeKey: "lg.map", layerMenu: true, players: true, layers: [],
+      storeKey: "lg.map", layerMenu: true, players: true, hypertubes: () => true, layers: [],
       logistics: b => { const n = net(b.n); return !n || passes(n); },   // the map follows both tables' filters
       storage: s => stPasses(s),
       highlight: () => picked || (pickedSt ? [...linkedNets()] : null),
