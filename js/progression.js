@@ -156,18 +156,36 @@ const Progression = (() => {
           <div class="hb-val"><b>${r.tapped}</b> <span class="muted">/ ${r.n}</span></div></div>`).join("")}</div>`;
   }
 
+  // what a collectible gives you; what a node can give at its purity (per minute at 100% / 250% clock)
+  const COLLECT_USE = { "Somersloop": "doubles a machine's output (alien research, then slot it in)", "Mercer Sphere": "alien research and the Dimensional Depot",
+    "Blue Power Slug": "1 Power Shard", "Yellow Power Slug": "2 Power Shards", "Purple Power Slug": "5 Power Shards" };
+  const collectTip = a => Pop.head(a.Name, { iconName: a.Name, sub: "not picked up yet", status: "On the map", color: COLLECTIBLES.find(c => c.name === a.Name)?.color || "var(--accent)" }) +
+    Pop.sec("Collectible") + (COLLECT_USE[a.Name] ? Pop.row("Gives", COLLECT_USE[a.Name]) : "") + Pop.where(a.location);
+  const PURE = { Impure: 0.5, Normal: 1, Pure: 2 };
+  function nodeRates(n) {
+    const k = PURE[n.Purity] || 1, fluid = n.ResourceForm === "Liquid" || n.ResourceForm === "Gas";
+    if (/Geyser/i.test(n.Name) || /Geyser/i.test(n.NodeType)) return [["Geothermal Generator", `about ${fmtNum(200 * k)} MW`]];
+    if (/Fracking|Satellite/i.test(n.NodeType)) return [["Well satellite", `${fmtNum(60 * k)} / ${fmtNum(150 * k)} m³`]];
+    if (fluid) return [["Oil Extractor", `${fmtNum(120 * k)} / ${fmtNum(300 * k)} m³`]];
+    return [["Miner Mk.1", `${fmtNum(60 * k)} / ${fmtNum(150 * k)}`], ["Miner Mk.2", `${fmtNum(120 * k)} / ${fmtNum(300 * k)}`], ["Miner Mk.3", `${fmtNum(240 * k)} / ${fmtNum(600 * k)}`]];
+  }
+  const nodeTip = n => Pop.head(n.Name, { iconName: n.Name, sub: `${esc(n.Purity)} ${n.NodeType === "Node" ? "node" : esc(n.NodeType).toLowerCase()}`,
+                                          status: n.Exploited ? "Tapped" : "Free", color: n.Exploited ? "#199e70" : "var(--muted)" }) +
+    Pop.sec(`Per minute at 100% / 250% clock · ${esc(n.Purity)} ×${PURE[n.Purity] ?? 1}`) + nodeRates(n).map(([k, v]) => Pop.row(k, v)).join("") +
+    (n.Exploited ? Pop.note("an extractor is built on it") : "") + Pop.where(n.location);
+
   function renderMap() {
     if (!map) return;
     const pt = (a, extra) => ({ id: a.ID, x: a.location.x, y: a.location.y, ...extra });
     const col = name => COLLECTIBLES.find(c => c.name === name)?.color;
-    map.setPoints("sloop", (data.getArtifacts || []).filter(a => a.Name === "Somersloop").map(a => pt(a, { label: "Somersloop" })));
-    map.setPoints("sphere", (data.getArtifacts || []).filter(a => a.Name === "Mercer Sphere").map(a => pt(a, { label: "Mercer Sphere" })));
-    map.setPoints("slug", (data.getPowerSlug || []).map(a => pt(a, { label: a.Name, color: col(a.Name) })));
+    map.setPoints("sloop", (data.getArtifacts || []).filter(a => a.Name === "Somersloop").map(a => pt(a, { label: "Somersloop", tip: () => collectTip(a) })));
+    map.setPoints("sphere", (data.getArtifacts || []).filter(a => a.Name === "Mercer Sphere").map(a => pt(a, { label: "Mercer Sphere", tip: () => collectTip(a) })));
+    map.setPoints("slug", (data.getPowerSlug || []).map(a => pt(a, { label: a.Name, color: col(a.Name), tip: () => collectTip(a) })));
     const pickCol = COLLECTIBLES.find(c => c.name === ui.node);   // a collectible picked (vs a resource)
     const nodes = (data.getResourceNode || []).filter(n => !ui.node || pickCol || n.Name === ui.node);
     const nl = n => `${n.Name} · ${n.Purity}${n.NodeType !== "Node" ? " · " + n.NodeType : ""}${n.Exploited ? " · tapped" : ""}`;
-    map.setPoints("free", nodes.filter(n => !n.Exploited).map(n => pt(n, { label: nl(n), color: n.Purity === "Pure" ? "#f2f2f2" : n.Purity === "Normal" ? "#aab1bd" : "#6b7380" })));
-    map.setPoints("tapped", nodes.filter(n => n.Exploited).map(n => pt(n, { label: nl(n) })));
+    map.setPoints("free", nodes.filter(n => !n.Exploited).map(n => pt(n, { label: nl(n), color: n.Purity === "Pure" ? "#f2f2f2" : n.Purity === "Normal" ? "#aab1bd" : "#6b7380", tip: () => nodeTip(n) })));
+    map.setPoints("tapped", nodes.filter(n => n.Exploited).map(n => pt(n, { label: nl(n), tip: () => nodeTip(n) })));
     // a resource picked from the list: its nodes drawn big with a ring (white = untapped, green = tapped), the rest fades
     // the picked thing is drawn big with a ring (resources: white = untapped, green = tapped; collectibles: their colour)
     const BASE = { free: 3, tapped: 3.5, sloop: 4.5, sphere: 4, slug: 3 };

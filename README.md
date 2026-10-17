@@ -4,12 +4,18 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 
 ![Overview](docs/screenshots/overview.png)
 
+## Maps
+
+Every tab's map shares the same parts: a Layers dropdown (including hypertubes: tubes, entrances and the open ends rides launch from, with their angle), right-click to open the same spot in another tab's map, and a detailed popup for anything you hover. Machines, generators, vehicles, stations, storage, belts and pipes, power poles and switches, players, resource nodes and collectibles all show a title, a status badge and labelled rows: what it's doing, rates, contents, its power grid, height and position. Extractors also show what they took out over the last 10 minutes and hour, the most they can at their clock speed, what's unused, and the node's purity.
+
+![Hover popup](docs/screenshots/hover.png)
+
 ## Tabs
 
 ### Overview (home)
 - **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), unconnected belt/pipe ends, AWESOME Sinks without power, milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
 - **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), progression (Space Elevator and HUB parts), vehicles (per type, stuck ones by name), logistics (belt and pipe totals by tier) and the AWESOME Sink (points per minute, time to the next coupon, the items earning the most).
-- **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, AWESOME Sinks, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), every storage container, fluid buffer and Dimensional Depot uploader, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
+- **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, AWESOME Sinks, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), every storage container, fluid buffer and Dimensional Depot uploader, hypertubes, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
 
 ### Vehicles
 ![Vehicles](docs/screenshots/vehicles.png)

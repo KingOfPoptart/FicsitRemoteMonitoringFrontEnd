@@ -53,7 +53,7 @@ const Production = (() => {
     const eff = m.Productivity ?? m.production?.[0]?.ProdPercent ?? 0;
     const o = { id: m.ID, building: m.Name, recipe: m.Recipe || "", extractor, outputs, inputs, eff,
       clock: m.ManuSpeed ?? 100, shards: m.PowerShards || 0, sloops: m.Somersloops || 0,
-      mw: m.PowerInfo?.PowerConsumed || 0, maxMw: m.PowerInfo?.MaxPowerConsumed || 0, circuit: m.PowerInfo?.CircuitGroupID,
+      mw: m.PowerInfo?.PowerConsumed || 0, maxMw: m.PowerInfo?.MaxPowerConsumed || 0, circuit: m.PowerInfo?.CircuitGroupID, circuitId: m.PowerInfo?.CircuitID,
       inv: { in: m.InputInventory || [], out: m.OutputInventory || (extractor ? m.production : []) || [] }, loc: m.location };
     o.status = machineStatus({ ...m, eff }, m.production);
     if (o.status !== "running" && o.status !== "partial") o.eff = m.IsConfigured && !m.IsPaused ? eff : 0;
@@ -318,9 +318,43 @@ const Production = (() => {
   }
   function unfocus() { if (selected) focus(selected); }
 
-  const machinePop = m => `<div class="head">${esc(m.building)} ${esc(shortId(m.id))}${m.recipe ? " · " + esc(m.recipe) : ""} · ${M_STATUS[m.status].label} · ${pct(m.eff)} productive<br>` +
-    `clock ${pct(m.clock)}${m.shards ? ` · ${m.shards} power shard${m.shards > 1 ? "s" : ""}` : ""}${m.sloops ? ` · ${m.sloops} Somersloop${m.sloops > 1 ? "s" : ""}` : ""} · ${fmtNum(m.mw, 1)} MW now, ${fmtNum(m.maxMw, 1)} MW max</div>` +
-    (m.inv.in.length ? popSection("Input") + invRows(m.inv.in) : "") + popSection("Output") + invRows(m.inv.out);
+  // machine hover: a clear title (building, recipe, status) and labelled rows. Extractors also say what they took out
+  // lately (server.py averages each one over the last 10 / 60 minutes), the most they can at this clock, what's unused,
+  // and the node's purity (worked out from the max rate) with what it would give at 250%.
+  const EXTRACT_BASE = { "Miner Mk.1": 60, "Miner Mk.2": 120, "Miner Mk.3": 240, "Oil Extractor": 120 };   // per min at 100% on a normal node
+  const PURITY = { 0.5: "Impure", 1: "Normal", 2: "Pure" };
+  const popRow = Pop.row;
+  const perMin = (v, name) => v == null ? "–" : `${fmtRate(v)} <small>${unitOf(name)}</small>`;
+  function machinePop(m) {
+    const st = M_STATUS[m.status], out = m.outputs[0];
+    let html = Pop.head(m.building, { id: shortId(m.id), sub: m.recipe ? esc(m.recipe) : "no recipe", status: st.label, color: st.color });
+    if (m.extractor && out) {
+      const h = extHist[m.id], base = EXTRACT_BASE[m.building], clock = m.clock || 100;
+      const lately = h?.m10 ?? out.cur, unused = Math.max(0, out.max - lately);
+      const purity = base ? PURITY[Math.round(out.max / (clock / 100) / base * 2) / 2] : null;
+      html += popSection(`Extracting ${out.name}`) +
+        // FRM's current rate is the game's productivity average, so it lags: a stopped extractor reads 0 now
+        popRow("Right now", ["running", "partial"].includes(m.status) ? perMin(out.cur, out.name) : `0 <small>${unitOf(out.name)} · ${st.label.toLowerCase()}</small>`) +
+        popRow("Last 10 min", h?.m10 != null ? perMin(h.m10, out.name) : `<span class="muted">collecting…</span>`) +
+        popRow(h && h.mins < 55 ? `Last ${Math.max(1, Math.round(h.mins))} min` : "Last hour", h?.m60 != null ? perMin(h.m60, out.name) : `<span class="muted">collecting…</span>`) +
+        popRow(`Max at ${pct(clock)} clock`, perMin(out.max, out.name)) +
+        popRow("Unused", `${perMin(unused, out.name)} <small>(${pct(out.max ? lately / out.max * 100 : 0)} used)</small>`, unused > 0.05 ? "mp-hi" : "");
+      if (purity || base) html += popSection("Node") + (purity ? popRow("Purity", purity) : "") +
+        (clock < 250 ? popRow("At 250% clock", perMin(out.max / clock * 250, out.name)) : "");
+    } else {
+      if (m.outputs.length) html += popSection("Makes (now / max)") + m.outputs.map(o => popRow(`${icon(o.name, "icon sm")}${esc(o.name)}`, `${fmtRate(o.cur)} / ${perMin(o.max, o.name)}`)).join("");
+      if (m.inputs.length) html += popSection("Uses (now / max)") + m.inputs.map(i => popRow(`${icon(i.name, "icon sm")}${esc(i.name)}`, `${fmtRate(i.cur)} / ${perMin(i.max, i.name)}`)).join("");
+    }
+    html += popSection("Machine") + popRow("Productivity", pct(m.eff)) + Pop.grid(m.circuitId) +
+      popRow("Clock", `${pct(m.clock)}${m.shards ? ` <small>· ${m.shards} shard${m.shards > 1 ? "s" : ""}</small>` : ""}${m.sloops ? ` <small>· ${m.sloops} Somersloop${m.sloops > 1 ? "s" : ""}</small>` : ""}`) +
+      popRow("Power", `${fmtNum(m.mw, 1)} <small>of ${fmtNum(m.maxMw, 1)} MW</small>`);
+    const held = [...m.inv.in, ...m.inv.out].filter(i => i.Amount > 0);
+    if (held.length) html += popSection("Holding") + held.map(i => popRow(`${icon(i.Name, "icon sm")}${esc(i.Name)}`,
+      isFluid(i.Name) ? `${fmtNum(i.Amount, 1)} <small>m³</small>` : `${fmtNum(i.Amount)}${i.MaxAmount ? ` <small>/ ${fmtNum(i.MaxAmount)}</small>` : ""}`)).join("");
+    return html + Pop.where(m.loc);
+  }
+  let extHist = {};
+  async function pollExtractors() { try { extHist = await (await fetch("/hist/extractors", { cache: "no-store" })).json(); } catch {} }
 
   // ---- markup + events -----------------------------------------------------------------------
   function init() {
@@ -433,12 +467,12 @@ const Production = (() => {
   }
 
   return {
-    snapshot, isShort, M_STATUS,
+    snapshot, isShort, M_STATUS, machinePop, pollExtractors, machine: id => machines.find(m => m.id === id),   // the Overview map uses the same machine hover
     show() {
       if (!itemTable) init();
       poll(); pollHistory();
       timer = timer || every(poll, POLL_MS);
-      this.histTimer = this.histTimer || every(pollHistory, 15000);
+      if (!this.histTimer) { pollExtractors(); this.histTimer = every(() => { pollHistory(); pollExtractors(); }, 15000); }
       if (!recipeTimer) { pollRecipes(); recipeTimer = every(pollRecipes, 300000); }   // unlocks change rarely
     },
     hide() { stopPoll(timer); stopPoll(this.histTimer); stopPoll(recipeTimer); timer = this.histTimer = recipeTimer = null; },

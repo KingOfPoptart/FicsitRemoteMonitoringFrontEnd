@@ -60,6 +60,14 @@
   .cargo-pop .row { display: flex; justify-content: space-between; gap: 16px; padding: 3px 9px; }
   .cargo-pop .row b { font-weight: 600; font-variant-numeric: tabular-nums; }
   .cargo-pop .head { padding: 2px 9px 6px; margin-bottom: 3px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  /* machine hover: title block + labelled rows */
+  .cargo-pop .mp-head { padding: 2px 9px 6px; }
+  .cargo-pop .mp-title { font-size: 15px; font-weight: 600; color: #fff; }
+  .cargo-pop .mp-title .muted { font-size: 12px; font-weight: 400; }
+  .cargo-pop .mp-sub { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 2px; font-size: 13px; }
+  .cargo-pop .row small { font-weight: 400; color: var(--muted); font-size: 11px; }
+  .cargo-pop .row span .icon { vertical-align: -3px; margin-right: 5px; }
+  .cargo-pop .row.mp-hi b { color: var(--accent); }
   tr.cargo-open td.cargo { color: var(--text); box-shadow: inset 2px 0 0 #fa954980; }
   tr.sort-row th { overflow: hidden; text-overflow: ellipsis; }
   .rz { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 3; }
@@ -704,7 +712,8 @@ function fromWheeled(c) {
   return {
     id: c.ID, type, golden: /Gold/i.test(c.ClassName), name: c.Name, status, error: c.AutoPilotStatus, speed,
     route: Array.isArray(c.Route) ? c.Route.map(w => ({ name: w.Name, next: w.IsNextStop })) : null,
-    nextStop: c.NextStop || "", autopilot: !!c.Autopilot, driver: c.Driver || "",
+    nextStop: c.NextStop || "", autopilot: !!c.Autopilot, driver: c.Driver || "", pathName: c.PathName || "",
+    fuel: (c.FuelInventory || []).filter(i => i.Amount > 0), fuelUse: c.FuelConsumption, hasFuel: c.HasFuel,
     items: inv.map(i => tank ? { name: i.Name, amount: m3(i), unit: "m³" } : itemOf(i.Name, i.Amount)),
     fill: Math.min(1, tank ? inv.reduce((a, i) => a + m3(i), 0) / tank : stacks / TYPES[type].slots),
     loc: c.location, rot: headingToCanvas(c.location.rotation), rail: false,
@@ -735,6 +744,7 @@ function fromTrain(t) {
     consist: cars.length ? `${locos} loco${locos === 1 ? "" : "s"}+${cars.length - locos} car${cars.length - locos === 1 ? "" : "s"}` : "",
     route: stops, nextStop: stops.find(s => s.next)?.name || t.TrainStation || "",
     autopilot: t.Status === "Self-Driving", driver: t.Status === "Manual Driving" ? "(manual)" : "",
+    mass: t.TotalMass, payload: t.PayloadMass, maxPayload: t.MaxPayloadMass, power: t.PowerInfo, cars: cars.length, trainStatus: t.Status,
     items: Object.entries(grouped).map(([name, amount]) => itemOf(name, amount)),
     fill: t.MaxPayloadMass ? t.PayloadMass / t.MaxPayloadMass : 0,
     loc: t.location, rot: headingToCanvas(t.location.rotation), rail: true,
@@ -1320,31 +1330,38 @@ function centerOn(id, zoom) {
 
 canvas.addEventListener("mousemove", e => {   // hovering a marker highlights its row
   if (vmap.dragging) return;
-  const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, now = performance.now();
+  const r = canvas.getBoundingClientRect(), hit = vehicleAt(e.clientX - r.left, e.clientY - r.top);
+  setHover(hit ? hit.v.id : null);
+  if (hit) scrollRowIntoView(document.querySelector(`tr[data-id="${CSS.escape(hit.v.id)}"]`));
+});
+// popup: the vehicle or station under the cursor, whichever is nearer (a station a vehicle is parked on is reachable at its edge)
+vmap.opts.extraTip = (mx, my) => {
+  const v = vehicleAt(mx, my), st = stationAt(mx, my);
+  return v && (!st || v.d < 7 || v.d <= st.d) ? vehiclePop(v.v) : st ? stationPopHtml(st) : null;   // right on a vehicle: the vehicle
+};
+canvas.addEventListener("mouseleave", () => { setHover(null); hideCargoPop(); });
+
+// ---- station contents popup on the map ---------------------------------------------
+function stationAt(mx, my, mv = vmap) {
+  // only station types that are shown on the map
+  const groups = [["drone", dronePorts, "dronePorts"], ["truck", truckStations, "truckStations"], ["train", trainStations, "trainStations"]].filter(g => mv.isOn(g[2]));
+  let best = null, bd = 11;
+  for (const [kind, list] of groups) for (const s of list) {
+    const p = mv.toScreen(worldToImg(s.location.x, s.location.y)), d = Math.hypot(p.x - mx, p.y - my);
+    if (d < bd) { bd = d; best = { kind, s, d }; }
+  }
+  return best;
+}
+// the vehicle drawn under the cursor on the Vehicles map (they glide, so where it is on screen right now)
+function vehicleAt(mx, my) {
+  const now = performance.now();
   let best = null, bd = 14;
   for (const v of onMap()) {
     const m = motion.get(v.id); if (!m) continue;
     const p = toScreen(interp(m, now)), d = Math.hypot(p.x - mx, p.y - my);
-    if (d < bd) { bd = d; best = v.id; }
+    if (d < bd) { bd = d; best = v; }
   }
-  setHover(best);
-  if (best) scrollRowIntoView(document.querySelector(`tr[data-id="${CSS.escape(best)}"]`));
-  // a station under the cursor shows what's in it, even when a vehicle is parked on it (that vehicle highlights too)
-  const st = stationAt(mx, my);
-  if (st) showPopAt(stationPopHtml(st), e.clientX, e.clientY); else hideCargoPop();
-});
-canvas.addEventListener("mouseleave", () => { setHover(null); hideCargoPop(); });
-
-// ---- station contents popup on the map ---------------------------------------------
-function stationAt(mx, my) {
-  // only station types that are shown on the map
-  const groups = [["drone", dronePorts, "dronePorts"], ["truck", truckStations, "truckStations"], ["train", trainStations, "trainStations"]].filter(g => layers[g[2]]);
-  let best = null, bd = 11;
-  for (const [kind, list] of groups) for (const s of list) {
-    const p = toScreen(worldToImg(s.location.x, s.location.y)), d = Math.hypot(p.x - mx, p.y - my);
-    if (d < bd) { bd = d; best = { kind, s }; }
-  }
-  return best;
+  return best && { v: best, d: bd };
 }
 const invRows = (inv, empty = "empty") => {
   const items = (inv || []).filter(i => i.Amount > 0);
@@ -1353,20 +1370,50 @@ const invRows = (inv, empty = "empty") => {
     return `<div class="row"><span>${esc(i.Name)}</span><b>${it.unit ? Math.round(it.amount).toLocaleString() + " " + it.unit : "×" + it.amount.toLocaleString()}</b></div>`; }).join("");
 };
 const popSection = title => `<div class="head" style="border-top:1px solid var(--line);border-bottom:none;margin:4px 0 0;padding-top:6px">${esc(title)}</div>`;
-function stationPopHtml({ kind, s }) {
+const VEH_STATUS_COLOR = { moving: "var(--ok)", docking: "var(--info)", stopped: "#c5cad3", driven: "var(--driven)", error: "var(--bad)" };
+const stationPower = s => s.PowerInfo ? Pop.row("Power", Pop.mw(s.PowerInfo.PowerConsumed || 0, s.PowerInfo.MaxPowerConsumed)) + Pop.grid(s.PowerInfo.CircuitID) : "";
+// vehicles parked at a station right now
+const dockedAt = (s, list = vehicles) => list.filter(v => v.loc && Math.hypot(v.loc.x - s.location.x, v.loc.y - s.location.y) < 2500 && (v.status === "docking" || v.status === "stopped"));
+function stationPopHtml({ kind, s }, list) {
+  const docked = dockedAt(s, list), dockRow = docked.length ? Pop.row("Vehicles here", docked.map(v => `${esc(v.type)} ${esc(shortId(v.id))}`).join(", ")) : "";
   if (kind === "truck") {
-    const fuel = (s.FuelInventory || []).some(i => i.Amount > 0) ? popSection("Fuel") + invRows(s.FuelInventory) : "";
-    return `<div class="head"><b style="color:${STATION_COLOR.truck}">■</b> ${esc(s.Name)} · Truck station · ${esc(s.LoadMode || "")}</div>` + invRows(s.Inventory) + fuel;
+    const mode = s.LoadMode || "Idle";
+    return Pop.head(s.Name, { id: shortId(s.ID), sub: "truck station", status: mode, color: STATION_COLOR.truck }) +
+      Pop.sec("Station") + (s.StationStatus ? Pop.row("Status", esc(s.StationStatus)) : "") + dockRow + stationPower(s) +
+      Pop.sec("Inventory") + Pop.items(s.Inventory, { max: 10 }) +
+      ((s.FuelInventory || []).some(i => i.Amount > 0) ? Pop.sec("Fuel for trucks") + Pop.items(s.FuelInventory) : "") + Pop.where(s.location);
   }
   if (kind === "train") {
-    const plats = (s.CargoInventory || []).map((p, i) =>
-      popSection(`Platform ${i + 1} · ${p.Name || "Platform"}${p.LoadingMode ? " · " + p.LoadingMode : ""}${p.DockingStatus ? " · " + p.DockingStatus : ""}`) + invRows(p.Inventory)).join("");
-    return `<div class="head"><b style="color:${STATION_COLOR.train}">■</b> ${esc(s.Name)} · Train station</div>` + (plats || `<div class="row muted"><span>no freight platforms</span></div>`);
+    const plats = s.CargoInventory || [];
+    return Pop.head(s.Name, { id: shortId(s.ID), sub: "train station", status: `${plats.length} platform${plats.length === 1 ? "" : "s"}`, color: STATION_COLOR.train }) +
+      Pop.sec("Station") + dockRow + stationPower(s) +
+      (plats.map((pl, i) => Pop.sec(`Platform ${i + 1} · ${pl.LoadingMode || pl.Name || "freight"}${pl.DockingStatus && !/None/.test(pl.DockingStatus) ? " · " + pl.DockingStatus : ""}`) +
+        Pop.items(pl.Inventory, { max: 6 })).join("") || Pop.note("no freight platforms")) + Pop.where(s.location);
   }
-  const paired = s.PairedStation && s.PairedStation !== "None" ? ` · paired → ${esc(s.PairedStation)}` : " · not paired";
-  return `<div class="head"><b style="color:${STATION_COLOR.drone}">■</b> ${esc(s.Name)} · Drone port · ${esc(s.DroneStatus || "")}${paired}</div>` +
-    popSection("Input (to send)") + invRows(s.InputInventory) + popSection("Output (received)") + invRows(s.OutputInventory) +
-    ((s.FuelInventory || []).some(i => i.Amount > 0) ? popSection("Fuel") + invRows(s.FuelInventory) : "");
+  const paired = s.PairedStation && s.PairedStation !== "None" ? esc(s.PairedStation) : `<span class="warn-text">not paired</span>`;
+  return Pop.head(s.Name, { id: shortId(s.ID || ""), sub: "drone port", status: s.DroneStatus || "No drone", color: STATION_COLOR.drone }) +
+    Pop.sec("Port") + Pop.row("Paired with", paired) + stationPower(s) +
+    ((s.FuelInventory || []).some(i => i.Amount > 0) ? Pop.sec("Batteries / fuel") + Pop.items(s.FuelInventory) : "") +
+    Pop.sec("To send") + Pop.items(s.InputInventory) + Pop.sec("Received") + Pop.items(s.OutputInventory) + Pop.where(s.location);
+}
+function vehiclePop(v) {
+  const near = v.loc ? nearestStation(v) : null, stops = v.route || [];
+  const title = v.name && v.name !== v.type ? `${v.type} · ${v.name}` : v.type;
+  const err = v.status === "error" && v.error ? Pop.row("Problem", `<span class="bad-text">${esc(trainErr(v.error) || v.error)}</span>`) : "";
+  return Pop.head(title, { id: shortId(v.id), sub: v.consist ? esc(v.consist) : v.pathName ? esc(v.pathName) : v.autopilot ? "self-driving" : "manual",
+                           status: STATUS_LABEL[v.status], color: VEH_STATUS_COLOR[v.status] }) +
+    Pop.sec("Driving") + err + Pop.row("Speed", v.speed != null ? `${fmtNum(v.speed)}${Pop.unit("km/h")}` : "–") +
+    (v.nextStop ? Pop.row("Next stop", esc(v.nextStop)) : "") +
+    Pop.row("Autopilot", v.autopilot ? "on" : "off") + (v.driver ? Pop.row("Driver", esc(v.driver)) : "") +
+    (near && near.name ? Pop.row("Nearest station", `${esc(near.name)}${Pop.unit(`${fmtNum(near.dist)} m`)}`) : "") +
+    (stops.length ? Pop.sec(`Route · ${stops.length} stop${stops.length === 1 ? "" : "s"}`) +
+      stops.slice(0, 6).map((r, i) => Pop.row(`${i + 1}. ${esc(r.name)}`, r.next ? `<span style="color:var(--accent)">next</span>` : "")).join("") +
+      (stops.length > 6 ? Pop.note(`+${stops.length - 6} more`) : "") : "") +
+    Pop.sec(`Cargo · ${fmtNum(v.fill * 100)}% full`) + Pop.items(v.items, { max: 8 }) +
+    (v.mass ? Pop.row("Weight", `${fmtNum(v.mass / 1000)}${Pop.unit(`t · payload ${fmtNum(v.payload / 1000)} of ${fmtNum(v.maxPayload / 1000)} t`)}`) : "") +
+    (v.fuel ? Pop.sec("Fuel") + Pop.items(v.fuel, { empty: v.hasFuel === false ? "out of fuel" : "none" }) : "") +
+    (v.power ? Pop.sec("Power") + Pop.row("Drawing", Pop.mw(v.power.PowerConsumed || 0, v.power.MaxPowerConsumed)) : "") +
+    Pop.where(v.loc);
 }
 function showPopAt(html, x, y) {
   cargoPop.innerHTML = html; cargoPop.style.display = "block";

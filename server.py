@@ -7,6 +7,7 @@ and records power/production history so the charts have data from before the pag
 /hist/power?mins=60       power history per grid (sampled every 5 s, kept 24 h)
 /hist/production?mins=60  produced/consumed per item and generation per generator type (sampled every 15 s, kept 24 h)
 /hist/sink?mins=60        AWESOME Sink points per minute (from the running total, sampled every 15 s, kept 24 h)
+/hist/extractors          each extractor's average output over the last 10 and 60 minutes (kept in memory only)
 /sinks                    each AWESOME Sink and the machines whose belts lead into it (worked out at most once a minute)
 /hypertubes               tube networks, entrances (power) and the open ends rides shoot out of (at most every 30 s)
 /logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks (worked out
@@ -148,6 +149,7 @@ class History:
         self.power = []   # [t, {groupId: [prod, cons, cap, maxCons, batteryPct, battIn, battOut, fuse, battCapMWh]}]
         self.prod = []    # [t, {item: [p, c]}, {genType: MW}]
         self.sink = []    # [t, total standard points, total DNA points]
+        self.ext = {}     # extractor ID -> [[t, per min], ...] for the last hour (memory only, not saved)
 
     def load(self):
         try:
@@ -211,6 +213,30 @@ class History:
     def add_sink(self, total, dna):
         with self.lock:
             self.sink.append([round(time.time()), total, dna])
+
+    def add_extractors(self, extractors):
+        now, cut = round(time.time()), time.time() - 3600
+        with self.lock:
+            seen = set()
+            for m in extractors:
+                rate = sum(p.get("CurrentProd") or 0 for p in m.get("production") or [])
+                rows = self.ext.setdefault(m["ID"], [])
+                rows.append([now, round(rate, 3)])
+                while rows and rows[0][0] < cut:
+                    rows.pop(0)
+                seen.add(m["ID"])
+            for k in [k for k in self.ext if k not in seen]:   # dismantled
+                del self.ext[k]
+
+    def extractors_json(self):
+        """per extractor: average output per minute over the last 10 and 60 minutes, and how many minutes it has"""
+        now = time.time()
+        out = {}
+        with self.lock:
+            for k, rows in self.ext.items():
+                avg = lambda mins: (lambda v: round(sum(v) / len(v), 2) if v else None)([r for t, r in rows if t >= now - mins * 60])
+                out[k] = {"m10": avg(10), "m60": avg(60), "mins": round((now - rows[0][0]) / 60, 1) if rows else 0}
+        return out
 
     def sink_json(self, mins):
         """points/min over the minute before each sample (the sink takes items in bursts: a 15 s step is too jumpy)"""
@@ -724,6 +750,7 @@ def recorder():
                 for g in gens:
                     gen[g["Name"]] = gen.get(g["Name"], 0) + (g.get("RegulatedDemandProd") or 0)
                 HIST.add_prod(production_totals(fac, ext, gens), gen)
+                HIST.add_extractors(ext)
                 try:
                     dna = frm_json("getExplorationSink")[0].get("TotalPoints", 0)
                 except (OSError, ValueError, IndexError):
@@ -766,6 +793,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self.send_body(200, hyper_data())
             except Exception as e:   # FRM down or loading
                 return self.send_body(502, json.dumps({"error": str(e)}).encode())
+        if path == "/hist/extractors":
+            return self.send_body(200, json.dumps(HIST.extractors_json(), separators=(",", ":")).encode())
         if path in ("/hist/power", "/hist/production", "/hist/sink"):
             try:
                 mins = max(1, min(KEEP_S // 60, int(urllib.parse.parse_qs(query).get("mins", ["60"])[0])))

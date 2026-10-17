@@ -3,6 +3,40 @@
 // anything else (vehicle paths, rails, moving markers) through the draw() hook. Uses the page's WORLD/IMG/worldToImg/mapImg.
 "use strict";
 
+// ---- hover popups: one look on every map -----------------------------------------------------------
+// A title (name + short ID), a sub line with a coloured status pill, then labelled rows in sections. Every marker's
+// tip() builds its popup from these, so they all read the same way as the machine one.
+const Pop = {
+  head(title, { id, sub, status, color, iconName } = {}) {
+    return `<div class="mp-head"><div class="mp-title">${iconName ? icon(iconName, "icon sm") + " " : ""}${esc(title)}${id ? ` <span class="muted">${esc(id)}</span>` : ""}</div>` +
+      (sub || status ? `<div class="mp-sub"><span>${sub || ""}</span>${status ? Pop.pill(status, color) : ""}</div>` : "") + `</div>`;
+  },
+  pill: (label, color = "var(--muted)") => `<span class="pill" style="background:color-mix(in srgb, ${color} 22%, transparent);color:${color}">${esc(label)}</span>`,
+  row: (k, v, cls = "") => `<div class="row${cls ? " " + cls : ""}"><span>${k}</span><b>${v}</b></div>`,
+  note: (text, cls = "muted") => `<div class="row ${cls}"><span>${text}</span></div>`,
+  sec: title => popSection(title),
+  unit: u => ` <small>${u}</small>`,
+  item: (name, v) => Pop.row(`${icon(name, "icon sm")}${esc(name)}`, v),
+  // inventory list: biggest first, "+N more" past max
+  items(inv, { max = 8, empty = "empty" } = {}) {
+    const amt = i => i.Amount ?? i.amount;
+    const list = (inv || []).filter(i => amt(i) > 0).sort((a, b) => amt(b) - amt(a));
+    if (!list.length) return Pop.note(empty);
+    return list.slice(0, max).map(i => { const name = i.Name ?? i.name, n = amt(i), cap = i.MaxAmount;
+      return Pop.item(name, fluidSet.has(name) || i.unit ? `${fmtNum(n, n < 10 ? 1 : 0)}${Pop.unit("m³")}` : `${fmtNum(n)}${cap && cap > 1 ? Pop.unit("/ " + fmtNum(cap)) : ""}`); }).join("") +
+      (list.length > max ? Pop.note(`+${list.length - max} more`) : "");
+  },
+  // where it is: height and map position (metres, like the game's map)
+  where: l => !l ? "" : Pop.row("Height", `${fmtNum(l.z / 100)}${Pop.unit("m")}`) + Pop.row("Position", `X ${fmtNum(l.x / 100)} · Y ${fmtNum(l.y / 100)}${Pop.unit("m")}`),
+  compass: deg => ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][Math.round(((deg % 360) + 360) % 360 / 45) % 8],
+  mw: (now, max) => `${fmtNum(now, now < 10 ? 1 : 0)}${max != null ? Pop.unit(`of ${fmtNum(max, max < 10 ? 1 : 0)} MW`) : Pop.unit("MW")}`,
+  // the power grid a circuit belongs to (from the shared PowerNet poll)
+  grid(circuit) {
+    const g = PowerNet.gridOf(circuit);
+    if (!g) return circuit == null || circuit < 0 ? Pop.row("Grid", `<span class="bad-text">not connected</span>`) : "";
+    return Pop.row("Grid", g.FuseTriggered ? `<span class="bad-text">fuse tripped</span>` : `${fmtNum(g.PowerConsumed)}${Pop.unit(`of ${fmtNum(g.PowerCapacity || g.PowerProduction)} MW used`)}`);
+  },
+};
 
 /**
  * new MapView(container, {
@@ -14,6 +48,7 @@
  *   animate() -> bool               repaint continuously (~30 fps) while it says something on the map is moving
  *   fitTo() -> [image points], fitLabel   what the Fit button frames (default: the visible point layers)
  *   onPan()                         the user dragged the map
+ *   extraTip(mx, my) -> html        hover popup for something drawn by draw() (canvas px), when no marker / belt is under the cursor
  *   hint, dim                       hint text bottom-left; darkening over the map image (0-1)
  * })
  * setPoints(layerKey, [{ id, x, y, color?, label?, ... }]) — world coordinates (Unreal cm)
@@ -36,12 +71,23 @@ const Players = {
     for (const mv of this.maps) this.push(mv);
   },
   push(mv) {   // online: solid orange + name; offline: grey, dashed outline, "(offline)"
-    mv.setPoints("players", this.list.filter(p => p.location).map(p => ({ id: p.ID, x: p.location.x, y: p.location.y,
+    mv.setPoints("players", this.list.filter(p => p.location).map(p => ({ id: p.ID, x: p.location.x, y: p.location.y, tip: () => playerTip(this.list.find(x => x.ID === p.ID) || p),
       label: `${p.Name}${p.Online ? " · online" + lookLabel(p.location.pitch) : " · offline"}`, name: p.Online ? p.Name : `${p.Name} (offline)`,
       rot: typeof p.location.rotation === "number" ? p.location.rotation - 90 : null,   // FRM: compass, 0 = north
       offline: !p.Online, color: p.Online ? PLAYER_COLOR : "#8c94a1" })));
   },
 };
+
+function playerTip(p) {
+  const l = p.location, dead = p.Dead || p.PlayerHP <= 0, inv = p.Inventory || [];
+  return Pop.head(p.Name, { sub: p.Online ? `facing ${Pop.compass(l.rotation || 0)}` : "last seen here", status: dead ? "Dead" : p.Online ? "Online" : "Offline",
+                            color: dead ? "var(--bad)" : p.Online ? PLAYER_COLOR : "var(--muted)" }) +
+    Pop.sec("Player") + Pop.row("Health", `${fmtNum(p.PlayerHP)}${Pop.unit("/ 100")}`) +
+    (p.Online ? Pop.row("Speed", `${fmtNum(p.Speed || 0)}${Pop.unit("km/h")}`) : "") +
+    (p.Online && typeof l.pitch === "number" && l.pitch !== 0 ? Pop.row("Looking", Math.abs(l.pitch) < 5 ? "ahead" : `${l.pitch > 0 ? "up" : "down"} ${fmtNum(Math.abs(l.pitch))}°`) : "") +
+    Pop.where(l) +
+    (inv.length ? Pop.sec(`Carrying · ${inv.length} kind${inv.length === 1 ? "" : "s"} of item`) + Pop.items(inv, { max: 6 }) : "");
+}
 
 // Belts and pipes on any map: MapView({ logistics: seg => bool }) adds a layer per belt tier (Mk.1-Mk.6) and pipe
 // tier (Mk.1-Mk.2) and draws the segments the filter keeps (all, production lines, power lines). One shared fetch
@@ -121,13 +167,23 @@ function drawLogistics(mv, keep, hi, hover) {
 }
 
 // tooltip for a belt / pipe: the piece itself, then its whole network
-const netTooltip = (n, seg) => !n ? "" :
-  `<div class="head"><b style="color:#fff">Mk.${seg ? seg.t : "?"} ${seg?.h != null ? "conveyor lift" : n.kind === "belt" ? "conveyor belt" : "pipeline"}</b>` +
-  ` · ${n.kind === "belt" ? `${({ 1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200 })[seg?.t] || "?"} items/min` : `${({ 1: 300, 2: 600 })[seg?.t] || "?"} m³/min`}<br>` +
-  (seg?.h != null ? `${fmtNum(seg.h, 1)} m ${seg.up ? "up" : "down"}<br>` : "") +
-  `part of a ${n.kind} network · ${n.p && n.w ? "production + power" : n.p ? "production" : n.w ? "power" : "other"} · ${n.len >= 1000 ? (n.len / 1000).toFixed(1) + " km" : n.len + " m"}</div>` +
-  (Object.entries(n.touches).slice(0, 5).map(([k, c]) => `<div class="row"><span>${esc(k)}</span><b>×${c}</b></div>`).join("") || `<div class="row muted"><span>connects to nothing found</span></div>`) +
-  `<div class="row muted"><span>${n.segs} piece${n.segs === 1 ? "" : "s"}${n.lifts ? ` + ${n.lifts} lift${n.lifts > 1 ? "s" : ""}` : ""} · bottleneck ${n.cap ? n.cap + (n.kind === "pipe" ? " m³" : "") + "/min" : "–"}${n.open ? ` · ${n.open} open ends` : ""}</span></div>`;
+const BELT_IPM = { 1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200 }, PIPE_M3 = { 1: 300, 2: 600 };
+function netTooltip(n, seg) {
+  if (!n) return "";
+  const lift = seg?.h != null, belt = n.kind === "belt", t = seg?.t;
+  const what = n.p && n.w ? "production + power" : n.p ? "production" : n.w ? "power" : "other";
+  const kinds = Object.entries(n.touches);
+  return Pop.head(`Mk.${t || "?"} ${lift ? "Conveyor Lift" : belt ? "Conveyor Belt" : "Pipeline"}`, { sub: `part of a ${n.kind} network`, status: what[0].toUpperCase() + what.slice(1),
+                  color: belt ? BELT_COLOR[t] || BELT_COLOR[1] : PIPE_COLOR[t] || PIPE_COLOR[1] }) +
+    Pop.sec("This piece") + Pop.row("Carries up to", belt ? `${fmtNum(BELT_IPM[t])}${Pop.unit("items/min")}` : `${fmtNum(PIPE_M3[t])}${Pop.unit("m³/min")}`) +
+    (lift ? Pop.row("Lifts", `${fmtNum(seg.h, 1)}${Pop.unit("m " + (seg.up ? "up" : "down"))}`) : "") +
+    Pop.sec("Whole network") + Pop.row("Length", n.len >= 1000 ? `${fmtNum(n.len / 1000, 1)}${Pop.unit("km")}` : `${fmtNum(n.len)}${Pop.unit("m")}`) +
+    Pop.row("Pieces", `${fmtNum(n.segs)}${n.lifts ? Pop.unit(`+ ${n.lifts} lift${n.lifts > 1 ? "s" : ""}`) : ""}`) +
+    Pop.row("Bottleneck", n.cap ? `${fmtNum(n.cap)}${Pop.unit(belt ? "items/min" : "m³/min")}` : "–") +
+    (n.open ? Pop.row("Open ends", `<span class="warn-text">${n.open}</span>`) : "") +
+    Pop.sec("Connects to") + (kinds.slice(0, 6).map(([k, c]) => Pop.row(esc(k), `×${c}`)).join("") || Pop.note("nothing found")) +
+    (kinds.length > 6 ? Pop.note(`+${kinds.length - 6} more kinds`) : "");
+}
 
 // The power network on any map: MapView({ powerNet: circuits => bool }) adds power lines, poles, wall outlets,
 // towers, switches and power storage, keeping the ones whose circuit(s) the filter accepts (all, or one grid).
@@ -149,6 +205,7 @@ const PowerNet = {
     const [c, p, s, u, g, w] = await Promise.allSettled(["getCables", "getPowerPoles", "getSwitches", "getPowerUsage", "getGenerators", "getPower"].map(e => getJSON(e)));
     const ok = r => r.status === "fulfilled" ? r.value : null;
     const usage = ok(u) || [], gens = ok(g) || [], poles = ok(p) || [];   // getPowerPoles needs the newer FRM build
+    this.grids = ok(w) || this.grids || [];
     this.groupOf = new Map((ok(w) || []).flatMap(gr => (gr.AssociatedCircuits || []).map(c => [c, gr.CircuitGroupID])));
     this.poles = poles.map(x => ({ ...x, kind: /Tower/i.test(x.ClassName) ? "towers" : /Wall/i.test(x.ClassName) ? "outlets" : "poles", circuits: [x.CircuitID] }));
     this.switches = (ok(s) || []).map(x => ({ ...x, circuits: [x.Primary, x.Secondary] }));
@@ -164,16 +221,40 @@ const PowerNet = {
     for (const mv of this.maps) this.push(mv);
     for (const f of this.listeners) f();
   },
+  gridOf(circuit) { const id = this.groupOf.get(circuit); return id == null ? null : (this.grids || []).find(g => g.CircuitGroupID === id); },
   push(mv) {
     const keep = mv.opts.powerNet, pt = (o, extra) => o.location && { id: o.ID, x: o.location.x, y: o.location.y, ...extra };
     for (const k of ["poles", "outlets", "towers"])
-      mv.setPoints(k, this.poles.filter(x => x.kind === k && keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, label: `${x.Name} · ${x.Connections} of ${x.MaxConnections} wires` })).filter(Boolean));
+      mv.setPoints(k, this.poles.filter(x => x.kind === k && keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, label: `${x.Name} · ${x.Connections} of ${x.MaxConnections} wires`, tip: () => poleTip(x) })).filter(Boolean));
     mv.setPoints("switches", this.switches.filter(x => keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, color: x.IsOn ? POWER_COLOR : "#6b7380",
-      label: `${x.SwitchTag || x.Name || "Power Switch"} · ${x.IsOn ? "on" : "off"}${x.Priority >= 0 ? ` · priority ${x.Priority}` : ""}` })).filter(Boolean));
-    mv.setPoints("pstorage", this.storage.filter(x => keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, label: "Power Storage" })).filter(Boolean));
+      label: `${x.SwitchTag || x.Name || "Power Switch"} · ${x.IsOn ? "on" : "off"}${x.Priority >= 0 ? ` · priority ${x.Priority}` : ""}`, tip: () => switchTip(x) })).filter(Boolean));
+    mv.setPoints("pstorage", this.storage.filter(x => keep(x.circuits)).map(x => pt(x, { circuits: x.circuits, label: "Power Storage", tip: () => pstorageTip(x) })).filter(Boolean));
     mv.draw();
   },
 };
+function poleTip(x) {
+  const full = x.Connections >= x.MaxConnections;
+  return Pop.head(x.Name, { id: shortId(x.ID), sub: x.kind === "towers" ? "power tower" : x.kind === "outlets" ? "wall outlet" : "power pole",
+                            status: x.CircuitID >= 0 ? "Connected" : "No grid", color: x.CircuitID >= 0 ? POWER_COLOR : "var(--bad)" }) +
+    Pop.sec("Wiring") + Pop.row("Wires", `${x.Connections}${Pop.unit(`of ${x.MaxConnections}${full ? " · full" : ""}`)}`) + Pop.grid(x.CircuitID) + Pop.where(x.location);
+}
+function switchTip(x) {
+  const side = (on, c) => { if (!on) return `<span class="muted">nothing</span>`; const g = PowerNet.gridOf(c);
+    return g ? `${fmtNum(g.PowerConsumed)}${Pop.unit(`of ${fmtNum(g.PowerCapacity || g.PowerProduction)} MW`)}` : "–"; };
+  return Pop.head(x.SwitchTag || x.Name || "Power Switch", { id: shortId(x.ID), sub: x.Priority >= 0 ? `priority switch · group ${x.Priority || "undefined"}` : "power switch",
+                                                             status: x.IsOn ? "On" : "Off", color: x.IsOn ? POWER_COLOR : "var(--muted)" }) +
+    Pop.sec("Connects") + Pop.row("Side 1", side(x.Connected0, x.Primary)) + Pop.row("Side 2", side(x.Connected1, x.Secondary)) +
+    Pop.note(x.IsOn ? "both sides share power" : "the two sides are cut off from each other") + Pop.where(x.location);
+}
+function pstorageTip(x) {
+  const pi = x.PowerInfo || {}, g = PowerNet.gridOf(pi.CircuitID), t = v => v && v !== "00:00:00";
+  return Pop.head("Power Storage", { id: shortId(x.ID), sub: "battery", status: g?.BatteryPercent != null ? `${fmtNum(g.BatteryPercent)}% charged` : null, color: POWER_COLOR }) +
+    (g ? Pop.sec("Batteries on this grid") + Pop.row("Charge", `${fmtNum(g.BatteryPercent)}%`) +
+      (g.BatteryCapacity ? Pop.row("Stored", `${fmtNum(g.BatteryCapacity * g.BatteryPercent / 100)}${Pop.unit(`of ${fmtNum(g.BatteryCapacity)} MWh`)}`) : "") +
+      (g.BatteryInput ? Pop.row("Charging", `${fmtNum(g.BatteryInput, 1)}${Pop.unit("MW")}`) : "") + (g.BatteryOutput ? Pop.row("Supplying", `${fmtNum(g.BatteryOutput, 1)}${Pop.unit("MW")}`) : "") +
+      (t(g.BatteryTimeFull) ? Pop.row("Full in", g.BatteryTimeFull) : "") + (t(g.BatteryTimeEmpty) ? Pop.row("Empty in", g.BatteryTimeEmpty) : "") : "") +
+    Pop.sec("This one") + Pop.row("Drawing", Pop.mw(pi.PowerConsumed || 0, pi.MaxPowerConsumed)) + Pop.grid(pi.CircuitID) + Pop.where(x.location);
+}
 function drawPowerLines(mv, keep) {
   if (!mv.isOn("wires") || !PowerNet.wires.length) return;
   const ctx = mv.ctx; ctx.lineWidth = Math.max(0.7, Math.min(1.8, mv.view.s * 2));
@@ -249,12 +330,16 @@ const Storage = {
 };
 // how full a storage is, as text: "12 / 24 slots" or "1,234 / 2,400 m³"
 const storageFill = s => s.kind === "fluid" ? `${fmtNum(s.content, s.content < 10 ? 1 : 0)} / ${fmtNum(s.cap)} m³` : s.slots ? `${fmtNum(s.used)} / ${fmtNum(s.slots)} slots` : `${fmtNum(s.used)} stacks`;
-const storageTip = s => !s ? "" :
-  `<div class="head"><span class="with-icon">${icon(STORAGE_TYPES[s.cls]?.[3] || s.type)}<b style="color:#fff">${esc(s.type)}</b></span>` +
-  `${storageFill(s)}${s.kind !== "crate" ? ` · ${Math.round(s.frac * 100)}% full` : ""}` +
-  (s.kind === "fluid" && (s.fill > 0.05 || s.drain > 0.05) ? `<br>filling ${fmtRate(s.fill)} · draining ${fmtRate(s.drain)} m³/min` : "") + `</div>` +
-  (s.items.length ? s.items.slice(0, 8).map(i => `<div class="row"><span class="with-icon">${icon(i.name, "icon sm")}${esc(i.name)}</span><b>${fmtNum(i.amount, i.fluid ? 1 : 0)}${i.fluid ? " m³" : ""}</b></div>`).join("") +
-    (s.items.length > 8 ? `<div class="row muted"><span>+${s.items.length - 8} more</span></div>` : "") : `<div class="row muted"><span>empty</span></div>`);
+function storageTip(s) {
+  if (!s) return "";
+  const fullCol = s.frac >= 0.98 ? "var(--bad)" : s.frac >= 0.8 ? "var(--warn)" : "#b5e550";
+  return Pop.head(s.type, { id: s.id ? shortId(s.id) : "", iconName: STORAGE_TYPES[s.cls]?.[3] || s.type,
+                            sub: s.kind === "fluid" ? (s.fluid ? esc(s.fluid) : "empty") : s.kind === "crate" ? "crate" : `${s.items.length} kind${s.items.length === 1 ? "" : "s"} of item`,
+                            status: s.kind === "crate" ? null : `${Math.round(s.frac * 100)}% full`, color: fullCol }) +
+    Pop.sec("Contents") + Pop.row(s.kind === "fluid" ? "Holding" : "Slots used", storageFill(s)) +
+    (s.kind === "fluid" ? Pop.row("Filling", `${fmtRate(s.fill)}${Pop.unit("m³/min")}`) + Pop.row("Draining", `${fmtRate(s.drain)}${Pop.unit("m³/min")}`) : Pop.items(s.items, { max: 10 })) +
+    Pop.where(s.loc);
+}
 
 // Hypertubes on any map: MapView({ hypertubes: net => bool }) adds the tubes (hollow, like glass), their entrances
 // and the open ends a ride shoots out of (an arrow the way it points). One shared fetch of /hypertubes (server.py
@@ -283,15 +368,19 @@ const Hyper = {
     mv.setPoints("hents", this.entrances.filter(e => keep(e.n)).map(e => ({ id: e.id, x: e.x, y: e.y, net: e.n,
       color: e.fuse || !e.mw ? "var(--bad)" : TUBE_COLOR, tip: () => entranceTip(e) })));
     mv.setPoints("hexits", this.networks.filter(n => keep(n.id)).flatMap(n => n.exits.map((x, i) => ({ id: `${n.id}:x${i}`, x: x.x, y: x.y, net: n.id,
-      rot: x.heading - 90, tip: () => exitTip(x) }))));
+      rot: x.heading - 90, tip: () => exitTip(x, n.id) }))));
   },
 };
 const tubeLen = m => m >= 1000 ? `${fmtNum(m / 1000, 1)} km` : `${fmtNum(m)} m`;
 const launchAngle = p => p == null ? "–" : Math.abs(p) < 3 ? "level" : `${fmtNum(Math.abs(p))}° ${p > 0 ? "up" : "down"}`;
-const entranceTip = e => `<div class="head"><b style="color:#fff">Hypertube Entrance</b> · ${e.fuse ? `<span class="bad-text">fuse blown</span>` : e.mw ? "powered" : `<span class="bad-text">no power</span>`}</div>` +
-  `<div class="row"><span>Power</span><b>${fmtNum(e.mw, 1)} / ${fmtNum(e.max, 1)} MW</b></div><div class="row"><span>Height</span><b>${fmtNum(e.z / 100)} m</b></div>`;
-const exitTip = x => `<div class="head"><b style="color:#fff">Open tube end</b> · rides shoot out here</div>` +
-  `<div class="row"><span>Points</span><b>${launchAngle(x.pitch)}</b></div><div class="row"><span>Height</span><b>${fmtNum(x.z / 100)} m</b></div>`;
+const tubeNet = id => { const n = Hyper.byId?.get(id); return !n ? "" : Pop.sec("Its network") + Pop.row("Tube length", tubeLen(n.len)) + Pop.row("Pieces", fmtNum(n.tubes)) +
+  Pop.row("Entrances", fmtNum(n.ents.length)) + (n.juncs ? Pop.row("Junctions", fmtNum(n.juncs)) : "") + Pop.row("Open ends", fmtNum(n.exits.length)) +
+  Pop.row("Height range", `${fmtNum(n.z0)} – ${fmtNum(n.z1)}${Pop.unit("m")}`); };
+const entranceTip = e => Pop.head("Hypertube Entrance", { id: shortId(e.id), sub: "launches you into the tube", status: e.fuse ? "Fuse tripped" : e.mw ? "Powered" : "No power",
+                                                        color: e.fuse || !e.mw ? "var(--bad)" : TUBE_COLOR }) +
+  Pop.sec("Entrance") + Pop.row("Power", Pop.mw(e.mw, e.max)) + Pop.grid(e.circuit) + Pop.where(e) + tubeNet(e.n);
+const exitTip = (x, net) => Pop.head("Open Tube End", { sub: "rides shoot out here", status: launchAngle(x.pitch), color: TUBE_COLOR }) +
+  Pop.sec("Launch") + Pop.row("Points", launchAngle(x.pitch)) + Pop.row("Facing", Pop.compass(x.heading)) + Pop.where(x) + tubeNet(net);
 function drawHypertubes(mv, keep) {
   if (!mv.isOn("tubes") || !Hyper.tubes.length) return;
   const ctx = mv.ctx, w = Math.max(1.6, Math.min(4, 1.8 * Math.sqrt(mv.view.s / 0.3)));
@@ -418,9 +507,10 @@ class MapView {
       if ((p && p.id) !== this.hoverId) { this.hoverId = p ? p.id : null; opts.onHover && opts.onHover(p); this.draw(); }
       if (netId !== this.hoverNet) { this.hoverNet = netId; opts.onNetHover && opts.onNetHover(netId); this.draw(); }
       const tip = p ? (p.tip ? p.tip() : p.layer === "players" || !opts.tooltip ? p.label && `<div class="row"><span>${esc(p.label)}</span></div>` : opts.tooltip(p))
-                    : seg && netTooltip(Logistics.byId?.get(netId), seg);
+                    : seg ? netTooltip(Logistics.byId?.get(netId), seg)
+                    : opts.extraTip?.(e.clientX - r.left, e.clientY - r.top);   // things the tab draws itself (stations, moving vehicles)
       if (tip) showPopAt(tip, e.clientX, e.clientY); else hideCargoPop();
-      this.canvas.style.cursor = p || seg ? "pointer" : "";
+      this.canvas.style.cursor = p || seg || tip ? "pointer" : "";
     });
     this.canvas.addEventListener("mouseleave", () => {
       if (this.hoverNet) { this.hoverNet = null; opts.onNetHover && opts.onNetHover(null); }

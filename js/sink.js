@@ -29,6 +29,16 @@ const Sink = {
     return [...items.values()];
   },
   feedPts: s => s.feeds.reduce((a, f) => a + f.rate * f.pts, 0),
+  // a sink's popup (Sink tab and Overview maps): what feeds it, points, belts in, power
+  tip(s, name) {
+    const items = Sink.byItem([s]).sort((a, b) => b.ptsMin - a.ptsMin);
+    return Pop.head("AWESOME Sink", { id: shortId(s.id), sub: name ? esc(name) : "", status: s.on ? "Powered" : "No power", color: s.on ? SINK_COLOR : "var(--bad)" }) +
+      Pop.sec("Intake") + Pop.row("Could take in", s.feeds.length ? `${s.feeds.some(f => f.split) ? "≤ " : ""}${Sink.k(Sink.feedPts(s))}${Pop.unit("points/min")}` : "–") +
+      Pop.row("Belts in", fmtNum(s.inputs)) + (s.loose ? Pop.row("From nothing", `<span class="warn-text">${s.loose} belt${s.loose > 1 ? "s" : ""}</span>`) : "") +
+      (items.length ? Pop.sec("Fed by") + items.slice(0, 8).map(i => Pop.item(i.item, `${fmtRate(i.rate)}${Pop.unit(`/min · ${Sink.k(i.ptsMin)} pts`)}`)).join("") : "") +
+      (s.other.length ? Pop.sec("Also from") + s.other.slice(0, 4).map(o => Pop.row(esc(o.name), o.holds.map(h => `${fmtNum(h.n)} ${esc(h.item)}`).join(", ") || "empty")).join("") : "") +
+      (!s.inputs ? Pop.note("no belts go into it") : "");
+  },
   async sinks() { const r = await fetch("/sinks", { cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); },
 };
 
@@ -144,20 +154,15 @@ const SinkTab = (() => {
       p.items.set(f.item, f); p.sinks.add(r.id); seen.set(f.src, p);
     }
     map.setPoints("feeds", [...seen.values()].map(p => ({ ...p, label: [...p.items.values()].map(f => `${f.building} · ${f.recipe}`)[0],
-      tip: () => `<div class="head">${esc([...p.items.values()][0].building)} · ${esc([...p.items.values()][0].recipe)}</div>` +
-        [...p.items.values()].map(f => `<div class="row"><span class="with-icon">${icon(f.item, "icon sm")}${esc(f.item)}</span><b>${fmtRate(f.rate)}/min · ${Sink.k(f.rate * f.pts)} pts</b></div>`).join("") +
-        popSection("Feeds") + [...p.sinks].map(id => `<div class="row"><span>${esc(rows.find(r => r.id === id)?.name || "")}</span></div>`).join("") })));
+      tip: () => { const f0 = [...p.items.values()][0], m = Production.machine?.(p.id);
+        return m ? Production.machinePop(m) + Pop.sec("Feeds") + [...p.sinks].map(id => Pop.note(esc(rows.find(r => r.id === id)?.name || ""), "")).join("")
+          : Pop.head(f0.building, { id: shortId(p.id), sub: esc(f0.recipe) }) + Pop.sec("Sends to the sinks") +
+            [...p.items.values()].map(f => Pop.item(f.item, `${fmtRate(f.rate)}${Pop.unit(`/min · ${Sink.k(f.rate * f.pts)} pts`)}`)).join("") +
+            Pop.sec("Feeds") + [...p.sinks].map(id => Pop.note(esc(rows.find(r => r.id === id)?.name || ""), "")).join(""); } })));
     if (!framed) { framed = true; map.autoFit(); }   // once: after that the view is the user's
     emphasize();
   }
-  function sinkTip(r) {
-    return `<div class="head"><b style="color:${SINK_COLOR}">■</b> AWESOME Sink · ${esc(r.name)}${r.on ? "" : ` · <span class="bad-text">no power</span>`}</div>` +
-      (r.items.length ? popSection(`Fed up to ${Sink.k(r.ptsMin)} points/min`) + r.items.slice(0, 8).map(i =>
-        `<div class="row"><span class="with-icon">${icon(i.item, "icon sm")}${esc(i.item)}</span><b>${fmtRate(i.rate)}/min · ${Sink.k(i.ptsMin)} pts</b></div>`).join("") : "") +
-      (r.other.length ? popSection("Also from") + r.other.map(o => `<div class="row"><span>${esc(o.name)}</span><b>${o.holds.map(h => `${fmtNum(h.n)} ${esc(h.item)}`).join(", ") || "empty"}</b></div>`).join("") : "") +
-      (r.loose ? `<div class="row warn-text"><span>${r.loose} belt${r.loose > 1 ? "s" : ""} into it start${r.loose > 1 ? "" : "s"} at nothing</span></div>` : "") +
-      (!r.inputs ? `<div class="row muted"><span>no belts go into it</span></div>` : "");
-  }
+  function sinkTip(r) { return Sink.tip(r, r.name); }
   // the selected sink and the machines feeding it stand out on the map
   function emphasize() {
     if (!map) return;

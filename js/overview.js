@@ -21,7 +21,7 @@ const Overview = (() => {
     render();
   }
   // machines and items: the copy server.py's history recorder takes every 15 s does (these replies are the biggest FRM has)
-  async function factory() { try { prod = await Production.snapshot(20); } catch {} render(); }
+  async function factory() { try { prod = await Production.snapshot(20); } catch {} Production.pollExtractors(); render(); }
   // ---- Logistics card: belts and pipes, tiers, unconnected ends (data from the shared /logistics fetch)
   function renderLogistics() {
     const nets = Logistics.networks;
@@ -198,15 +198,29 @@ const Overview = (() => {
     const pt = (o, extra) => o.location && { id: o.ID, x: o.location.x, y: o.location.y, ...extra };
     if (prod) {
       map.setPoints("machines", prod.machines.filter(m => m.loc).map(m => ({ id: m.id, x: m.loc.x, y: m.loc.y, color: Production.M_STATUS[m.status].color,
-        label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${Production.M_STATUS[m.status].label}`, tab: "production" })));
-      map.setPoints("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "#e879f9" : "var(--bad)", tab: "power" })).filter(Boolean));
+        label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${Production.M_STATUS[m.status].label}`, tab: "production",
+        tip: () => Production.machinePop(prod.machines.find(x => x.id === m.id) || m) })));
+      map.setPoints("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "#e879f9" : "var(--bad)", tab: "power",
+        tip: () => Power.genPop(g) })).filter(Boolean));
     }
-    map.setPoints("veh", veh.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tab: "vehicles" })));
-    map.setPoints("hub", (d.getTradingPost || []).map(o => pt(o, { label: o.Name })).filter(Boolean));
+    map.setPoints("veh", veh.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tab: "vehicles",
+      tip: () => vehiclePop(veh.find(x => x.id === v.id) || v) })));
+    map.setPoints("hub", (d.getTradingPost || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => hubTip(o) })).filter(Boolean));
     if (sinks) map.setPoints("sinks", sinks.map(s => ({ id: s.id, x: s.x, y: s.y, color: s.on ? SINK_COLOR : "var(--bad)", tab: "sink",
-      label: `AWESOME Sink · ${s.feeds.length ? `up to ${Sink.k(Sink.feedPts(s))} points/min` : "nothing traced in"}${s.on ? "" : " · no power"}` })));
-    map.setPoints("elevator", (d.getSpaceElevator || []).map(o => pt(o, { label: o.Name })).filter(Boolean));
+      label: `AWESOME Sink · ${s.feeds.length ? `up to ${Sink.k(Sink.feedPts(s))} points/min` : "nothing traced in"}${s.on ? "" : " · no power"}`, tip: () => Sink.tip(s) })));
+    map.setPoints("elevator", (d.getSpaceElevator || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => elevatorTip(o) })).filter(Boolean));
   }
+  const hubTip = o => { const t = (d.getHUBTerminal || [])[0], ms = t?.HasActiveMilestone ? t.ActiveMilestone : null;
+    return Pop.head(o.Name, { sub: "your base", status: `HUB upgrade ${o.HUBLevel ?? "?"}`, color: "#fa9549" }) +
+      (ms ? Pop.sec(`Milestone · Tier ${ms.TechTier} ${esc(ms.Name)}`) + (ms.Cost || []).map(c => { const tot = c.TotalCost ?? c.Amount, got = tot - (c.RemainingCost ?? tot);
+        return Pop.item(c.Name, `${fmtNum(got)}${Pop.unit(`of ${fmtNum(tot)}`)}`); }).join("") : Pop.sec("Milestone") + Pop.note("none selected")) +
+      (t ? Pop.row("Freighter", t.ShipDock ? "docked, ready to send" : `away${t.ShipReturn ? ` · back in ${esc(t.ShipReturn)}` : ""}`) : "") + Pop.where(o.location); };
+  const elevatorTip = o => { const parts = o.CurrentPhase || [], done = o.FullyUpgraded;
+    const se = Progression.seState(o);
+    return Pop.head(o.Name, { sub: se && !done ? `phase ${se.n}${se.phase ? " · " + esc(se.phase.name) : ""}` : "Project Assembly",
+                              status: done ? "Complete" : o.UpgradeReady ? "Ready to send" : `${pct((se?.frac || 0) * 100)} done`, color: done || o.UpgradeReady ? "var(--ok)" : "#fa9549" }) +
+      (parts.length && !done ? Pop.sec("This phase needs") + parts.map(c => { const got = (c.TotalCost || 0) - (c.RemainingCost || 0);
+        return Pop.item(c.Name, `${fmtNum(got)}${Pop.unit(`of ${fmtNum(c.TotalCost)}`)}`); }).join("") : "") + Pop.where(o.location); };
 
   function init() {
     root.innerHTML = `
@@ -244,6 +258,7 @@ const Overview = (() => {
       tooltip: p => `<div class="row"><span>${esc(p.label)}</span></div>`,
       onClick: p => { if (p.tab) location.hash = p.tab; },
       draw: (c, now, mv) => drawNetwork(mv, k => mv.isOn(k)),   // roads, tracks, drone routes, stations (shared with Vehicles)
+      extraTip: (mx, my) => { const st = stationAt(mx, my, map); return st ? stationPopHtml(st, veh) : null; },
     });
   }
 

@@ -178,12 +178,32 @@ const Power = (() => {
     map.setEmphasis(em);
   }
   function switchPop(r) {
-    const list = side => side.names.map(([k, n]) => `<div class="row"><span>${esc(k)}</span><b>×${n}</b></div>`).join("") || `<div class="row muted"><span>nothing but wires</span></div>`;
-    return `<div class="head"><b style="color:#fff">${esc(r.name)}</b> · ${r.priority >= 0 ? `priority switch, group ${prioLabel(r.priority)}` : "power switch"} · ${r.s.IsOn ? "on" : "off"}</div>` +
-      popSection(`Fed from (blue) · ${fmtNum(r.feed.out)} MW from ${r.feed.gens.length} generator${r.feed.gens.length === 1 ? "" : "s"}`) + list(r.feed) +
-      popSection(`Controls (orange) · ${fmtNum(r.ctrl.use)} MW now, ${fmtNum(r.ctrl.max)} MW max`) + list(r.ctrl) +
-      (r.loop ? `<div class="row warn-text"><span>both sides are also connected another way</span></div>` : "");
+    const list = side => side.names.slice(0, 6).map(([k, n]) => Pop.row(esc(k), `×${n}`)).join("") || Pop.note("nothing but wires");
+    return Pop.head(r.name, { id: shortId(r.id), sub: r.priority >= 0 ? `priority switch · group ${prioLabel(r.priority)}` : "power switch",
+                              status: r.s.IsOn ? "On" : "Off", color: r.s.IsOn ? POWER_COLOR : "var(--muted)" }) +
+      Pop.sec("Fed from (blue on the map)") + Pop.row("Generators", `${r.feed.gens.length}${Pop.unit(`· ${fmtNum(r.feed.out)} MW`)}`) + list(r.feed) +
+      Pop.sec("Controls (orange on the map)") + Pop.row("Using", `${fmtNum(r.ctrl.use)}${Pop.unit(`of ${fmtNum(r.ctrl.max)} MW max`)}`) + list(r.ctrl) +
+      (r.loop ? Pop.note("both sides are also connected another way", "warn-text") : "") + Pop.where(r.s.location);
   }
+  // a generator's popup (also used by the Overview map, from the raw FRM reading)
+  function genPop(raw) {
+    const g = fromGen(raw), st = G_STATUS[g.status], fuelLeft = g.fuel && g.burn > 0 ? g.fuel.Amount / g.burn : null;
+    const grid = groups.find(x => x.CircuitGroupID === g.pi?.CircuitGroupID);
+    return Pop.head(g.type, { id: shortId(g.id), sub: grid ? `on ${esc(gridName(grid))}` : "generator", status: st.label, color: st.color }) +
+      Pop.sec("Output") + Pop.row("Making", `${fmtNum(g.out, g.out < 10 ? 1 : 0)}${Pop.unit(`of ${fmtNum(g.cap)} MW`)}`) +
+      Pop.row("Load", pct(g.cap ? g.out / g.cap * 100 : 0)) +
+      Pop.row("Clock", `${pct(g.clock)}${g.shards ? Pop.unit(`· ${g.shards} shard${g.shards > 1 ? "s" : ""}`) : ""}`) +
+      (g.fuel ? Pop.sec("Fuel") + Pop.item(g.fuel.Name, `${fmtNum(g.fuel.Amount)}${g.fuel.MaxAmount ? Pop.unit("/ " + fmtNum(g.fuel.MaxAmount)) : ""}`) +
+        Pop.row("Burning", `${fmtRate(g.burn)}${Pop.unit("/min")}`) + (fuelLeft != null ? Pop.row("Lasts", fuelLeft < 90 ? `${fmtNum(fuelLeft)}${Pop.unit("min")}` : `${fmtNum(fuelLeft / 60, 1)}${Pop.unit("h")}`) : "") : "") +
+      (g.sup ? Pop.sec(g.sup.Name) + Pop.row("Using", `${fmtRate(g.sup.CurrentConsumed || 0)}${Pop.unit(`of ${fmtRate(g.sup.MaxConsumed || 0)} m³/min`)}`) +
+        (g.water != null ? Pop.row("Tank", pct(g.water)) : "") : "") +
+      Pop.grid(g.pi?.CircuitID) + Pop.where(raw.location);
+  }
+  // anything else that uses power
+  const usePop = u => { const pi = u.PowerInfo || {}, on = pi.PowerConsumed > 0.11;
+    return Pop.head(u.Name, { id: shortId(u.ID), sub: "uses power", status: pi.FuseTriggered ? "Fuse tripped" : pi.CircuitID < 0 ? "No grid" : on ? "Drawing power" : "Idle",
+                              color: pi.FuseTriggered || pi.CircuitID < 0 ? "var(--bad)" : on ? POWER_COLOR : "var(--muted)" }) +
+      Pop.sec("Power") + Pop.row("Drawing", Pop.mw(pi.PowerConsumed || 0, pi.MaxPowerConsumed)) + Pop.grid(pi.CircuitID) + Pop.where(u.location); };
 
   async function pollHistory() {
     try {
@@ -323,9 +343,9 @@ const Power = (() => {
     if (sideShown) showSides(switchRows().find(r => r.id === sideShown.id) || null);   // keep the map highlight current
     const pt = (u, extra) => u.location && { id: u.ID || u.id, x: u.location.x, y: u.location.y, ...extra };
     map.setPoints("gens", gens.filter(x => x.raw.location).map(x => pt(x.raw, { circuits: [x.pi?.CircuitID], color: G_STATUS[x.status].color,
-      label: `${x.type} · ${G_STATUS[x.status].label} · ${fmtNum(x.out, 0)} MW` })));
+      label: `${x.type} · ${G_STATUS[x.status].label} · ${fmtNum(x.out, 0)} MW`, tip: () => genPop(x.raw) })));
     map.setPoints("use", usage.filter(u => u.PowerInfo?.MaxPowerConsumed > 0).map(u => pt(u, { circuits: [u.PowerInfo.CircuitID],
-      label: `${u.Name} · ${fmtNum(u.PowerInfo.PowerConsumed, 1)} MW (max ${fmtNum(u.PowerInfo.MaxPowerConsumed, 1)})` })).filter(Boolean));
+      label: `${u.Name} · ${fmtNum(u.PowerInfo.PowerConsumed, 1)} MW (max ${fmtNum(u.PowerInfo.MaxPowerConsumed, 1)})`, tip: () => usePop(u) })).filter(Boolean));
   }
 
   function renderCharts() {
@@ -529,6 +549,7 @@ const Power = (() => {
   }
 
   return {
+    genPop,   // the Overview map's generator hover
     show() {
       if (!chart) init();
       poll(); pollDetail(); pollHistory();
