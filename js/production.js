@@ -467,7 +467,7 @@ const Production = (() => {
   }
 
   return {
-    snapshot, isShort, M_STATUS, machinePop, pollExtractors, machine: id => machines.find(m => m.id === id),   // the Overview map uses the same machine hover
+    snapshot, isShort, M_STATUS, machinePop, RECIPE_BUILDINGS, pollExtractors, machine: id => machines.find(m => m.id === id),   // the Overview map uses the same machine hover
     show() {
       if (!itemTable) init();
       poll(); pollHistory();

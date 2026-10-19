@@ -14,7 +14,7 @@ Every tab's map shares the same parts: a Layers dropdown (including hypertubes: 
 
 ### Overview (home)
 - **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), unconnected belt/pipe ends, AWESOME Sinks without power, milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
-- **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), progression (Space Elevator and HUB parts), vehicles (per type, stuck ones by name), logistics (belt and pipe totals by tier) and the AWESOME Sink (points per minute, time to the next coupon, the items earning the most).
+- **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), progression (Space Elevator and HUB parts), vehicles (per type, stuck ones by name), belts & pipes (totals by tier, head lift problems) and the AWESOME Sink (points per minute, time to the next coupon, the items earning the most).
 - **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, AWESOME Sinks, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), every storage container, fluid buffer and Dimensional Depot uploader, hypertubes, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
 
 ### Vehicles
@@ -37,15 +37,23 @@ Every tab's map shares the same parts: a Layers dropdown (including hypertubes: 
 - **Grid layout**: each grid's sections, following the switches out from the generators.
 - Generation by generator type and consumption by building type, beside a map of the power network: lines, poles, wall outlets, towers, switches and power storage, with the selected grid bright and the rest faded.
 
-### Logistics
-![Logistics](docs/screenshots/logistics.png)
-- Every conveyor belt and pipe, grouped into **networks** (belts or pipes that connect to each other; conveyor lifts are belt pieces that go up or down, so a line keeps going through them), and every **storage** building: Storage Container, Industrial Storage Container, Personal / Medical / Hazard Storage Box (and the HUB's), Fluid Buffer, Industrial Fluid Buffer, Dimensional Depot Uploader and dismantle / death crate.
-- Totals: belts and pipes (with lifts, splitters/mergers and junctions/pumps/valves), unconnected ends, slots used across containers, m³ stored across fluid buffers, depot items at their limit, and full storage (click those to list them).
-- **Networks table**: what each network feeds (production, power), the buildings it connects (storage included), its length, pieces, lifts, tier mix and bottleneck (the slowest tier, lifts included), and open ends.
-- **Storage table**: type, contents, how full (slots used, or m³ of the tank), amount stored, each fluid buffer's fill / drain rate, and the belts and pipes into it.
-- The two are **linked**: click a network (in the table or on the map) and the storage it reaches is pinned to the top of the Storage table and ringed on the map; click a storage and the belts and pipes into it are pinned and drawn on the map. Every column of both tables has a filter, and the map follows them.
-- Under the map: belt, lift and pipe pieces by tier, and every **Dimensional Depot** item against its limit (an uploader counts as full only when the depot can't take any more of its item).
-- Hover a belt, pipe, lift or storage on any map to see it. Lifts are drawn as small squares in their belt tier's colour with a ↕, on top of the belts; the maps have one layer per kind of storage building.
+### Belts
+![Belts](docs/screenshots/belts.png)
+- Every conveyor belt grouped into **networks** (belts that connect to each other; conveyor lifts are belt pieces that go up or down, so a line keeps going through them), and every item **storage** building: Storage Container, Industrial Storage Container, Personal / Medical / Hazard Storage Box (and the HUB's), Dimensional Depot Uploader and dismantle / death crate.
+- Totals: belts, lifts, splitters and mergers, unconnected ends, slots used across containers, depot items at their limit, and full storage (click those to list them).
+- **Belt networks table**: what each network feeds (production, power), the buildings it connects (storage included), its length, pieces, lifts, tier mix and bottleneck (the slowest tier, lifts included), and open ends. **Storage table**: type, contents, slots used, amount stored and the belts into it.
+- The two are **linked**: click a network (in the table or on the map) and the storage it reaches is pinned to the top of the Storage table and ringed on the map; click a storage and the belts into it are pinned and drawn on the map. Every column of both tables has a filter, and the map follows them.
+- Under the map: belt and lift pieces by tier, and every **Dimensional Depot** item against its limit (an uploader counts as full only when the depot can't take any more of its item).
+- Lifts are drawn as small squares in their belt tier's colour with a ↕, on top of the belts.
+
+### Pipes
+![Pipes](docs/screenshots/pipes.png)
+- Every pipe grouped into networks, and every **fluid buffer** (Fluid Buffer, Industrial Fluid Buffer), linked the same way as on the Belts tab.
+- Totals: pipes and junctions, pumps and valves (how many are pumping, their power), head lift problems, unconnected ends, m³ stored across buffers, and full buffers.
+- **Pipe networks table**: the fluid in each, what it feeds, what it connects, length, pieces, tiers, bottleneck, open ends and head lift. **Fluid buffers table**: contents, how full, fill / drain rate and the pipes into it.
+- Under the map: pipe pieces by tier, and every **pump** with its head-lift gauge (how high it's pushing now, against its design) and flow — click one to find it on the map.
+- **Head lift**: liquids only climb so high above whatever pushes them — a pump (Mk.1 20 m, Mk.2 50 m), an extractor or machine output (10 m) or a fluid buffer (8 / 12 m); a little past that the flow drops, a few metres more and it stops. Head lift only passes through completely filled pipes, and a fluid buffer counts as one: a pump's push carries through a buffer once it's full; while it fills, past it only the buffer's own head lift counts, in proportion to how full it is. `server.py` splits the pipes at pumps and filling buffers into runs, finds what pushes each run and how high that reaches, and flags pipe pieces above it: a little over = **near limit** (yellow), past the point where flow stops = **too high** (red). The live contents of those pipes then say how sure that is (they stay empty while the rest of the run has fluid = almost certainly head lift; full anyway = not flagged). Flagged pipes are drawn dashed red / yellow with a ⚠ at the highest point (popup: what pushes it, from what height, how far over); the tile and the Head lift column list them, and the Overview shows them under what needs attention. Gases need no head lift and are skipped.
+- Hover a belt, pipe, lift, pump or storage on any map to see it; the maps have one layer per kind of storage building.
 - `server.py` works the networks out by following what each belt, lift and pipe end is plugged into (FRM's `ConnectedTo0` / `ConnectedTo1`), through splitters/mergers, junctions/pumps/valves and floor holes. With an FRM build that doesn't report those, it falls back to geometry (ends that meet, each lift joined to the nearest belt end at its height). A network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
 
 ### Inventory
@@ -64,11 +72,11 @@ Every tab's map shares the same parts: a Layers dropdown (including hypertubes: 
 
 ### Progression
 ![Progression](docs/screenshots/progression.png)
-- Space Elevator phase with each part's delivered amount, how many are in storage, how fast the factory makes them and time to finish; the HUB's active milestone; milestones per tier; MAM research; alternate recipes, AWESOME Shop and coupons.
+- Space Elevator phase with each part's delivered amount, how many are in storage, how fast the factory makes them and time to finish; the HUB's active milestone; milestones per tier (hover one to see what it unlocks: buildings, recipes and the machine that makes each, equipment, and what it still costs); MAM research; alternate recipes, AWESOME Shop and coupons.
 - Collectibles found (Somersloops, Mercer Spheres, power slugs) and resource nodes tapped. Click one to find the ones still out there on the map.
 
 ### Everywhere
-- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline) as arrows pointing the way they face. **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview and Logistics maps show them all.
+- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline) as arrows pointing the way they face. **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview map shows them all, the Belts and Pipes maps one each.
 - Every table has its title and row count on the left, **Clear filters** on the right, and filters under the column headings.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
 - On a desktop browser each tab fits one screen; on phones the panels stack.
@@ -78,6 +86,7 @@ Every tab's map shares the same parts: a Layers dropdown (including hypertubes: 
 - Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
 - Python 3.9+ (standard library only; [Pillow](https://pypi.org/project/pillow/) is optional, for resizing pictures).
 - **FRM 1.5.4 or newer** for everything this dashboard shows. Older builds still work, with less: vehicles have no routes or next stops and stay frozen whenever no player is nearby; power poles, wall outlets and towers are missing from the maps (power lines and switches still show); fluid buffers are missing, storage slots used are estimated from stack sizes and the Dimensional Depot shows amounts without limits; belt / lift / pipe networks are worked out from positions (some lines through conveyor lifts come out split), and the Sink tab can't tell what feeds each sink.
+- **Head lift** and the Pipes tab's pumps need FRM [PR #320](https://github.com/porisius/FicsitRemoteMonitoring/pull/320) (pipe contents and flow, each pump's head lift, and which pipe ends are a building's fluid output — not released yet). Without it the Head lift tile says so and pumps aren't shown.
 - **FRM 1.5.5** (the next release) adds which machine recipes are unlocked, each generator's water level and where a player is looking. Until then the Production tab shows recipes without locked / unlocked, the water level is estimated from the water in the generator, and the maps show players' direction but not whether they're looking up or down.
 
 ## Setup

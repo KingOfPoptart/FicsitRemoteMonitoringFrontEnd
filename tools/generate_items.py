@@ -31,6 +31,8 @@ if __name__ == "__main__":
             if name and form != "RF_INVALID":
                 fluid = form in ("RF_LIQUID", "RF_GAS")
                 item = {"name": name, "kind": "fluid" if fluid else "solid", "class": c["ClassName"]}
+                if form == "RF_GAS":   # gases need no head lift in pipes
+                    item["gas"] = True
                 energy = float(c.get("mEnergyValue") or 0) * (1000 if fluid else 1)   # docs give fluids per litre
                 if energy > 0:
                     item["energy"] = round(energy, 3)

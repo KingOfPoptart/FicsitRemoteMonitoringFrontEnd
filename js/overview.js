@@ -35,6 +35,10 @@ const Overview = (() => {
     $("ovLogi").innerHTML = `<div class="big">${km(sum("belt", "len"))} <small>of belts · ${km(sum("pipe", "len"))} of pipes</small></div>
       <div class="t-sub">${fmtNum(Logistics.belts.length)} belts in ${nets.filter(n => n.kind === "belt").length} networks · ${fmtNum(Logistics.pipes.length)} pipes in ${nets.filter(n => n.kind === "pipe").length}</div>
       <h3>By tier</h3>${tiers.map(([k, t, c]) => `<div class="part"><span class="with-icon"><i class="sw-line" style="background:${(k === "belt" ? BELT_COLOR : PIPE_COLOR)[t]}"></i>Mk.${t} ${k}s</span>${bar(c / maxT, (k === "belt" ? BELT_COLOR : PIPE_COLOR)[t])}<span class="muted">${fmtNum(c)}</span></div>`).join("")}
+      ${(() => { const hl = Logistics.headlift; if (!hl) return "";
+        const bad = [...hl.runs.filter(r => r.sev !== "ok").map(r => [r.sev, `${esc(r.fluid || "Pipe")} · ${fmtNum(r.over, 1)} m above ${esc(r.src?.name || "its source")}`]),
+                     ...hl.pumps.filter(p => p.sev !== "ok").map(p => [p.sev, `${esc(p.name)} · pushing ${fmtNum(p.hl, 1)} of ${fmtNum(p.design)} m`])].sort((a, b) => (a[0] === "bad" ? 0 : 1) - (b[0] === "bad" ? 0 : 1));
+        return bad.length ? `<h3>Head lift</h3>${bad.slice(0, 4).map(([s, t]) => `<div class="kvrow"><span>${t}</span><b class="${s === "bad" ? "bad-text" : "warn-text"}">${s === "bad" ? "too high" : "near limit"}</b></div>`).join("")}` : ""; })()}
       ${open.length ? `<h3>Unconnected ends</h3>${open.slice(0, 4).map(n => `<div class="kvrow"><span>${n.kind === "belt" ? "Belts" : "Pipes"} · ${esc(Object.keys(n.touches).slice(0, 2).join(", ") || "nothing connected")}</span><b class="warn-text">${n.open}</b></div>`).join("")}` : ""}`;
   }
   Logistics.listeners.add(() => render());
@@ -82,8 +86,18 @@ const Overview = (() => {
       if (shorts.length) add("warn", `Used faster than made: ${shorts.slice(0, 4).map(i => `${i.name} (${fmtRate(i.net)}/min)`).join(", ")}${shorts.length > 4 ? ` +${shorts.length - 4} more` : ""}`, "production");
       if (by("full")) add("info", `${by("full")} machines are stopped with full output (backed up)`, "production");
     }
-    const openEnds = Logistics.networks.reduce((a, n) => a + n.open, 0);
-    if (openEnds) add("info", `${openEnds} belt / pipe end${openEnds === 1 ? " isn't" : "s aren't"} connected to anything (${Logistics.networks.filter(n => n.open).length} networks)`, "logistics");
+    const hl = Logistics.headlift;
+    if (hl) {   // pipes above their head lift: "bad" only when the live readings back it up (fluid stops below them)
+      const runs = hl.runs.filter(r => r.sev !== "ok"), pumps = hl.pumps.filter(p => p.sev !== "ok");
+      const sure = runs.filter(r => r.sev === "bad" && r.live === "starved"), fluids = [...new Set(runs.map(r => r.fluid).filter(Boolean))];
+      // red when a run is past where flow stops, unless nothing has reached it yet (can't tell)
+      if (runs.length) add(runs.some(r => r.sev === "bad" && r.live !== "empty") ? "bad" : "warn", `${runs.length} pipe run${runs.length > 1 ? "s go" : " goes"} higher than ${runs.length > 1 ? "their" : "its"} pump, extractor or buffer can push${fluids.length ? ` (${fluids.slice(0, 3).join(", ")})` : ""}${sure.length ? ` — ${sure.length} already stay${sure.length > 1 ? "" : "s"} empty past that point` : ""}`, "pipes");
+      if (pumps.length) add(pumps.some(p => p.sev === "bad") ? "bad" : "warn", `${pumps.length} pump${pumps.length > 1 ? "s are" : " is"} working past ${pumps.length > 1 ? "their" : "its"} head lift — flow drops${pumps.some(p => p.sev === "bad") ? " or stops" : ""}`, "pipes");
+    }
+    for (const kind of ["belt", "pipe"]) {   // unconnected ends, on the Belts and Pipes tabs
+      const nets = Logistics.networks.filter(n => n.kind === kind && n.open), ends = nets.reduce((a, n) => a + n.open, 0);
+      if (ends) add("info", `${ends} ${kind} end${ends === 1 ? " isn't" : "s aren't"} connected to anything (${nets.length} network${nets.length > 1 ? "s" : ""})`, kind + "s");
+    }
     // each stuck vehicle by name with its problem, e.g. Train "Train" (2 locos+1 car): Station unreachable
     for (const v of veh.filter(v => v.status === "error"))
       add("bad", `${v.type} ${v.name && v.name !== v.type ? `"${v.name.trim()}"` : shortId(v.id)}${v.consist ? ` (${v.consist})` : ""}: ${v.error || "autopilot error"}`, "vehicles");
@@ -233,7 +247,7 @@ const Overview = (() => {
               <div class="ov-power-side"><div id="ovPower"></div><div class="figs" id="ovPowerFigs"></div></div><div id="ovChart"></div></a>
             <a class="card link ov-card ov-prod" href="#production"><div class="card-head"><h2>Production</h2><span class="hint">→</span></div><div class="ov-body" id="ovProd"><p class="muted">Loading…</p></div></a>
             <a class="card link ov-card ov-veh" href="#vehicles"><div class="card-head"><h2>Vehicles</h2><span class="hint">→</span></div><div class="ov-body" id="ovVeh"></div></a>
-            <a class="card link ov-card ov-logi" href="#logistics"><div class="card-head"><h2>Logistics</h2><span class="hint">→</span></div><div class="ov-body" id="ovLogi"><p class="muted">Working out belts and pipes…</p></div></a>
+            <a class="card link ov-card ov-logi" href="#belts"><div class="card-head"><h2>Belts &amp; pipes</h2><span class="hint">→</span></div><div class="ov-body" id="ovLogi"><p class="muted">Working out belts and pipes…</p></div></a>
             <a class="card link ov-card ov-sink" href="#sink"><div class="card-head"><h2>AWESOME Sink</h2><span class="hint">→</span></div><div class="ov-body" id="ovSink"><p class="muted">Loading…</p></div></a>
             <a class="card link ov-card ov-prog" href="#progression"><div class="card-head"><h2>Progression</h2><span class="hint">→</span></div><div class="ov-body" id="ovProg"></div></a>
           </div>

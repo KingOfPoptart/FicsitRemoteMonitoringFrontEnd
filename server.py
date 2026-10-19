@@ -10,8 +10,9 @@ and records power/production history so the charts have data from before the pag
 /hist/extractors          each extractor's average output over the last 10 and 60 minutes (kept in memory only)
 /sinks                    each AWESOME Sink and the machines whose belts lead into it (worked out at most once a minute)
 /hypertubes               tube networks, entrances (power) and the open ends rides shoot out of (at most every 30 s)
-/logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks (worked out
-                          every 60 s while a page shows them, every 5 min for a page in the background, else not at all)
+/logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks, plus pipe head
+                          lift: pumps and pipe runs higher than their source can push (worked out every 60 s while a page
+                          shows them, every 5 min for a page in the background, else not at all)
 
 By default it only listens on this machine (127.0.0.1). Use --host 0.0.0.0 to reach it from other
 devices on your network. The FRM URL can also be set with the FRM_URL environment variable.
@@ -488,7 +489,7 @@ def networks(kind, segs, joiners, buildings, storage=frozenset()):
             continue
         pts = s.get("SplineData") or [s["location0"], s["location1"]]
         out.append({"t": _tier(s.get("Name")), "pts": [[round(q["x"]), round(q["y"])] for q in pts],
-                    "p": n["p"], "w": n["w"], "n": n["id"]})
+                    "p": n["p"], "w": n["w"], "n": n["id"], **({"id": s.get("ID")} if kind == "pipe" else {})})
     return out, lifts, out_nets
 
 
@@ -497,6 +498,167 @@ def _is_lift(s):
 
 
 BELT_IPM = {1: 60, 2: 120, 3: 270, 4: 480, 5: 780, 6: 1200}   # items/min per belt tier (wiki)
+
+
+# ---- pipes: head lift ---------------------------------------------------------------------------
+# Liquids only climb so far above whatever pushes them: a pump (Mk.1 20 m, Mk.2 50 m), an extractor, a machine's
+# output or a fluid buffer. A little past that ("recommended") the flow slows; a few metres more and it stops (wiki
+# "Head lift": recommended / actual / max, measured from the source's pipe connector; where sources join, the highest
+# one counts). A powered pump starts the count again from itself; an unpowered one passes nothing on. Head lift only
+# passes through completely filled segments, and a buffer counts as one (wiki): one that isn't full starts the count
+# again with its own head lift scaled by how full it is (8 / 12 m when full); once it's full, the push carries through (seen
+# in-game: Mk.2 pump -> Industrial Fluid Buffer -> pipe 25 m up past it: empty, pump gauge 3 m, while the buffer filled;
+# full, gauge 29 m, once the buffer was). Gases don't need head lift.
+# So the pipes are split at pumps and filling buffers into runs; each run's ceiling is its best source's height + lift, and pipe pieces
+# reaching above it are flagged. The live content of those pieces then says how sure that is: fluid can't fill a
+# pipe above its head lift. Needs FRM with ConnectedType0/1 on getPipes (what's at each end).
+HEAD_LIFT = {   # ClassName -> (recommended, actual, max) m (wiki)
+    "Build_WaterPump_C": (10, 12, 13), "Build_OilPump_C": (10, 12, 13),
+    "Build_FrackingExtractor_C": (10, 11, 13), "Build_OilRefinery_C": (10, 11, 13), "Build_Packager_C": (10, 11, 13),
+    "Build_Blender_C": (10, 11, 13), "Build_TrainDockingStationLiquid_C": (10, 11, 13),
+    "Build_PipeStorageTank_C": (8, 8, 8), "Build_IndustrialTank_C": (12, 12, 12),
+}
+HEAD_LIFT_DEFAULT = (10, 11, 13)   # any other building with a fluid output
+
+
+def _cls(bid):
+    return re.sub(r"_\d+$", "", bid or "")
+
+
+def _is_valve(p):
+    return not (p.get("DesignHeadLift") or 0) and "Valve" in (p.get("ClassName") or p.get("Name") or p.get("ID") or "")
+
+
+def head_lift(pipes, pumps, junctions, buffers, name_of):
+    """pipes / pumps / junctions / buffers: FRM lists; name_of(id) -> building name or None.
+    Returns (runs, pumps, {pipe id: info}) or None when FRM is too old to say what's at the end of a pipe."""
+    if not pipes or "ConnectedType0" not in pipes[0]:
+        return None
+    pipe_by = {p["ID"]: p for p in pipes}
+    pump_by = {p["ID"]: p for p in pumps if not _is_valve(p)}
+    buf_by = {b["ID"]: b for b in buffers}
+    # what doesn't split a run: junctions, valves, floor / wall holes
+    merge_ids = {j["ID"] for j in junctions} | {p["ID"] for p in pumps if _is_valve(p)}
+    parent = {}
+
+    def find(a):
+        parent.setdefault(a, a)
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    sources, pump_sides = [], []   # sources: (pipe id, kind, z m, (rec, act, max), name, building id, location)
+    for p in pipes:
+        find(p["ID"])
+        for k in (0, 1):
+            to, loc = p.get(f"ConnectedTo{k}"), p[f"location{k}"]
+            if not to:
+                continue
+            if to in pipe_by or to in merge_ids or "Passthrough" in to or "Hole" in to:
+                parent[find(p["ID"])] = find(to)
+            elif to in buf_by:   # a buffer pushes each pipe on it with its own head lift (once it has fluid in it)
+                b = buf_by[to]
+                if (b.get("Capacity") or 0) and (b.get("Content") or 0) >= b["Capacity"] * 0.98:
+                    parent[find(p["ID"])] = find(to)   # full: whatever pushes into it pushes on through
+                frac = min(1, (b.get("Content") or 0) / b["Capacity"]) if b.get("Capacity") else 1
+                if (b.get("Content") or 0) > 0.5:   # "buffers propagate head lift proportional to their fill height" (wiki)
+                    lift = tuple(round(x * frac, 1) for x in HEAD_LIFT.get(_cls(to), (8, 8, 8)))
+                    sources.append((p["ID"], "buffer", loc["z"] / 100, lift, name_of(to) or "Fluid Buffer", to, loc))
+            elif to in pump_by:
+                pump_sides.append((to, p["ID"], loc))
+            elif p.get(f"ConnectedType{k}") == "Producer":   # an extractor's or machine's fluid output
+                sources.append((p["ID"], "building", loc["z"] / 100, HEAD_LIFT.get(_cls(to), HEAD_LIFT_DEFAULT), name_of(to) or _cls(to), to, loc))
+    # pumps: the pipe on the pump's output starts a fresh count from the pump
+    pump_out, pump_in = {}, {}
+    for pid, pipe_id, loc in pump_sides:
+        pm = pump_by[pid]
+        side = 0 if pm.get("ConnectedTo0") == pipe_id else 1 if pm.get("ConnectedTo1") == pipe_id else None
+        out = side is not None and pm.get(f"ConnectionType{side}") == "Producer"
+        (pump_out if out else pump_in)[pid] = pipe_id
+        if out:
+            on = (pm.get("PowerInfo") or {}).get("CircuitID", -1) >= 0
+            d, m = pm.get("DesignHeadLift") or 0, pm.get("MaxHeadLift") or 0
+            lift = (d, (d + m) / 2, m) if on else (0, 0, 0)   # the game's design / max (Mk.1 20 / 22 m, Mk.2 50 / 55 m)
+            sources.append((pipe_id, "pump", loc["z"] / 100, lift, pm.get("Name") or "Pipeline Pump", pid, loc))
+    # runs: the pipes in each, and its best source (the highest ceiling)
+    runs = {}
+    for p in pipes:
+        runs.setdefault(find(p["ID"]), {"pipes": [], "src": None})["pipes"].append(p)
+    for pipe_id, kind, z, lift, name, bid, loc in sources:
+        r = runs[find(pipe_id)]
+        if r["src"] is None or z + lift[0] > r["src"]["z"] + r["src"]["lift"][0]:
+            r["src"] = {"kind": kind, "z": round(z, 1), "lift": lift, "name": name, "id": bid,
+                        "x": round(loc["x"]), "y": round(loc["y"]), "on": lift[2] > 0}
+    out_runs, per_pipe = [], {}
+    for n, (root, r) in enumerate(runs.items()):
+        rid = f"h{n}"
+        fluids = [p.get("Fluid") for p in r["pipes"] if p.get("Fluid")]
+        fluid = max(set(fluids), key=fluids.count) if fluids else ""
+        gas = bool(ITEMS.get(fluid, {}).get("gas"))
+        src, flagged = r["src"], []
+        for p in r["pipes"]:
+            pts = (p.get("SplineData") or []) + [p["location0"], p["location1"]]
+            top = max(pts, key=lambda q: q["z"])
+            cap = p.get("Capacity") or 0
+            fill = min((p.get("Content") or 0) / cap, 1) if cap else None
+            info = {"run": rid, "top": round(top["z"] / 100, 1), "fill": None if fill is None else round(fill, 2),
+                    "flow": round(p.get("Flow") or 0, 1), "fluid": p.get("Fluid") or ""}
+            if src and not gas:
+                # centre to centre, like the game: pumps stacked every 20 m work. A metre or two past the recommended
+                # head lift still flows; past "actual" the flow drops, at max it stops
+                need = top["z"] / 100 - src["z"]
+                info["need"] = round(need, 1)
+                slack = 1 if src["kind"] == "buffer" else 0.05   # a filling buffer's lift (scaled by its fill) is only an estimate
+                info["hl"] = "bad" if need > src["lift"][2] + slack else "warn" if need > src["lift"][1] + slack else None
+                if info["hl"]:
+                    flagged.append((p, top, need, fill, info))
+            per_pipe[p["ID"]] = info
+        run = {"id": rid, "pipes": len(r["pipes"]), "fluid": fluid, "gas": gas, "src": src,
+               "ceil": round(src["z"] + src["lift"][0], 1) if src else None, "sev": "ok"}
+        if flagged:
+            worst = max(flagged, key=lambda x: x[2])
+            run.update({"sev": "bad" if any(i["hl"] == "bad" for *_, i in flagged) else "warn",
+                        "need": round(worst[2], 1), "over": round(worst[2] - src["lift"][0], 1),
+                        "top": {"x": round(worst[1]["x"]), "y": round(worst[1]["y"]), "z": round(worst[1]["z"] / 100, 1)},
+                        "flagged": [p["ID"] for p, *_ in flagged]})
+            # the live readings say how sure that is: fluid can't fill pipes above its head lift
+            ff = [f for *_, f, _ in flagged if f is not None]
+            rest = [per_pipe[p["ID"]]["fill"] for p in r["pipes"] if not per_pipe[p["ID"]].get("hl") and per_pipe[p["ID"]]["fill"] is not None]
+            if ff:
+                run["fill"] = round(sum(ff) / len(ff), 2)
+                run["fed"] = round(sum(rest) / len(rest), 2) if rest else None
+                if min(ff) >= 0.9 or run["fill"] >= 0.85:   # full after all: something else lifts it (or the estimate is off): not a problem
+                    run["sev"], run["live"] = "ok", "full"
+                    for *_, i in flagged:
+                        i["hl"] = None
+                elif run["fill"] < 0.35 and (run["fed"] or 0) > max(0.3, run["fill"] * 2):
+                    # the rest of the run has fluid, these pieces hardly any (a sloped piece keeps a little at its low
+                    # end even when the fluid stops partway up): very likely head lift
+                    run["live"] = "starved"
+                elif run["fill"] < 0.15:
+                    run["live"] = "empty"     # nothing in the whole run: can't tell yet
+                else:
+                    run["live"] = "partly"
+        out_runs.append(run)
+    out_pumps = []
+    for pm in pumps:
+        d, m, hl = pm.get("DesignHeadLift"), pm.get("MaxHeadLift"), pm.get("HeadLift")
+        l, pi = pm.get("location") or {}, pm.get("PowerInfo") or {}
+        valve = _is_valve(pm)
+        out_pumps.append({"id": pm["ID"], "name": pm.get("Name"), "x": round(l.get("x", 0)), "y": round(l.get("y", 0)), "z": round(l.get("z", 0) / 100, 1),
+                          "valve": valve, "design": d, "max": m, "hl": None if hl is None else round(hl, 1),
+                          "flow": None if pm.get("Flow") is None else round(abs(pm["Flow"]), 1), "maxFlow": pm.get("MaxFlow"), "limit": pm.get("FlowLimit"),
+                          "fluid": pm.get("Fluid") or "", "on": pi.get("CircuitID", -1) >= 0, "mw": pi.get("PowerConsumed") or 0,
+                          # its gauge = the height of fluid pushing back on it. That sits at the max whenever the line is
+                          # full and backed up too (seen at full flow), so on its own it's no sign of trouble; the pipes
+                          # above it are (the run checks). An unpowered pump passes nothing on.
+                          "over": bool(d and hl is not None and hl > d + 0.05),
+                          "sev": "bad" if not valve and pi.get("CircuitID", -1) < 0 and pm.get("Fluid") else "ok",
+                          # which run it takes from / feeds (a valve sits inside one run: its two pipes)
+                          "in": per_pipe.get(pm.get("ConnectedTo0") if valve else pump_in.get(pm["ID"]), {}).get("run"),
+                          "out": per_pipe.get(pm.get("ConnectedTo1") if valve else pump_out.get(pm["ID"]), {}).get("run")})
+    return out_runs, out_pumps, per_pipe
 
 
 def logistics_worker():
@@ -524,13 +686,44 @@ def logistics_worker():
                          [("o", b["Name"], b["ID"], _box(b, 80)) for b in other if b.get("location") and b.get("Name")])
             belts, lifts, bnets = networks("belt", frm_json("getBelts", 30) + frm_json("getLifts", 30), frm_json("getSplitterMerger", 30), buildings, storage)
             pump_like = [x for x in frm_json("getPump", 30)]
-            pipes, _, pnets = networks("pipe", frm_json("getPipes", 30), frm_json("getPipeJunctions", 30) + pump_like, buildings, storage)
+            raw_pipes, junctions = frm_json("getPipes", 30), frm_json("getPipeJunctions", 30)
+            pipes, _, pnets = networks("pipe", raw_pipes, junctions + pump_like, buildings, storage)
+            names = {b["ID"]: b.get("Name") for b in fac + ext + gens + other if b.get("ID")}
+            hl = head_lift(raw_pipes, pump_like, junctions, buffers, names.get)
+            if hl:
+                runs, hl_pumps, per_pipe = hl
+                net_of = {}
+                for seg in pipes:   # each piece: top height, fill, flow, fluid, its run and whether it's above the head lift
+                    i = per_pipe.get(seg.get("id"))
+                    if i:
+                        seg.update({"z": i["top"], "c": i["fill"], "f": i["flow"], "fl": i["fluid"], "r": i["run"]})
+                        if i.get("need") is not None:
+                            seg["nd"] = i["need"]
+                        if i.get("hl"):
+                            seg["hl"] = i["hl"]
+                        net_of.setdefault(i["run"], seg["n"])
+                for r in runs:
+                    r["n"] = net_of.get(r["id"])
+                for pm in hl_pumps:
+                    pm["n"] = net_of.get(pm["out"] or pm["in"])
+                worst = {}
+                for r in runs:   # per network: its worst run
+                    if r["sev"] != "ok" and r["n"]:
+                        worst[r["n"]] = "bad" if r["sev"] == "bad" or worst.get(r["n"]) == "bad" else "warn"
+                for pm in hl_pumps:
+                    if pm["sev"] != "ok" and pm["n"]:
+                        worst[pm["n"]] = "bad" if pm["sev"] == "bad" or worst.get(pm["n"]) == "bad" else "warn"
+                for n in pnets:
+                    n["hl"] = worst.get(n["id"], "ok")
+                headlift = {"runs": runs, "pumps": hl_pumps}
+            else:
+                headlift = None
             counts = {"splitters": sum("Splitter" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
                       "mergers": sum("Merger" in (x.get("Name") or "") for x in frm_json("getSplitterMerger", 30)),
                       "junctions": len(frm_json("getPipeJunctions", 30)),
                       "pumps": sum("Pump" in (x.get("Name") or "") for x in pump_like),
                       "valves": sum("Valve" in (x.get("Name") or "") for x in pump_like)}
-            LOGI["json"] = json.dumps({"belts": belts, "lifts": lifts, "pipes": pipes, "networks": bnets + pnets, "counts": counts},
+            LOGI["json"] = json.dumps({"belts": belts, "lifts": lifts, "pipes": pipes, "networks": bnets + pnets, "counts": counts, "headlift": headlift},
                                       separators=(",", ":")).encode()
             LOGI["t"] = time.monotonic()
         except Exception:

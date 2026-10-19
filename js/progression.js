@@ -48,7 +48,7 @@ function milestoneTiers(schematics) {
 }
 
 const Progression = (() => {
-  let data = {}, timers = [], map, framed = false;
+  let data = {}, timers = [], map, framed = false, tipOn = false;
   const root = $("tab-progression");
   const ui = (() => { try { return { node: "", ...JSON.parse(localStorage.getItem("pg.ui") || "{}") }; } catch { return { node: "" }; } })();
 
@@ -104,8 +104,28 @@ const Progression = (() => {
       return `<div class="tier${locked ? " locked" : ""}">
         <div class="tier-head"><b>Tier ${t.tier}</b>${bar(t.done / t.list.length, t.done === t.list.length ? "var(--ok)" : "var(--s1)")}<span class="muted">${t.done}/${t.list.length}</span>
           ${locked ? `<span class="muted sub">needs elevator phase ${gate}</span>` : ""}</div>
-        <div class="ms">${t.list.map(s => `<span class="m${s.Purchased ? " got" : ""}" title="${s.Purchased ? "Unlocked" : locked ? "Locked" : "Available"}">${s.Purchased ? "✓ " : ""}${esc(s.Name)}</span>`).join("")}</div></div>`;
+        <div class="ms">${t.list.map(s => `<span class="m${s.Purchased ? " got" : ""}" data-sch="${esc(s.ID)}"${locked ? " data-locked" : ""}>${s.Purchased ? "✓ " : ""}${esc(s.Name)}</span>`).join("")}</div></div>`;
     }).join("")}</div>`;
+  }
+
+  // hover a milestone: what it unlocks (FRM lists its recipes: build-gun ones are buildings, workshop ones equipment,
+  // the rest item recipes with the machine that makes them) and, until it's bought, what it still costs
+  function milestoneTip(s, locked) {
+    const recipes = s.Recipes || [], made = r => r.ProducedIn || [];
+    const buildings = recipes.filter(r => made(r).includes("BP_BuildGun_C"));
+    const equipment = recipes.filter(r => made(r).includes("BP_WorkshopComponent_C"));
+    const items = recipes.filter(r => !buildings.includes(r) && !equipment.includes(r));
+    const machine = r => made(r).map(c => Production.RECIPE_BUILDINGS[c]).find(Boolean) || "Craft Bench";
+    const list = (title, rs, row) => !rs.length ? "" : Pop.sec(`${title} · ${rs.length}`) + rs.slice(0, 10).map(row).join("") + (rs.length > 10 ? Pop.note(`+${rs.length - 10} more`) : "");
+    const prod = r => r.Products?.[0]?.Name || r.Name;
+    const status = s.Purchased ? "Unlocked" : locked ? "Locked" : "Available";
+    const cost = (s.Cost || []).map(c => ({ name: c.Name, total: c.TotalCost ?? c.Amount, left: c.RemainingCost ?? c.Amount }));
+    return Pop.head(s.Name, { sub: `Tier ${s.TechTier} milestone`, status, color: s.Purchased ? "var(--ok)" : locked ? "var(--muted)" : "var(--s1)" }) +
+      list("Buildings", buildings, r => Pop.row(`${icon(r.Name, "icon sm")}${esc(r.Name)}`, "")) +
+      list("Recipes", items, r => Pop.row(`${icon(prod(r), "icon sm")}${esc(r.Name)}`, `<span class="muted">${esc(machine(r))}</span>`)) +
+      list("Equipment", equipment, r => Pop.row(`${icon(prod(r), "icon sm")}${esc(r.Name)}`, `<span class="muted">Equipment Workshop</span>`)) +
+      (!recipes.length ? Pop.note(s.HasUnlocks ? "Unlocks things FRM doesn't list (inventory slots, upgrades…)" : "Nothing listed") : "") +
+      (!s.Purchased && cost.length ? Pop.sec("Cost") + cost.map(c => Pop.item(c.name, c.left < c.total ? `${fmtNum(c.left)}${Pop.unit(`of ${fmtNum(c.total)} left`)}` : fmtNum(c.total))).join("") : "");
   }
 
   function renderOther() {
@@ -240,6 +260,12 @@ const Progression = (() => {
       ],
       tooltip: p => `<div class="row"><span>${esc(p.label)}</span></div>`,
     });
+    root.addEventListener("mousemove", e => {
+      const m = e.target.closest("[data-sch]"), s = m && (data.getSchematics || []).find(x => x.ID === m.dataset.sch);
+      if (s) { showPopAt(milestoneTip(s, m.hasAttribute("data-locked")), e.clientX, e.clientY); tipOn = true; }
+      else if (tipOn) { hideCargoPop(); tipOn = false; }
+    });
+    root.addEventListener("mouseleave", () => { if (tipOn) { hideCargoPop(); tipOn = false; } });
     root.addEventListener("click", e => {
       const n = e.target.closest("[data-node]");
       if (n) {

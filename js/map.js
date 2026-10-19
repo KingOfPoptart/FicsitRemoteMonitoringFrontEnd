@@ -102,10 +102,50 @@ const logisticsLayers = keep => [
   ...[1, 2].map(t => ({ key: "pipe" + t, group: "Pipes", label: `Mk.${t} pipes`,
     swatch: `background:linear-gradient(${PIPE_COLOR[t]} 0 30%, #0d1013 30% 70%, ${PIPE_COLOR[t]} 70%);height:6px`,
     count: () => Logistics.pipes.filter(b => b.t === t && keep(b)).length })),
+  { key: "pumps", group: "Pipes", label: "Pumps & valves", color: PIPE_COLOR[1], shape: "pump", size: 4.5 },
+  { key: "headlift", group: "Pipes", label: "Head lift problems", color: "var(--bad)", shape: "alert", size: 6, top: true,
+    title: "Pipes higher than their pump, extractor or machine can push the fluid (they stay empty or flow slowly) and pumps working past their head lift" },
 ];
+// head lift (server.py works it out): pipes are split at pumps into runs, each with a ceiling = its best source's height + head lift
+const HL_COLOR = { bad: "var(--bad)", warn: "var(--warn)" };
+const HL_TEXT = { bad: "Too high", warn: "Near limit", ok: "OK" };
+const hlRunOf = id => Logistics.headlift?.runs?.find(r => r.id === id);
+// how sure we are, from what's in those pipes right now
+const HL_LIVE = { starved: "the rest of the run has fluid, these pieces stay empty", empty: "nothing in this run yet, so it can't be seen working",
+                  partly: "partly filled: probably a slow trickle", full: "they're full anyway, so something else lifts it" };
+function runTip(r) {
+  const s = r.src, col = HL_COLOR[r.sev] || "var(--ok)";
+  return Pop.head(r.sev === "bad" ? "Pipe too high for its head lift" : "Pipe near its head-lift limit", { sub: `${r.fluid ? esc(r.fluid) + " · " : ""}${fmtNum(r.flagged?.length || 0)} of ${fmtNum(r.pipes)} pieces in this run`,
+                  status: HL_TEXT[r.sev], color: col, iconName: r.fluid || undefined }) +
+    Pop.sec("Head lift") +
+    (s ? Pop.row("Pushed by", `${esc(s.name)}${s.kind === "building" ? Pop.unit("fluid output") : ""}`) + Pop.row("Source height", `${fmtNum(s.z, 1)}${Pop.unit("m")}`) +
+         Pop.row("Head lift", s.on ? `${fmtNum(s.lift[0])}${Pop.unit(s.lift[2] > s.lift[0] ? `m · flow stops past ${fmtNum(s.lift[2])} m` : "m")}` : `<span class="bad-text">0 m · pump has no power</span>`) +
+         Pop.row("Fluid reaches", `${fmtNum(r.ceil, 1)}${Pop.unit("m high")}`) : "") +
+    Pop.row("Highest pipe", `${fmtNum(r.top.z, 1)}${Pop.unit("m")}`) +
+    Pop.row("Needs", `<span style="color:${col}">${fmtNum(r.need, 1)} m</span>${Pop.unit(`${fmtNum(r.over, 1)} m over`)}`) +
+    (r.fill != null ? Pop.sec("Right now") + Pop.row("Those pieces", `${Math.round(r.fill * 100)}%${Pop.unit("full")}`) +
+       (r.fed != null ? Pop.row("Rest of the run", `${Math.round(r.fed * 100)}%${Pop.unit("full")}`) : "") +
+       (r.live ? Pop.note(HL_LIVE[r.live]) : "") : "") +
+    Pop.note(r.sev === "bad" ? "Fix: a pump below this point, or lower the pipe" : "Flow may slow down here: a pump would help", "warn-text") +
+    Pop.where({ x: r.top.x, y: r.top.y, z: r.top.z * 100 });
+}
+function pumpTip(p) {
+  const col = p.sev === "bad" ? "var(--bad)" : p.sev === "warn" ? "var(--warn)" : !p.on ? "var(--bad)" : "var(--ok)";
+  const status = p.valve ? (p.limit >= 0 ? `Limit ${fmtNum(p.limit)} m³/min` : "Open") : !p.on ? "No power" : p.sev === "bad" ? "At max head lift" : p.sev === "warn" ? "Over design head lift" : p.flow ? "Pumping" : "Idle";
+  const pct = p.design ? Math.min(1, (p.hl || 0) / p.max) : 0;
+  return Pop.head(p.name || (p.valve ? "Valve" : "Pipeline Pump"), { id: shortId(p.id), sub: p.fluid ? esc(p.fluid) : "empty", status, color: col, iconName: p.name }) +
+    (p.valve ? "" : Pop.sec("Head lift") + Pop.row("Pushing now", `${p.hl == null ? "–" : fmtNum(p.hl, 1)}${Pop.unit(`m of ${fmtNum(p.design)} m design`)}`) +
+       Pop.row("Gauge", `<span class="nowrap">${bar(pct, col)} ${Math.round(pct * 100)}%</span>`) +
+       Pop.row("Flow stops at", `${fmtNum(p.max)}${Pop.unit("m")}`) +
+       (p.sev !== "ok" ? Pop.note(p.sev === "bad" ? "At its limit: nothing gets past. Add a pump lower down, or lower the pipe" : "Past its design head lift: the flow drops. Another pump higher up would help", "warn-text") : "")) +
+    Pop.sec("Flow") + Pop.row("Now", `${p.flow == null ? "–" : fmtRate(p.flow)}${Pop.unit("m³/min")}`) +
+    (p.limit != null && p.limit >= 0 ? Pop.row("Limited to", `${fmtNum(p.limit)}${Pop.unit("m³/min")}`) : "") +
+    (!p.valve ? Pop.sec("Power") + Pop.row("Using", Pop.mw(p.mw)) : "") +
+    Pop.where({ x: p.x, y: p.y, z: p.z * 100 });
+}
 const Logistics = {
-  belts: [], lifts: [], pipes: [], networks: [], counts: {}, maps: new Set(), listeners: new Set(), timer: null,
-  attach(mv) { this.maps.add(mv); this.start(); },
+  belts: [], lifts: [], pipes: [], networks: [], counts: {}, headlift: null, maps: new Set(), listeners: new Set(), timer: null,
+  attach(mv) { this.maps.add(mv); this.start(); this.push(mv); },
   start() { if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 60000, () => onScreen(this.maps)); } },
   async poll() {
     try {
@@ -116,8 +156,19 @@ const Logistics = {
       Object.assign(this, await r.json());
       this.byId = new Map(this.networks.map(n => [n.id, n]));
     } catch { if (!this.belts.length) setTimeout(() => this.poll(), 5000); return; }   // server still working it out
-    for (const mv of this.maps) { mv.renderButtons(); mv.draw(); }
+    for (const mv of this.maps) { this.push(mv); mv.renderButtons(); mv.draw(); }
     for (const f of this.listeners) f();
+  },
+  push(mv) {   // pumps and head-lift warnings are markers (with popups); the pipes themselves are drawn by drawLogistics
+    const hl = this.headlift, f = mv.opts.logistics;
+    if (!f) return;
+    const keep = ({ n }) => { const net = this.byId?.get(n); return f({ n, p: net?.p, w: net?.w }); };   // a map's filter takes pipe pieces
+    mv.setPoints("pumps", (hl?.pumps || []).filter(p => keep({ n: p.n })).map(p => ({ id: p.id, x: p.x, y: p.y, label: p.name, pump: p,
+      color: p.sev === "bad" ? "#ef5f5f" : p.sev === "warn" ? "#f2c14e" : p.valve ? "#99f6e4" : PIPE_COLOR[1], tip: () => pumpTip(p) })));
+    mv.setPoints("headlift", [...(hl?.runs || []).filter(r => r.sev !== "ok" && keep({ n: r.n })).map(r => ({ id: "hl:" + r.id, x: r.top.x, y: r.top.y, net: r.n, run: r,
+                                 color: r.sev === "bad" ? "#ef5f5f" : "#f2c14e", label: HL_TEXT[r.sev], tip: () => runTip(r) })),
+                              ...(hl?.pumps || []).filter(p => p.sev !== "ok" && keep({ n: p.n })).map(p => ({ id: "hl:" + p.id, x: p.x, y: p.y, net: p.n,
+                                 color: p.sev === "bad" ? "#ef5f5f" : "#f2c14e", label: p.name, tip: () => pumpTip(p) }))]);
   },
 };
 function drawLogistics(mv, keep, hi, hover) {
@@ -143,6 +194,12 @@ function drawLogistics(mv, keep, hi, hover) {
   };
   for (const id of hi) outline(id, "#fa9549");                  // picked
   if (hover && !hi.includes(hover)) outline(hover, "#ffffff");   // under the mouse
+  if (mv.isOn("headlift")) for (const sev of ["warn", "bad"]) {   // pipe pieces above their head lift
+    const segs = Logistics.pipes.filter(b => b.hl === sev && keep(b) && mv.isOn("pipe" + b.t));
+    if (!segs.length) continue;
+    ctx.globalAlpha = 1; ctx.strokeStyle = "rgba(13,16,19,.9)"; ctx.lineWidth = w * 2.2 + 4; ctx.beginPath(); path(segs); ctx.stroke();
+    ctx.strokeStyle = sev === "bad" ? "#ef5f5f" : "#f2c14e"; ctx.lineWidth = w * 2.2 + 1.5; ctx.setLineDash([6, 4]); ctx.beginPath(); path(segs); ctx.stroke(); ctx.setLineDash([]);
+  }
   // conveyor lifts: belt pieces that go straight up, so a marker on top of the belts (belt colour by tier, ↕)
   if (mv.isOn("lifts")) {
     const r = Math.max(3.5, Math.min(7.5, w * 2.6));
@@ -177,12 +234,29 @@ function netTooltip(n, seg) {
                   color: belt ? BELT_COLOR[t] || BELT_COLOR[1] : PIPE_COLOR[t] || PIPE_COLOR[1] }) +
     Pop.sec("This piece") + Pop.row("Carries up to", belt ? `${fmtNum(BELT_IPM[t])}${Pop.unit("items/min")}` : `${fmtNum(PIPE_M3[t])}${Pop.unit("m³/min")}`) +
     (lift ? Pop.row("Lifts", `${fmtNum(seg.h, 1)}${Pop.unit("m " + (seg.up ? "up" : "down"))}`) : "") +
+    (!belt && seg?.c != null ? (seg.fl ? Pop.item(seg.fl, `${Math.round(seg.c * 100)}%${Pop.unit("full")}`) : Pop.row("Holds", "empty")) +
+       Pop.row("Flow", `${fmtRate(Math.abs(seg.f || 0))}${Pop.unit("m³/min")}`) : "") +
+    (!belt && seg?.z != null ? Pop.row("Highest point", `${fmtNum(seg.z, 1)}${Pop.unit("m")}`) : "") +
+    (!belt ? pipeHeadLift(seg) : "") +
     Pop.sec("Whole network") + Pop.row("Length", n.len >= 1000 ? `${fmtNum(n.len / 1000, 1)}${Pop.unit("km")}` : `${fmtNum(n.len)}${Pop.unit("m")}`) +
     Pop.row("Pieces", `${fmtNum(n.segs)}${n.lifts ? Pop.unit(`+ ${n.lifts} lift${n.lifts > 1 ? "s" : ""}`) : ""}`) +
     Pop.row("Bottleneck", n.cap ? `${fmtNum(n.cap)}${Pop.unit(belt ? "items/min" : "m³/min")}` : "–") +
     (n.open ? Pop.row("Open ends", `<span class="warn-text">${n.open}</span>`) : "") +
     Pop.sec("Connects to") + (kinds.slice(0, 6).map(([k, c]) => Pop.row(esc(k), `×${c}`)).join("") || Pop.note("nothing found")) +
     (kinds.length > 6 ? Pop.note(`+${kinds.length - 6} more kinds`) : "");
+}
+
+// the head-lift lines of a pipe piece's popup: what pushes the fluid here, how high that reaches, and this piece
+function pipeHeadLift(seg) {
+  const r = seg?.r && hlRunOf(seg.r);
+  if (!r) return "";
+  if (r.gas) return Pop.row("Head lift", `<span class="muted">not needed for a gas</span>`);
+  if (!r.src) return Pop.row("Head lift", `<span class="muted">nothing pushes into this run</span>`);
+  const col = HL_COLOR[seg.hl] || "var(--ok)";
+  return Pop.sec("Head lift") + Pop.row("Pushed by", `${esc(r.src.name)}${Pop.unit(`at ${fmtNum(r.src.z, 1)} m`)}`) +
+    Pop.row("Reaches", r.src.on ? `${fmtNum(r.ceil, 1)}${Pop.unit(`m high (${fmtNum(r.src.lift[0])} m lift)`)}` : `<span class="bad-text">pump has no power</span>`) +
+    (seg.nd != null ? Pop.row("This piece needs", `<span style="color:${col}">${fmtNum(seg.nd, 1)} m</span>${Pop.unit(HL_TEXT[seg.hl || "ok"])}`) : "") +
+    (seg.hl ? Pop.note(seg.hl === "bad" ? "Too high: fluid can't get up here. A pump lower down would fix it" : "Above the recommended head lift: flow may slow down", "warn-text") : "");
 }
 
 // The power network on any map: MapView({ powerNet: circuits => bool }) adds power lines, poles, wall outlets,
@@ -425,14 +499,17 @@ const MapCtx = {
     requestAnimationFrame(() => { for (const m of MapView.all) m.applyPending(); });   // a map that already exists and kept its size
   },
 };
-const MAP_TABS = ["overview", "vehicles", "production", "power", "logistics", "sink", "progression"];
+const MAP_TABS = ["overview", "vehicles", "production", "power", "belts", "pipes", "sink", "progression"];
 
 class MapView {
   static all = []; static pending = null;
   constructor(el, opts) {
     this.opts = opts;
-    this.layers = [...opts.layers, ...(opts.powerNet ? powerLayers(opts.powerNet) : []), ...(opts.logistics ? logisticsLayers(opts.logistics) : []),
-                   ...(opts.storage ? storageLayers(opts.storage) : []), ...(opts.hypertubes ? hypertubeLayers(opts.hypertubes) : []),
+    // opts.only "belt" | "pipe": a map of just one of them (Belts / Pipes tabs): its layers and the storage on its side
+    const side = l => !opts.only || l.group === (opts.only === "belt" ? "Belts" : "Pipes");
+    const stSide = l => !opts.only || (storageKind(l.label) === "fluid") === (opts.only === "pipe");
+    this.layers = [...opts.layers, ...(opts.powerNet ? powerLayers(opts.powerNet) : []), ...(opts.logistics ? logisticsLayers(opts.logistics).filter(side) : []),
+                   ...(opts.storage ? storageLayers(opts.storage).filter(stSide) : []), ...(opts.hypertubes ? hypertubeLayers(opts.hypertubes) : []),
                    ...(opts.players ? [playerLayer()] : [])];
     this.points = {}; this.hoverId = null; this.focus = null; this.fitted = false;
     this.tab = el.closest("main.tab")?.id.replace(/^tab-/, ""); MapView.all.push(this);
@@ -582,7 +659,9 @@ class MapView {
                     drain: `background:radial-gradient(${l.color} 0 22%, #0d1013 23% 45%, ${l.color} 46%);border-radius:50%;`,
                     arrow: "clip-path:polygon(100% 50%,0 100%,25% 50%,0 0);width:11px;", dot: "border-radius:50%;",
                     player: "clip-path:polygon(100% 50%,0 95%,25% 50%,0 5%);width:12px;",
-                    triangle: "clip-path:polygon(50% 0,100% 100%,0 100%);width:11px;height:11px;" }[l.shape || "dot"];
+                    triangle: "clip-path:polygon(50% 0,100% 100%,0 100%);width:11px;height:11px;",
+                    pump: "border-radius:3px;box-shadow:inset 0 0 0 2.5px " + l.color + ";background:radial-gradient(#0d1013 0 30%, " + l.color + " 31%);",
+                    alert: "clip-path:polygon(50% 0,100% 100%,0 100%);width:12px;height:11px;" }[l.shape || "dot"];
     return `<i style="background:${l.color};width:9px;height:9px;display:inline-block;${shape}"></i>`;
   }
   layerCount(l) { return l.count ? l.count() : (this.points[l.key] || []).length; }
@@ -838,6 +917,16 @@ class MapView {
       ctx.fillStyle = "#0d1013"; ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = Math.max(1.5, rad * 0.35); ctx.strokeStyle = c; ctx.beginPath(); ctx.arc(s.x, s.y, rad * 0.8, 0, Math.PI * 2); ctx.stroke();
       ctx.fillStyle = c; ctx.beginPath(); ctx.arc(s.x, s.y, rad * 0.28, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; return;
+    }
+    else if (l.shape === "pump") {
+      ctx.roundRect(s.x - rad, s.y - rad, rad * 2, rad * 2, rad * 0.45); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "#0d1013"; ctx.lineWidth = Math.max(1, rad * 0.32); ctx.beginPath(); ctx.arc(s.x, s.y, rad * 0.45, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; return;
+    }
+    else if (l.shape === "alert") {   // a warning sign: triangle with a "!"
+      ctx.moveTo(s.x, s.y - rad * 1.55); ctx.lineTo(s.x + rad * 1.35, s.y + rad * 0.95); ctx.lineTo(s.x - rad * 1.35, s.y + rad * 0.95); ctx.closePath();
+      ctx.lineJoin = "round"; ctx.lineWidth = 2.5; ctx.stroke(); ctx.fill(); ctx.lineJoin = "miter";
+      if (rad >= 3.5) { ctx.fillStyle = "#0d1013"; ctx.fillRect(s.x - rad * 0.13, s.y - rad * 0.75, rad * 0.26, rad * 0.95); ctx.beginPath(); ctx.arc(s.x, s.y + rad * 0.5, rad * 0.16, 0, Math.PI * 2); ctx.fill(); }
+      ctx.globalAlpha = 1; return;
     }
     else if (l.shape === "ring") { ctx.arc(s.x, s.y, rad, 0, Math.PI * 2); ctx.globalAlpha = alpha; ctx.lineWidth = 2; ctx.strokeStyle = cssColor(p.color || l.color); ctx.stroke(); ctx.globalAlpha = 1; return; }
     else ctx.arc(s.x, s.y, rad, 0, Math.PI * 2);
