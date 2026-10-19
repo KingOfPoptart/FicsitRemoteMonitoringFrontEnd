@@ -1291,8 +1291,8 @@ const networkLayers = () => [
 ];
 const vmap = new MapView($("vehMap"), {
   storeKey: "vt.layers", animate: () => mapMoving(), dim: 0.35, fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
-  layerMenu: true, players: true, hypertubes: () => true,
-  // a layer per vehicle type (picture + count), then the transport network; players are added by MapView
+  layerMenu: true, drawsNetwork: true, world: { replaces: ["veh"] },   // its own vehicles (per type) instead of the shared arrows
+  // a layer per vehicle type (picture + count), then the transport network; every other kind of thing is in the Layers menu, off
   layers: [...Object.keys(TYPES).map(t => ({ key: "v:" + t, group: "Vehicles", label: t, swatchHtml: typeImg(t),
             count: () => vehicles.filter(v => v.type === t).length })), ...networkLayers()],
   draw: (c, now) => draw(now),
@@ -1678,8 +1678,9 @@ addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 resize(); fitWorld(); renderHead(); renderLayerButtons(); applyRowHeight();
 pollStatic().then(poll);
 every(poll, POLL_MS, () => activeTab === "vehicles");
-// paths, rails and stations are drawn on the Vehicles and Overview maps only
-const showsNetwork = () => activeTab === "vehicles" || activeTab === "overview";
+// paths, rails and stations: for the Vehicles and Overview maps, or any map with one of those layers switched on
+const showsNetwork = () => activeTab === "vehicles" || activeTab === "overview" ||
+  MapView.all.some(mv => mv.tab === activeTab && NET_KEYS().some(k => mv.isOn(k)));
 every(pollStatic, 60000, showsNetwork);
 // station contents change constantly; refresh them faster than paths/rails
 every(async () => {

@@ -5,7 +5,9 @@
 const Overview = (() => {
   let d = {}, prod = null, veh = [], timers = [], map, chart, sinks = null;
   const root = $("tab-overview");
-  const VEH_COLOR = { moving: "#5fcf80", docking: "#5fa8ef", stopped: "#c5cad3", driven: "#c39cf7", error: "#ef5f5f" };
+  // vehicles, machines and sinks come from the shared map sources (one fetch for the cards and every map)
+  VehSrc.listeners.add(() => { veh = VehSrc.list; if (activeTab === "overview") render(); });
+  FactorySrc.listeners.add(() => { prod = FactorySrc.prod; sinks = FactorySrc.sinks; if (activeTab === "overview") render(); });
 
   async function load(eps) {
     const res = await Promise.allSettled(eps.map(e => getJSON(e)));
@@ -14,14 +16,10 @@ const Overview = (() => {
   }
   async function fast() {
     await load(["getPower", "getSessionInfo", "getSpaceElevator", "getHUBTerminal", "getResourceSink", "getTradingPost"]);
-    try {
-      const [w, t, dr] = await Promise.all([getJSON("getVehicles"), getJSON("getTrains").catch(() => []), getJSON("getDrone").catch(() => [])]);
-      veh = w.map(fromWheeled).concat(t.map(fromTrain), dr.map(fromDrone));
-    } catch {}
     render();
   }
   // machines and items: the copy server.py's history recorder takes every 15 s does (these replies are the biggest FRM has)
-  async function factory() { try { prod = await Production.snapshot(20); } catch {} Production.pollExtractors(); render(); }
+  const extractors = () => Production.pollExtractors();   // for the machine popups' extractor history
   // ---- Logistics card: belts and pipes, tiers, unconnected ends (data from the shared /logistics fetch)
   function renderLogistics() {
     const nets = Logistics.networks;
@@ -44,8 +42,6 @@ const Overview = (() => {
   Logistics.listeners.add(() => render());
 
   async function slow() { await load(["getSchematics"]); render(); }
-  // AWESOME Sinks: what feeds them (server.py traces the belts at most once a minute)
-  async function sinkData() { try { sinks = (await Sink.sinks()).sinks; } catch {} render(); }
   async function powerHist() {
     try {
       const h = await (await fetch("/hist/power?mins=60", { cache: "no-store" })).json();
@@ -204,37 +200,7 @@ const Overview = (() => {
     $("statsOv").innerHTML = (gs.length ? `<span class="stat"><b>${fmtNum(tot("PowerConsumed"))}</b>/ ${fmtNum(tot("PowerCapacity"))} MW</span>` : "") +
       (prod ? `<span class="stat"><b>${prod.machines.filter(m => m.status === "running" || m.status === "partial").length}</b>machines working</span>` : "") +
       `<span class="stat"><b>${veh.length}</b>vehicles</span>`;
-    renderMap();
   }
-
-  function renderMap() {
-    if (!map) return;
-    const pt = (o, extra) => o.location && { id: o.ID, x: o.location.x, y: o.location.y, ...extra };
-    if (prod) {
-      map.setPoints("machines", prod.machines.filter(m => m.loc).map(m => ({ id: m.id, x: m.loc.x, y: m.loc.y, color: Production.M_STATUS[m.status].color,
-        label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${Production.M_STATUS[m.status].label}`, tab: "production",
-        tip: () => Production.machinePop(prod.machines.find(x => x.id === m.id) || m) })));
-      map.setPoints("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "#e879f9" : "var(--bad)", tab: "power",
-        tip: () => Power.genPop(g) })).filter(Boolean));
-    }
-    map.setPoints("veh", veh.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tab: "vehicles",
-      tip: () => vehiclePop(veh.find(x => x.id === v.id) || v) })));
-    map.setPoints("hub", (d.getTradingPost || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => hubTip(o) })).filter(Boolean));
-    if (sinks) map.setPoints("sinks", sinks.map(s => ({ id: s.id, x: s.x, y: s.y, color: s.on ? SINK_COLOR : "var(--bad)", tab: "sink",
-      label: `AWESOME Sink · ${s.feeds.length ? `up to ${Sink.k(Sink.feedPts(s))} points/min` : "nothing traced in"}${s.on ? "" : " · no power"}`, tip: () => Sink.tip(s) })));
-    map.setPoints("elevator", (d.getSpaceElevator || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => elevatorTip(o) })).filter(Boolean));
-  }
-  const hubTip = o => { const t = (d.getHUBTerminal || [])[0], ms = t?.HasActiveMilestone ? t.ActiveMilestone : null;
-    return Pop.head(o.Name, { sub: "your base", status: `HUB upgrade ${o.HUBLevel ?? "?"}`, color: "#fa9549" }) +
-      (ms ? Pop.sec(`Milestone · Tier ${ms.TechTier} ${esc(ms.Name)}`) + (ms.Cost || []).map(c => { const tot = c.TotalCost ?? c.Amount, got = tot - (c.RemainingCost ?? tot);
-        return Pop.item(c.Name, `${fmtNum(got)}${Pop.unit(`of ${fmtNum(tot)}`)}`); }).join("") : Pop.sec("Milestone") + Pop.note("none selected")) +
-      (t ? Pop.row("Freighter", t.ShipDock ? "docked, ready to send" : `away${t.ShipReturn ? ` · back in ${esc(t.ShipReturn)}` : ""}`) : "") + Pop.where(o.location); };
-  const elevatorTip = o => { const parts = o.CurrentPhase || [], done = o.FullyUpgraded;
-    const se = Progression.seState(o);
-    return Pop.head(o.Name, { sub: se && !done ? `phase ${se.n}${se.phase ? " · " + esc(se.phase.name) : ""}` : "Project Assembly",
-                              status: done ? "Complete" : o.UpgradeReady ? "Ready to send" : `${pct((se?.frac || 0) * 100)} done`, color: done || o.UpgradeReady ? "var(--ok)" : "#fa9549" }) +
-      (parts.length && !done ? Pop.sec("This phase needs") + parts.map(c => { const got = (c.TotalCost || 0) - (c.RemainingCost || 0);
-        return Pop.item(c.Name, `${fmtNum(got)}${Pop.unit(`of ${fmtNum(c.TotalCost)}`)}`); }).join("") : "") + Pop.where(o.location); };
 
   function init() {
     root.innerHTML = `
@@ -256,20 +222,10 @@ const Overview = (() => {
       </div>`;
     chart = new LineChart($("ovChart"), { height: 140, unit: "MW", fill: true });
     map = new MapView($("ovMap"), {
-      // dropdown sections: Factory, Transport, Stations, People (players are added by MapView)
-      // everything: every belt and pipe, the whole power network (new storeKey = all layers start enabled)
-      storeKey: "ov.map2", layerMenu: true, players: true, logistics: () => true, powerNet: () => true, storage: () => true, hypertubes: () => true, layers: [
-        // told apart by shape (and colour where status isn't the point): machines = small dots coloured by status,
-        // generators = amber diamonds (red when out of fuel/water), vehicles = heading arrows, players = labelled dots on top
-        { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6 },
-        { key: "gens", group: "Factory", label: "Generators", color: "#e879f9", size: 5, shape: "diamond" },   // fuchsia; red = not running
-        { key: "hub", group: "Factory", label: "The HUB", color: "#fa9549", size: 6.5, shape: "square" },
-        { key: "elevator", group: "Factory", label: "Space Elevator", color: "#fa9549", size: 8, shape: "triangle" },
-        { key: "sinks", group: "Factory", label: "AWESOME Sinks", color: SINK_COLOR, size: 6, shape: "drain" },   // red = no power
-        { key: "veh", group: "Transport", label: "Vehicles", color: "#5fcf80", size: 5, shape: "arrow" },
-        ...networkLayers(),
-      ],
-      tooltip: p => `<div class="row"><span>${esc(p.label)}</span></div>`,
+      // the whole world: every kind of thing is in the Layers menu; on to start with: the factory, transport, the power
+      // network, belts, pipes, storage and hypertubes (resource nodes and collectibles are there, off)
+      storeKey: "ov.map2", layerMenu: true, layers: [], drawsNetwork: true,
+      world: { on: l => ["Factory", "Transport", "Stations", "Power network", "Belts", "Pipes", "Storage", "Hypertubes"].includes(l.group) },
       onClick: p => { if (p.tab) location.hash = p.tab; },
       draw: (c, now, mv) => drawNetwork(mv, k => mv.isOn(k)),   // roads, tracks, drone routes, stations (shared with Vehicles)
       extraTip: (mx, my) => { const st = stationAt(mx, my, map); return st ? stationPopHtml(st, veh) : null; },
@@ -279,8 +235,8 @@ const Overview = (() => {
   return {
     show() {
       if (!map) init();
-      fast().then(powerHist); sinkData(); factory(); slow(); Logistics.start();
-      if (!timers.length) timers = [every(fast, 3000), every(factory, 15000), every(slow, 60000), every(powerHist, 15000), every(sinkData, 60000)];
+      fast().then(powerHist); extractors(); slow(); Logistics.start(); VehSrc.need(); FactorySrc.need(); Players.need();
+      if (!timers.length) timers = [every(fast, 3000), every(extractors, 15000), every(slow, 60000), every(powerHist, 15000)];
     },
     hide() { timers.forEach(stopPoll); timers = []; },
   };

@@ -9,8 +9,9 @@
 const BACKGROUND_MS = 60000;
 const polls = new Set();
 
-function every(fn, ms, when) {
-  const p = { ms, last: Date.now(), h: 0 };   // callers fetch once themselves right before starting the timer
+function every(fn, ms, when, lazy = false) {
+  // callers fetch once themselves right before starting the timer; a lazy one hasn't, so the first wake runs it
+  const p = { ms, last: lazy ? 0 : Date.now(), h: 0 };
   p.run = () => { if (when && !when()) return; p.last = Date.now(); fn(); };
   p.arm = (delay = document.hidden ? Math.max(ms, BACKGROUND_MS) : ms) => {
     clearTimeout(p.h); p.h = setTimeout(() => { p.arm(); p.run(); }, delay);

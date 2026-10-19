@@ -1054,4 +1054,6 @@ if __name__ == "__main__":
         threading.Thread(target=recorder, daemon=True).start()
     threading.Thread(target=logistics_worker, daemon=True).start()
     print(f"FICSIT monitor on http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}  (FRM: {FRM})")
+    # a page opening a tab fires a burst of requests at once: queue them instead of refusing (the default backlog is 5)
+    http.server.ThreadingHTTPServer.request_queue_size = 128
     http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

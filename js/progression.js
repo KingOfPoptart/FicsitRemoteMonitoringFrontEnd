@@ -251,7 +251,7 @@ const Progression = (() => {
         </div>
       </div>`;
     map = new MapView($("pgMap"), {
-      storeKey: "pg.map", layerMenu: true, players: true, hypertubes: () => true, layers: [
+      storeKey: "pg.map", layerMenu: true, layers: [
         { key: "sloop", group: "Collectibles", label: "Somersloops", color: "#e66767", size: 4.5, shape: "diamond" },
         { key: "sphere", group: "Collectibles", label: "Mercer Spheres", color: "#9085e9", size: 4, shape: "diamond" },
         { key: "slug", group: "Collectibles", label: "Power slugs", color: "#3987e5", size: 3, on: false },
@@ -281,7 +281,7 @@ const Progression = (() => {
   }
 
   return {
-    seState, milestoneTiers,
+    seState, milestoneTiers, collectTip, nodeTip, COLLECTIBLES,   // the shared resource layers on other maps use these
     show() {
       if (!map) init();
       fast(); slow(); world();

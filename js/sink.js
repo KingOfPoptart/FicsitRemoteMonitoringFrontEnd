@@ -227,7 +227,7 @@ const SinkTab = (() => {
     ], { sortKey: "ptsMin", dir: -1, storeKey: "sk.sinks", empty: "No AWESOME Sinks.", onFilter: render,
          rowAttrs: r => `data-sink="${esc(r.id)}" class="${r.id === sel ? "sel" : ""}"` });
     map = new MapView($("skMap"), {
-      storeKey: "sk.map", layerMenu: true, players: true, hypertubes: () => true,
+      storeKey: "sk.map", layerMenu: true, world: { on: l => l.group === "Belts" || l.group === "Pipes" },
       // only the belts that end at a sink (their whole network, back to the machines)
       logistics: b => b.n && !!Logistics.byId?.get(b.n)?.touches?.["AWESOME Sink"], layers: [
         { key: "sinks", group: "Sinks", label: "AWESOME Sinks", color: SINK_COLOR, size: 6.5, shape: "drain" },

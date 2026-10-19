@@ -56,18 +56,25 @@ const Pop = {
 // Players on any map: MapView({ players: true }) adds this layer, and one shared poll keeps every such map updated.
 const PLAYER_COLOR = "#22d3ee";   // cyan: nothing else on the maps uses it
 const playerLayer = () => ({ key: "players", group: "People", label: "Players", color: PLAYER_COLOR, size: 6, shape: "player", top: true });
-// A shared poll only runs while a map on the open tab uses it (see every() in poll.js).
-const onScreen = maps => [...maps].some(mv => mv.tab === activeTab);
+// Every map can show everything (one Layers menu with every kind of thing); each kind comes from a shared source that
+// fetches only while it's needed: a tab that uses its data is open (src.need() from that tab), or a map on the open
+// tab has one of its layers switched on (see every() in poll.js). Switching a layer on fetches it at once.
+const wanted = src => src.tabs.has(activeTab) || [...src.maps].some(mv => mv.tab === activeTab && mv.layers.some(l => l.on && !l.own && src.owns(l.key)));
+// start a source's timer (if it isn't running) and fetch now if it's wanted and has nothing yet
+function runSource(src, ms) {
+  if (!src.timer) src.timer = every(() => src.poll(), ms, () => wanted(src), true);
+  // checked a tick later: the Vehicles map is built while the page is still starting up (before it knows the open tab)
+  setTimeout(() => { if (wanted(src) && !src.loaded && !src.busy) { src.busy = true; Promise.resolve(src.poll()).finally(() => { src.busy = false; }); } });
+}
+const SOURCES = [];
 // FRM 1.5.5+ getPlayer pitch = where the player is looking (-90 down .. 90 up); older FRM always sent 0
 const lookLabel = p => typeof p !== "number" || p === 0 ? "" : Math.abs(p) < 5 ? " · looking ahead" : ` · looking ${p > 0 ? "up" : "down"} ${Math.round(Math.abs(p))}°`;
 const Players = {
-  list: [], maps: new Set(), timer: null,
-  attach(mv) {
-    this.maps.add(mv); this.push(mv);
-    if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 5000, () => onScreen(this.maps)); }
-  },
+  list: [], maps: new Set(), tabs: new Set(), timer: null, loaded: false, owns: k => k === "players",
+  attach(mv) { this.maps.add(mv); this.push(mv); runSource(this, 5000); },
+  need() { this.tabs.add(activeTab); runSource(this, 5000); },
   async poll() {
-    try { this.list = await getJSON("getPlayer"); } catch { return; }
+    try { this.list = await getJSON("getPlayer"); this.loaded = true; } catch { return; }
     for (const mv of this.maps) this.push(mv);
   },
   push(mv) {   // online: solid orange + name; offline: grey, dashed outline, "(offline)"
@@ -143,10 +150,12 @@ function pumpTip(p) {
     (!p.valve ? Pop.sec("Power") + Pop.row("Using", Pop.mw(p.mw)) : "") +
     Pop.where({ x: p.x, y: p.y, z: p.z * 100 });
 }
+const LOGI_KEYS = new Set(["belt1", "belt2", "belt3", "belt4", "belt5", "belt6", "lifts", "pipe1", "pipe2", "pumps", "headlift"]);
 const Logistics = {
-  belts: [], lifts: [], pipes: [], networks: [], counts: {}, headlift: null, maps: new Set(), listeners: new Set(), timer: null,
-  attach(mv) { this.maps.add(mv); this.start(); this.push(mv); },
-  start() { if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 60000, () => onScreen(this.maps)); } },
+  belts: [], lifts: [], pipes: [], networks: [], counts: {}, headlift: null, maps: new Set(), tabs: new Set(), listeners: new Set(), timer: null, loaded: false,
+  owns: k => LOGI_KEYS.has(k),
+  attach(mv) { this.maps.add(mv); this.push(mv); runSource(this, 60000); },
+  start() { this.tabs.add(activeTab); runSource(this, 60000); },   // a tab that uses the networks (tables, Overview cards)
   async poll() {
     try {
       // ?bg=1: only a page in the background is asking, so the server works the networks out less often
@@ -154,7 +163,7 @@ const Logistics = {
       // an old result (nobody was looking, so the server stopped working it out): it is on it now, look again soon
       if (+r.headers.get("X-Age") > 90 && !document.hidden) setTimeout(() => this.poll(), 10000);
       Object.assign(this, await r.json());
-      this.byId = new Map(this.networks.map(n => [n.id, n]));
+      this.byId = new Map(this.networks.map(n => [n.id, n])); this.loaded = true;
     } catch { if (!this.belts.length) setTimeout(() => this.poll(), 5000); return; }   // server still working it out
     for (const mv of this.maps) { this.push(mv); mv.renderButtons(); mv.draw(); }
     for (const f of this.listeners) f();
@@ -272,14 +281,17 @@ const powerLayers = keep => [
   { key: "switches", group: "Power network", label: "Power switches", color: POWER_COLOR, size: 5, shape: "diamond" },
   { key: "pstorage", group: "Power network", label: "Power Storage", color: "#fff1a8", size: 4.5, shape: "square" },
 ];
+const POWER_KEYS = new Set(["wires", "poles", "outlets", "towers", "switches", "pstorage"]);
 const PowerNet = {
   wires: [], poles: [], switches: [], storage: [], things: [], groupOf: new Map(), maps: new Set(), listeners: new Set(), timer: null,
-  attach(mv) { this.maps.add(mv); if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 30000, () => onScreen(this.maps)); } else this.push(mv); },
+  tabs: new Set(), loaded: false, owns: k => POWER_KEYS.has(k),
+  attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 30000); },
+  need() { this.tabs.add(activeTab); runSource(this, 30000); },   // the Power tab's tables use the switches and poles
   async poll() {
     const [c, p, s, u, g, w] = await Promise.allSettled(["getCables", "getPowerPoles", "getSwitches", "getPowerUsage", "getGenerators", "getPower"].map(e => getJSON(e)));
     const ok = r => r.status === "fulfilled" ? r.value : null;
     const usage = ok(u) || [], gens = ok(g) || [], poles = ok(p) || [];   // getPowerPoles needs the newer FRM build
-    this.grids = ok(w) || this.grids || [];
+    this.grids = ok(w) || this.grids || []; this.loaded = true;
     this.groupOf = new Map((ok(w) || []).flatMap(gr => (gr.AssociatedCircuits || []).map(c => [c, gr.CircuitGroupID])));
     this.poles = poles.map(x => ({ ...x, kind: /Tower/i.test(x.ClassName) ? "towers" : /Wall/i.test(x.ClassName) ? "outlets" : "poles", circuits: [x.CircuitID] }));
     this.switches = (ok(s) || []).map(x => ({ ...x, circuits: [x.Primary, x.Secondary] }));
@@ -366,9 +378,10 @@ const storageKey = type => "st:" + type;
 const storageLayers = keep => STORAGE_ORDER.map(type => { const k = storageKind(type), [shape, size] = STORAGE_SHAPE[k];
   return { key: storageKey(type), group: "Storage", label: type, color: STORAGE_COLOR[k], shape, size: type.startsWith("Industrial") ? size + 1 : size }; });
 const Storage = {
-  list: [], cloud: [], hasBuffers: false, maps: new Set(), listeners: new Set(), timer: null, loaded: false,
-  attach(mv) { this.maps.add(mv); this.start(); if (this.loaded) this.push(mv); },
-  start() { if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 10000, () => onScreen(this.maps)); } },
+  list: [], cloud: [], hasBuffers: false, maps: new Set(), tabs: new Set(), listeners: new Set(), timer: null, loaded: false,
+  owns: k => k.startsWith("st:"),
+  attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 10000); },
+  start() { this.tabs.add(activeTab); runSource(this, 10000); },
   async poll() {
     const [s, f, c, d] = await Promise.allSettled(["getStorageInv", "getFluidBuffer", "getCrateInv", "getCloudInv"].map(e => getJSON(e)));
     const ok = r => r.status === "fulfilled" ? r.value : null;
@@ -426,9 +439,10 @@ const hypertubeLayers = keep => [
   { key: "hexits", group: "Hypertubes", label: "Open ends (launch points)", color: TUBE_COLOR, size: 5, shape: "arrow" },
 ];
 const Hyper = {
-  tubes: [], entrances: [], networks: [], junctions: 0, loaded: false, maps: new Set(), listeners: new Set(), timer: null,
-  attach(mv) { this.maps.add(mv); this.start(); if (this.loaded) this.push(mv); },
-  start() { if (!this.timer) { this.poll(); this.timer = every(() => this.poll(), 30000, () => onScreen(this.maps)); } },
+  tubes: [], entrances: [], networks: [], junctions: 0, loaded: false, maps: new Set(), tabs: new Set(), listeners: new Set(), timer: null,
+  owns: k => k === "tubes" || k === "hents" || k === "hexits",
+  attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 30000); },
+  start() { this.tabs.add(activeTab); runSource(this, 30000); },
   async poll() {
     try { const r = await fetch("/hypertubes", { cache: "no-store" }); if (!r.ok) throw 0; Object.assign(this, await r.json()); }
     catch { return; }
@@ -499,22 +513,128 @@ const MapCtx = {
     requestAnimationFrame(() => { for (const m of MapView.all) m.applyPending(); });   // a map that already exists and kept its size
   },
 };
+// Factory buildings on any map: machines (dots by status), generators, the HUB, the Space Elevator and AWESOME Sinks.
+// The Production / Power / Sink tabs draw their own richer versions instead (a map's own layer wins over a shared one).
+const FACTORY_LAYERS = () => [
+  { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6 },
+  { key: "gens", group: "Factory", label: "Generators", color: "#e879f9", size: 5, shape: "diamond" },   // fuchsia; red = not running
+  { key: "hub", group: "Factory", label: "The HUB", color: "#fa9549", size: 6.5, shape: "square" },
+  { key: "elevator", group: "Factory", label: "Space Elevator", color: "#fa9549", size: 8, shape: "triangle" },
+  { key: "sinks", group: "Factory", label: "AWESOME Sinks", color: "#818cf8", size: 6, shape: "drain" },   // red = no power
+];
+const hubTip = o => { const t = (FactorySrc.d.getHUBTerminal || [])[0], ms = t?.HasActiveMilestone ? t.ActiveMilestone : null;
+  return Pop.head(o.Name, { sub: "your base", status: `HUB upgrade ${o.HUBLevel ?? "?"}`, color: "#fa9549" }) +
+    (ms ? Pop.sec(`Milestone · Tier ${ms.TechTier} ${esc(ms.Name)}`) + (ms.Cost || []).map(c => { const tot = c.TotalCost ?? c.Amount, got = tot - (c.RemainingCost ?? tot);
+      return Pop.item(c.Name, `${fmtNum(got)}${Pop.unit(`of ${fmtNum(tot)}`)}`); }).join("") : Pop.sec("Milestone") + Pop.note("none selected")) +
+    (t ? Pop.row("Freighter", t.ShipDock ? "docked, ready to send" : `away${t.ShipReturn ? ` · back in ${esc(t.ShipReturn)}` : ""}`) : "") + Pop.where(o.location); };
+const elevatorTip = o => { const parts = o.CurrentPhase || [], done = o.FullyUpgraded;
+  const se = Progression.seState(o);
+  return Pop.head(o.Name, { sub: se && !done ? `phase ${se.n}${se.phase ? " · " + esc(se.phase.name) : ""}` : "Project Assembly",
+                            status: done ? "Complete" : o.UpgradeReady ? "Ready to send" : `${pct((se?.frac || 0) * 100)} done`, color: done || o.UpgradeReady ? "var(--ok)" : "#fa9549" }) +
+    (parts.length && !done ? Pop.sec("This phase needs") + parts.map(c => { const got = (c.TotalCost || 0) - (c.RemainingCost || 0);
+      return Pop.item(c.Name, `${fmtNum(got)}${Pop.unit(`of ${fmtNum(c.TotalCost)}`)}`); }).join("") : "") + Pop.where(o.location); };
+const FactorySrc = {
+  prod: null, d: {}, sinks: null, maps: new Set(), tabs: new Set(), listeners: new Set(), timer: null, loaded: false,
+  owns: k => ["machines", "gens", "hub", "elevator", "sinks"].includes(k),
+  attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 15000); },
+  need() { this.tabs.add(activeTab); runSource(this, 15000); },
+  async poll() {
+    // machines: the copy server.py's history recorder takes every 15 s (the biggest replies FRM has)
+    const [p, tp, se, hub, sk] = await Promise.allSettled([Production.snapshot(20), getJSON("getTradingPost"), getJSON("getSpaceElevator"), getJSON("getHUBTerminal"), Sink.sinks()]);
+    const ok = r => r.status === "fulfilled" ? r.value : null;
+    if (ok(p)) this.prod = ok(p);
+    for (const [k, r] of [["getTradingPost", tp], ["getSpaceElevator", se], ["getHUBTerminal", hub]]) if (ok(r)) this.d[k] = ok(r);
+    if (ok(sk)) this.sinks = ok(sk).sinks;
+    this.loaded = true;
+    for (const mv of this.maps) this.push(mv);
+    for (const f of this.listeners) f();
+  },
+  push(mv) {
+    const pt = (o, extra) => o.location && { id: o.ID, x: o.location.x, y: o.location.y, ...extra }, prod = this.prod;
+    if (prod) {
+      mv.setShared("machines", prod.machines.filter(m => m.loc).map(m => ({ id: m.id, x: m.loc.x, y: m.loc.y, color: Production.M_STATUS[m.status].color,
+        label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${Production.M_STATUS[m.status].label}`, tab: "production",
+        tip: () => Production.machinePop(this.prod.machines.find(x => x.id === m.id) || m) })));
+      mv.setShared("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "#e879f9" : "var(--bad)", tab: "power",
+        tip: () => Power.genPop(g) })).filter(Boolean));
+    }
+    mv.setShared("hub", (this.d.getTradingPost || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => hubTip(o) })).filter(Boolean));
+    if (this.sinks) mv.setShared("sinks", this.sinks.map(s => ({ id: s.id, x: s.x, y: s.y, color: s.on ? SINK_COLOR : "var(--bad)", tab: "sink",
+      label: `AWESOME Sink · ${s.feeds.length ? `up to ${Sink.k(Sink.feedPts(s))} points/min` : "nothing traced in"}${s.on ? "" : " · no power"}`, tip: () => Sink.tip(s) })));
+    mv.setShared("elevator", (this.d.getSpaceElevator || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => elevatorTip(o) })).filter(Boolean));
+  },
+};
+// Vehicles on any map: one arrow per vehicle, coloured by status (the Vehicles tab draws its own, per type).
+const VEH_COLOR = { moving: "#5fcf80", docking: "#5fa8ef", stopped: "#c5cad3", driven: "#c39cf7", error: "#ef5f5f" };
+const VehSrc = {
+  list: [], maps: new Set(), tabs: new Set(), listeners: new Set(), timer: null, loaded: false, owns: k => k === "veh",
+  attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 3000); },
+  need() { this.tabs.add(activeTab); runSource(this, 3000); },
+  async poll() {
+    try {
+      const [w, t, dr] = await Promise.all([getJSON("getVehicles"), getJSON("getTrains").catch(() => []), getJSON("getDrone").catch(() => [])]);
+      this.list = w.map(fromWheeled).concat(t.map(fromTrain), dr.map(fromDrone)); this.loaded = true;
+    } catch { return; }
+    for (const mv of this.maps) this.push(mv);
+    for (const f of this.listeners) f();
+  },
+  push(mv) {
+    mv.setShared("veh", this.list.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], tab: "vehicles",
+      label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tip: () => vehiclePop(this.list.find(x => x.id === v.id) || v) })));
+  },
+};
+// Resource nodes and collectibles on any map (the Progression tab draws its own, with its resource picker)
+const RESOURCE_LAYERS = () => [
+  { key: "sloop", group: "Collectibles", label: "Somersloops", color: "#e66767", size: 4.5, shape: "diamond" },
+  { key: "sphere", group: "Collectibles", label: "Mercer Spheres", color: "#9085e9", size: 4, shape: "diamond" },
+  { key: "slug", group: "Collectibles", label: "Power slugs", color: "#3987e5", size: 3 },
+  { key: "free", group: "Resource nodes", label: "Untapped nodes", color: "#aab1bd", size: 3, shape: "square" },
+  { key: "tapped", group: "Resource nodes", label: "Tapped nodes", color: "#199e70", size: 3.5, shape: "square" },
+];
+const ResSrc = {
+  d: {}, maps: new Set(), tabs: new Set(), listeners: new Set(), timer: null, loaded: false,
+  owns: k => ["sloop", "sphere", "slug", "free", "tapped"].includes(k),
+  attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 120000); },
+  async poll() {
+    const eps = ["getResourceNode", "getArtifacts", "getPowerSlug"], res = await Promise.allSettled(eps.map(e => getJSON(e)));
+    eps.forEach((e, i) => { if (res[i].status === "fulfilled") this.d[e] = res[i].value; });
+    this.loaded = true;
+    for (const mv of this.maps) this.push(mv);
+  },
+  push(mv) {
+    const pt = (a, extra) => a.location && { id: a.ID, x: a.location.x, y: a.location.y, tab: "progression", ...extra };
+    const col = name => Progression.COLLECTIBLES.find(c => c.name === name)?.color, arts = this.d.getArtifacts || [], nodes = this.d.getResourceNode || [];
+    const nl = n => `${n.Name} · ${n.Purity}${n.NodeType !== "Node" ? " · " + n.NodeType : ""}${n.Exploited ? " · tapped" : ""}`;
+    mv.setShared("sloop", arts.filter(a => a.Name === "Somersloop").map(a => pt(a, { label: "Somersloop", tip: () => Progression.collectTip(a) })).filter(Boolean));
+    mv.setShared("sphere", arts.filter(a => a.Name === "Mercer Sphere").map(a => pt(a, { label: "Mercer Sphere", tip: () => Progression.collectTip(a) })).filter(Boolean));
+    mv.setShared("slug", (this.d.getPowerSlug || []).map(a => pt(a, { label: a.Name, color: col(a.Name), tip: () => Progression.collectTip(a) })).filter(Boolean));
+    mv.setShared("free", nodes.filter(n => !n.Exploited).map(n => pt(n, { label: nl(n), color: n.Purity === "Pure" ? "#f2f2f2" : n.Purity === "Normal" ? "#aab1bd" : "#6b7380", tip: () => Progression.nodeTip(n) })).filter(Boolean));
+    mv.setShared("tapped", nodes.filter(n => n.Exploited).map(n => pt(n, { label: nl(n), tip: () => Progression.nodeTip(n) })).filter(Boolean));
+  },
+};
+
 const MAP_TABS = ["overview", "vehicles", "production", "power", "belts", "pipes", "sink", "progression"];
 
 class MapView {
   static all = []; static pending = null;
   constructor(el, opts) {
-    this.opts = opts;
-    // opts.only "belt" | "pipe": a map of just one of them (Belts / Pipes tabs): its layers and the storage on its side
-    const side = l => !opts.only || l.group === (opts.only === "belt" ? "Belts" : "Pipes");
-    const stSide = l => !opts.only || (storageKind(l.label) === "fluid") === (opts.only === "pipe");
-    this.layers = [...opts.layers, ...(opts.powerNet ? powerLayers(opts.powerNet) : []), ...(opts.logistics ? logisticsLayers(opts.logistics).filter(side) : []),
-                   ...(opts.storage ? storageLayers(opts.storage).filter(stSide) : []), ...(opts.hypertubes ? hypertubeLayers(opts.hypertubes) : []),
-                   ...(opts.players ? [playerLayer()] : [])];
+    // every map has every layer; the filters (which belts / grids / storage a tab shows) default to everything
+    opts = this.opts = { ...opts, logistics: opts.logistics || (() => true), powerNet: opts.powerNet || (() => true),
+                         storage: opts.storage || (() => true), hypertubes: opts.hypertubes || (() => true) };
+    const world = opts.world || {}, inOn = world.on || (() => false), replaces = new Set(world.replaces || []);
+    for (const l of opts.layers) l.own = true;   // the tab's own layers: on as they say
+    this.ownKeys = new Set(opts.layers.map(l => l.key));
+    const shared = [...FACTORY_LAYERS(), { key: "veh", group: "Transport", label: "Vehicles", color: "#5fcf80", size: 5, shape: "arrow" }, ...networkLayers(),
+                    ...powerLayers(opts.powerNet), ...logisticsLayers(opts.logistics), ...storageLayers(opts.storage), ...RESOURCE_LAYERS(),
+                    ...hypertubeLayers(opts.hypertubes), playerLayer()].filter(l => !this.ownKeys.has(l.key) && !replaces.has(l.key));
+    for (const l of shared) l.on = l.key === "players" || !!inOn(l);   // shared: off unless this tab is about them (players always on)
+    this.layers = [...opts.layers, ...shared];
     this.points = {}; this.hoverId = null; this.focus = null; this.fitted = false;
     this.tab = el.closest("main.tab")?.id.replace(/^tab-/, ""); MapView.all.push(this);
+    // remembered on/off per map (".v3": the defaults changed when every map got every layer, so start over once)
+    this.storeKey = opts.storeKey + ".v3";
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem(opts.storeKey) || "{}"); } catch {}
+    try { saved = JSON.parse(localStorage.getItem(this.storeKey) || "{}"); } catch {}
     for (const l of this.layers) l.on = saved[l.key] ?? l.on ?? true;
     this.dragging = false; this.mouseWorld = null;
     el.classList.add("mapview");
@@ -585,7 +705,8 @@ class MapView {
       if (netId !== this.hoverNet) { this.hoverNet = netId; opts.onNetHover && opts.onNetHover(netId); this.draw(); }
       const tip = p ? (p.tip ? p.tip() : p.layer === "players" || !opts.tooltip ? p.label && `<div class="row"><span>${esc(p.label)}</span></div>` : opts.tooltip(p))
                     : seg ? netTooltip(Logistics.byId?.get(netId), seg)
-                    : opts.extraTip?.(e.clientX - r.left, e.clientY - r.top);   // things the tab draws itself (stations, moving vehicles)
+                    : opts.extraTip ? opts.extraTip(e.clientX - r.left, e.clientY - r.top)   // things the tab draws itself (stations, moving vehicles)
+                    : this.stationTip(e.clientX - r.left, e.clientY - r.top);
       if (tip) showPopAt(tip, e.clientX, e.clientY); else hideCargoPop();
       this.canvas.style.cursor = p || seg || tip ? "pointer" : "";
     });
@@ -594,11 +715,7 @@ class MapView {
       this.mouseWorld = null; this.draw(); if (this.hoverId) { this.hoverId = null; opts.onHover && opts.onHover(null); this.draw(); } hideCargoPop(); });
     mapImg.addEventListener("load", () => this.draw());
     this.renderButtons();
-    if (opts.players) Players.attach(this);
-    if (opts.logistics) Logistics.attach(this);
-    if (opts.powerNet) PowerNet.attach(this);
-    if (opts.storage) Storage.attach(this);
-    if (opts.hypertubes) Hyper.attach(this);
+    for (const src of SOURCES) src.attach(this);
     if (opts.animate) {   // repaint while something moves (capped at ~30 fps), never while the map isn't on screen
       let last = 0, was = false;
       const loop = t => {
@@ -613,6 +730,12 @@ class MapView {
     }
   }
   isOn(key) { return !!this.layers.find(l => l.key === key)?.on; }
+  stationTip(mx, my) {   // truck / train stations and drone ports drawn by drawNetwork, on maps that don't handle them
+    if (this.opts.drawsNetwork || !NET_KEYS().some(k => this.isOn(k))) return null;
+    const st = stationAt(mx, my, this); return st ? stationPopHtml(st) : null;
+  }
+  // a shared source's points: skipped where the tab draws its own layer with that key
+  setShared(key, pts) { if (!this.ownKeys.has(key) && this.layers.some(l => l.key === key)) this.setPoints(key, pts); }
   setPoints(key, pts) {
     this.points[key] = pts.map(p => ({ ...p, layer: key, ip: worldToImg(p.x, p.y) }));
     this.renderButtons();
@@ -649,8 +772,10 @@ class MapView {
   // turn layers on/off ({ key: bool }), remember it, redraw
   setLayers(changes) {
     for (const l of this.layers) if (l.key in changes) l.on = changes[l.key];
-    try { localStorage.setItem(this.opts.storeKey, JSON.stringify(Object.fromEntries(this.layers.map(x => [x.key, x.on])))); } catch {}
+    try { localStorage.setItem(this.storeKey, JSON.stringify(Object.fromEntries(this.layers.map(x => [x.key, x.on])))); } catch {}
     this.renderButtons(); this.draw();
+    for (const src of SOURCES) if (src.maps.has(this)) runSource(src, src.timer?.ms || 30000);   // a layer just switched on: fetch it now
+    wakePolls();   // the vehicle paths / stations polls in index.html
   }
   swatch(l) {
     if (l.swatchHtml) return l.swatchHtml;
@@ -664,7 +789,13 @@ class MapView {
                     alert: "clip-path:polygon(50% 0,100% 100%,0 100%);width:12px;height:11px;" }[l.shape || "dot"];
     return `<i style="background:${l.color};width:9px;height:9px;display:inline-block;${shape}"></i>`;
   }
-  layerCount(l) { return l.count ? l.count() : (this.points[l.key] || []).length; }
+  layerCount(l) {
+    // a shared layer whose data hasn't been fetched yet (it's off): "–", not 0, so it doesn't look empty
+    const src = !l.own && SOURCES.find(x => x.owns(l.key));
+    if (src && !src.loaded) return "–";
+    if (!l.own && NET_KEYS().includes(l.key) && !paths.length && !rails.length && !truckStations.length) return "–";
+    return l.count ? l.count() : (this.points[l.key] || []).length;
+  }
   renderButtons() {
     if (this.opts.layerMenu) {
       const on = this.layers.filter(l => l.on).length;
@@ -681,7 +812,7 @@ class MapView {
   // layers with a group get a heading per group (in order of first appearance); clicking a heading toggles the group
   renderMenu() {
     const groups = [...new Set(this.layers.map(l => l.group || ""))];
-    const row = l => `<label class="${this.layerCount(l) ? "" : "empty"}"><input type="checkbox" data-layer="${l.key}"${l.on ? " checked" : ""}>` +
+    const row = l => `<label class="${this.layerCount(l) === 0 ? "empty" : ""}"><input type="checkbox" data-layer="${l.key}"${l.on ? " checked" : ""}>` +
       `<span class="mv-sw">${this.swatch(l)}</span>${esc(l.label)}<span class="n">${this.layerCount(l)}</span></label>`;
     const html = `<div class="pop-list">${groups.map(g => {
       const ls = this.layers.filter(l => (l.group || "") === g);
@@ -815,6 +946,7 @@ class MapView {
     if (this.opts.powerNet) { ctx.save(); drawPowerLines(this, this.opts.powerNet); ctx.restore(); }
     if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.(), this.hoverNet); ctx.restore(); }   // under everything else
     if (this.opts.hypertubes) { ctx.save(); drawHypertubes(this, this.opts.hypertubes); ctx.restore(); }
+    if (!this.opts.drawsNetwork && NET_KEYS().some(k => this.isOn(k))) { ctx.save(); drawNetwork(this, k => this.isOn(k)); ctx.restore(); }
     if (this.opts.draw) { ctx.save(); this.opts.draw(ctx, performance.now(), this); ctx.restore(); }
     const marked = [], emph = [], top = [];
     for (const l of this.layers) {
@@ -934,3 +1066,6 @@ class MapView {
     ctx.globalAlpha = 1;
   }
 }
+
+const NET_KEYS = () => networkLayers().map(l => l.key);
+SOURCES.push(Players, Logistics, PowerNet, Storage, Hyper, FactorySrc, VehSrc, ResSrc);

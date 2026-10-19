@@ -260,9 +260,11 @@ function makeNetTab(kind) {
          pin: r => picked && linkedSt().has(r.id) ? 0 : 1,
          rowAttrs: r => `data-st="${esc(r.id)}" class="${r.id === pickedSt ? "sel" : picked && linkedSt().has(r.id) ? "link" : ""}"` });
     map = new MapView($(id("Map")), {
-      storeKey: P + ".map", layerMenu: true, players: true, hypertubes: () => true, layers: [], only: kind,
-      logistics: b => { const n = net(b.n); return !!n && n.kind === kind && passes(n); },   // the map follows both tables' filters
-      storage: s => mine(s) && stPasses(s),
+      storeKey: P + ".map", layerMenu: true, layers: [],
+      // on to start with: this tab's belts or pipes and the storage on its side (the rest is in the Layers menu)
+      world: { on: l => l.group === (BELT ? "Belts" : "Pipes") || (l.key.startsWith("st:") && (storageKind(l.label) === "fluid") !== BELT) },
+      logistics: b => { const n = net(b.n); return !n || n.kind !== kind || passes(n); },   // the map follows both tables' filters
+      storage: s => !mine(s) || stPasses(s),
       highlight: () => picked || (pickedSt ? [...linkedNets()] : null),
       hint: `hover a ${noun}${BELT ? "" : ", pump"} or ${BELT ? "storage" : "buffer"} to see it · click it (or a row) to select it and what it connects to`,
       onNetClick: nid => { if (nid) pick(nid, true); else if (picked) pick(null, true); else if (pickedSt) pickStorage(null, true); },   // empty map = clear

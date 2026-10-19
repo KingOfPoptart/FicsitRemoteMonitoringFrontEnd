@@ -500,7 +500,7 @@ const Power = (() => {
     const hl = id => { for (const tr of $("wUnits").querySelectorAll("tr[data-gid], tr[data-sw]")) tr.classList.toggle("hl", (tr.dataset.gid || tr.dataset.sw) === id); };
     map = new MapView($("wMap"), {
       // the selected grid only: its generators and consumers, and its part of the power network
-      storeKey: "pw.map2", layerMenu: true, players: true, powerNet: () => true, hypertubes: () => true, layers: [
+      storeKey: "pw.map2", layerMenu: true, world: { on: l => l.group === "Power network" }, layers: [
         // points and lines not on the selected grid fade (All grids: nothing fades), see fade below
         { key: "gens", group: "Power", label: "Generators", color: "var(--ok)", size: 5, shape: "diamond" },
         { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, on: false },
@@ -552,6 +552,7 @@ const Power = (() => {
     genPop,   // the Overview map's generator hover
     show() {
       if (!chart) init();
+      PowerNet.need();   // the switch and pole tables use the shared power network
       poll(); pollDetail(); pollHistory();
       timer = timer || every(poll, POLL_MS);
       detailTimer = detailTimer || every(pollDetail, DETAIL_MS);
