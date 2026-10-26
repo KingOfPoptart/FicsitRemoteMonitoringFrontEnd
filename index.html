@@ -1315,6 +1315,8 @@ function vehicleWhy(v) {
   if (v.hasFuel === false && v.autopilot && !v.driver) return Pop.why("bad", "Out of fuel");
   return "";
 }
+// the same, as plain text (Overview's attention list and stuck vehicles)
+const vehicleProblem = v => { const d = document.createElement("div"); d.innerHTML = vehicleWhy(v); return d.textContent || v.error || ""; };
 // one line under a station's title when something's wrong
 function stationWhy(kind, s) {
   const pw = Pop.powerWhy(s.PowerInfo);

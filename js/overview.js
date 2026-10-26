@@ -96,7 +96,7 @@ const Overview = (() => {
     }
     // each stuck vehicle by name with its problem, e.g. Train "Train" (2 locos+1 car): Station unreachable
     for (const v of veh.filter(v => v.status === "error"))
-      add("bad", `${v.type} ${v.name && v.name !== v.type ? `"${v.name.trim()}"` : shortId(v.id)}${v.consist ? ` (${v.consist})` : ""}: ${v.error || "autopilot error"}`, "vehicles");
+      add("bad", `${v.type} ${v.name && v.name !== v.type ? `"${v.name.trim()}"` : shortId(v.id)}${v.consist ? ` (${v.consist})` : ""}: ${vehicleProblem(v) || "autopilot error"}`, "vehicles");
     const se = Progression.seState(d.getSpaceElevator?.[0]);
     if (se?.ready) add("ok", `Space Elevator phase ${se.n} is ready to send`, "progression");
     const hub = d.getHUBTerminal?.[0];
@@ -166,7 +166,7 @@ const Overview = (() => {
       <div class="vtypes">${types.map(t => { const vs = veh.filter(v => v.type === t), c = st => vs.filter(v => v.status === st).length;
         return `<div class="vt"><span class="with-icon">${typeImg(t)}<b>${vs.length}</b> ${esc(t)}${vs.length === 1 ? "" : "s"}</span>
           <span class="vt-st">${["moving", "docking", "stopped", "driven", "error"].filter(st => c(st)).map(st => `<span class="pill s-${st}">${c(st)} ${STATUS_LABEL[st].toLowerCase()}</span>`).join("")}</span></div>`; }).join("")}</div>
-      ${errs.length ? `<h3>Stuck</h3>${errs.map(v => `<div class="kvrow"><span>${esc(v.type)} ${v.name && v.name.trim() !== v.type ? `"${esc(v.name.trim())}"` : esc(shortId(v.id))}</span><b class="bad-text">${esc(v.error || "error")}</b></div>`).join("")}` : ""}`;
+      ${errs.length ? `<h3>Stuck</h3>${errs.map(v => `<div class="kvrow"><span>${esc(v.type)} ${v.name && v.name.trim() !== v.type ? `"${esc(v.name.trim())}"` : esc(shortId(v.id))}</span><b class="bad-text">${esc(vehicleProblem(v) || "error")}</b></div>`).join("")}` : ""}`;
 
     // ---- Progression: tier, Space Elevator parts, HUB milestone parts, coupons
     const se = Progression.seState(d.getSpaceElevator?.[0]);
