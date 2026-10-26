@@ -33,11 +33,12 @@ const Sink = {
   tip(s, name) {
     const items = Sink.byItem([s]).sort((a, b) => b.ptsMin - a.ptsMin);
     return Pop.head("AWESOME Sink", { id: shortId(s.id), sub: name ? esc(name) : "", status: s.on ? "Powered" : "No power", color: s.on ? SINK_COLOR : "var(--bad)" }) +
+      (!s.on ? Pop.why("bad", "No power: sinks nothing") : !s.inputs ? Pop.why("serious", "No belts go into it") : "") +
       Pop.sec("Intake") + Pop.row("Could take in", s.feeds.length ? `${s.feeds.some(f => f.split) ? "≤ " : ""}${Sink.k(Sink.feedPts(s))}${Pop.unit("points/min")}` : "–") +
       Pop.row("Belts in", fmtNum(s.inputs)) + (s.loose ? Pop.row("From nothing", `<span class="warn-text">${s.loose} belt${s.loose > 1 ? "s" : ""}</span>`) : "") +
       (items.length ? Pop.sec("Fed by") + items.slice(0, 8).map(i => Pop.item(i.item, `${fmtRate(i.rate)}${Pop.unit(`/min · ${Sink.k(i.ptsMin)} pts`)}`)).join("") : "") +
       (s.other.length ? Pop.sec("Also from") + s.other.slice(0, 4).map(o => Pop.row(esc(o.name), o.holds.map(h => `${fmtNum(h.n)} ${esc(h.item)}`).join(", ") || "empty")).join("") : "") +
-      (!s.inputs ? Pop.note("no belts go into it") : "");
+      "";
   },
   async sinks() { const r = await fetch("/sinks", { cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); },
 };

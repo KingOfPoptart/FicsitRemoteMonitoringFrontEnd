@@ -40,7 +40,8 @@ const Production = (() => {
   function machineStatus(m, prod) {
     if (!m.IsConfigured) return "norecipe";
     if (m.IsPaused) return "paused";
-    if (m.PowerInfo?.FuseTriggered || m.PowerInfo?.CircuitID === -1) return "nopower";
+    // resource well extractors have no power plug: the pressurizer is what's powered
+    if (!/FrackingExtractor/.test(m.ClassName) && (m.PowerInfo?.FuseTriggered || m.PowerInfo?.CircuitID === -1)) return "nopower";
     if (m.IsProducing) return m.eff >= 90 ? "running" : "partial";
     const out = (m.OutputInventory?.length ? m.OutputInventory : prod) || [];
     if (out.some(o => o.MaxAmount > 0 && o.Amount >= o.MaxAmount * 0.9)) return "full";
@@ -51,10 +52,10 @@ const Production = (() => {
     const outputs = (m.production || []).map(p => ({ name: p.Name, cur: p.CurrentProd || 0, max: p.MaxProd || 0 }));
     const inputs = (m.ingredients || []).map(p => ({ name: p.Name, cur: p.CurrentConsumed || 0, max: p.MaxConsumed || 0 }));
     const eff = m.Productivity ?? m.production?.[0]?.ProdPercent ?? 0;
-    const o = { id: m.ID, building: m.Name, recipe: m.Recipe || "", extractor, outputs, inputs, eff,
+    const o = { id: m.ID, building: m.Name, recipe: m.Recipe || "", recipeCls: m.RecipeClassName || "", producing: !!m.IsProducing, extractor, outputs, inputs, eff,
       clock: m.ManuSpeed ?? 100, shards: m.PowerShards || 0, sloops: m.Somersloops || 0,
       mw: m.PowerInfo?.PowerConsumed || 0, maxMw: m.PowerInfo?.MaxPowerConsumed || 0, circuit: m.PowerInfo?.CircuitGroupID, circuitId: m.PowerInfo?.CircuitID,
-      inv: { in: m.InputInventory || [], out: m.OutputInventory || (extractor ? m.production : []) || [] }, loc: m.location };
+      fuse: !!m.PowerInfo?.FuseTriggered, inv: { in: m.InputInventory || [], out: m.OutputInventory || (extractor ? m.production : []) || [] }, loc: m.location };
     o.status = machineStatus({ ...m, eff }, m.production);
     if (o.status !== "running" && o.status !== "partial") o.eff = m.IsConfigured && !m.IsPaused ? eff : 0;
     return o;
@@ -109,6 +110,7 @@ const Production = (() => {
   // maxAge (s): an older copy server.py already has will do (its history recorder fetches these every 15 s)
   async function snapshot(maxAge) {
     const [fac, ext, gens] = await Promise.all([getJSON("getFactory", maxAge), getJSON("getExtractor", maxAge), getJSON("getGenerators", maxAge).catch(() => [])]);
+    loadCycles();
     const ms = fac.map(m => fromMachine(m, false)).concat(ext.map(m => fromMachine(m, true)));
     return { machines: ms, items: aggregate(ms, gens), gens };
   }
@@ -116,9 +118,23 @@ const Production = (() => {
   const RECIPE_BUILDINGS = { Build_SmelterMk1_C: "Smelter", Build_FoundryMk1_C: "Foundry", Build_ConstructorMk1_C: "Constructor",
     Build_AssemblerMk1_C: "Assembler", Build_ManufacturerMk1_C: "Manufacturer", Build_OilRefinery_C: "Refinery", Build_Packager_C: "Packager",
     Build_Blender_C: "Blender", Build_HadronCollider_C: "Particle Accelerator", Build_Converter_C: "Converter", Build_QuantumEncoder_C: "Quantum Encoder" };
+  // what one production cycle of each recipe takes in and puts out (by recipe class), for the machine hover's
+  // "why isn't it at 100%" line. Loaded once on any tab that shows machines; the Production tab refreshes it.
+  let cycles = new Map(), cyclesAt = 0;
+  function setCycles(list) {
+    cycles = new Map(list.map(r => [r.ClassName, { ins: new Map((r.Ingredients || []).map(i => [i.Name, i.Amount])),
+      outs: new Map((r.Products || []).map(i => [i.Name, i.Amount])) }]));
+  }
+  function loadCycles() {
+    if (cycles.size || Date.now() - cyclesAt < 60000) return;
+    cyclesAt = Date.now();
+    getJSON("getRecipes").then(setCycles).catch(() => {});
+  }
   async function pollRecipes() {
     try {
-      recipes = (await getJSON("getRecipes")).map(r => ({ name: r.Name, building: (r.ProducedIn || []).map(c => RECIPE_BUILDINGS[c]).find(Boolean),
+      const raw = await getJSON("getRecipes");
+      setCycles(raw);
+      recipes = raw.map(r => ({ name: r.Name, building: (r.ProducedIn || []).map(c => RECIPE_BUILDINGS[c]).find(Boolean),
         unlocked: r.Unlocked, alt: /^Alternate:/i.test(r.Name || ""),
         ins: (r.Ingredients || []).map(i => ({ name: i.Name, rate: i.FactoryRate })), outs: (r.Products || []).map(p => ({ name: p.Name, rate: p.FactoryRate })) }))
         .filter(r => r.building);
@@ -325,9 +341,34 @@ const Production = (() => {
   const PURITY = { 0.5: "Impure", 1: "Normal", 2: "Pure" };
   const popRow = Pop.row;
   const perMin = (v, name) => v == null ? "–" : `${fmtRate(v)} <small>${unitOf(name)}</small>`;
+  // Why a machine isn't at 100%: is its output backed up, or which input is it waiting for? Read from its buffers:
+  // an output that can't fit another cycle's worth = blocked; an input holding less than one cycle needs = starved.
+  // Productivity is the game's moving average, so a machine that just recovered still reads low for a while.
+  const SLOOP_SLOTS = { Constructor: 1, Smelter: 1, Assembler: 2, Foundry: 2, Refinery: 2, Converter: 2, Manufacturer: 4, Blender: 4, "Particle Accelerator": 4, "Quantum Encoder": 4 };
+  function whyPop(m) {
+    if (m.status === "norecipe" || m.status === "paused") return "";
+    if (m.status === "nopower") return Pop.powerWhy({ CircuitID: m.circuitId, FuseTriggered: m.fuse });
+    if (m.eff >= 99.5) return "";
+    const cyc = cycles.get(m.recipeCls), boost = 1 + (m.sloops || 0) / (SLOOP_SLOTS[m.building] || 1);
+    const have = (list, name) => list.find(i => i.Name === name);
+    const lost = o => Pop.short(o.cur, o.max, unitOf(o.name));
+    // output first: a backed-up machine stops taking input, so its inputs look full
+    const backed = m.outputs.filter(o => {
+      const b = have(m.inv.out, o.name), n = b?.Amount || 0, cap = b?.MaxAmount || 0, per = (cyc?.outs.get(o.name) || 0) * boost;
+      return cap > 0 && (n >= cap * 0.8 || (per && n + per > cap));
+    });
+    if (backed.length) return Pop.why("info", `Output full: ${backed.map(o => esc(o.name)).join(", ")}${lost(backed[0])}`);
+    // starved: under two cycles' worth in the buffer (nearly empty when the recipe isn't known)
+    const starved = m.extractor ? [] : m.inputs.filter(i => {
+      const b = have(m.inv.in, i.name), n = b?.Amount || 0, cap = b?.MaxAmount || 0, per = cyc?.ins.get(i.name) || 0;
+      return per ? n < per * 2 : n < cap * 0.1;
+    });
+    if (starved.length) return Pop.why("serious", `Starved: ${starved.map(i => esc(i.name) + lost(i)).join(", ")}`);
+    return m.outputs[0] ? Pop.why("muted", `Catching up, buffers OK${lost(m.outputs[0])}`) : "";
+  }
   function machinePop(m) {
     const st = M_STATUS[m.status], out = m.outputs[0];
-    let html = Pop.head(m.building, { id: shortId(m.id), sub: m.recipe ? esc(m.recipe) : "no recipe", status: st.label, color: st.color });
+    let html = Pop.head(m.building, { id: shortId(m.id), sub: m.recipe ? esc(m.recipe) : "no recipe", status: st.label, color: st.color }) + whyPop(m);
     if (m.extractor && out) {
       const h = extHist[m.id], base = EXTRACT_BASE[m.building], clock = m.clock || 100;
       const lately = h?.m10 ?? out.cur, unused = Math.max(0, out.max - lately);

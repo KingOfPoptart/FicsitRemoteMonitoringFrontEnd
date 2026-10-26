@@ -30,6 +30,19 @@ const Pop = {
   where: l => !l ? "" : Pop.row("Height", `${fmtNum(l.z / 100)}${Pop.unit("m")}`) + Pop.row("Position", `X ${fmtNum(l.x / 100)} · Y ${fmtNum(l.y / 100)}${Pop.unit("m")}`),
   compass: deg => ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][Math.round(((deg % 360) + 360) % 360 / 45) % 8],
   mw: (now, max) => `${fmtNum(now, now < 10 ? 1 : 0)}${max != null ? Pop.unit(`of ${fmtNum(max, max < 10 ? 1 : 0)} MW`) : Pop.unit("MW")}`,
+  // the one-line "what's wrong" box right under the title of anything with a problem
+  why: (cls, html) => `<div class="mp-why ${cls}">${html}</div>`,
+  // how far short of the full rate: "−15/min (33%)"
+  short: (cur, max, unit = "/min") => max > 0 ? ` <small>−${fmtRate(Math.max(0, max - cur))}${unit.startsWith("/") ? "" : " "}${unit.trim()} (${pct(Math.max(0, max - cur) / max * 100)})</small>` : "",
+  // no power: not wired up, or the grid's fuse blew (with what the grid wants vs what it can make)
+  powerWhy(pi) {
+    if (!pi) return "";
+    if (pi.CircuitID == null || pi.CircuitID < 0) return Pop.why("bad", "No power: not connected");
+    const g = PowerNet.gridOf(pi.CircuitID);
+    if (!pi.FuseTriggered && !g?.FuseTriggered) return "";
+    const need = g?.PowerMaxConsumed || 0, cap = g?.PowerCapacity || g?.PowerProduction || 0;
+    return Pop.why("bad", `Fuse tripped${need && cap ? `: needs ${fmtNum(need)} of ${fmtNum(cap)} MW${need > cap ? ` <small>(+${pct((need - cap) / cap * 100)})</small>` : ""}` : ""}`);
+  },
   // the power grid a circuit belongs to (from the shared PowerNet poll)
   grid(circuit) {
     const g = PowerNet.gridOf(circuit);
@@ -124,6 +137,8 @@ function runTip(r) {
   const s = r.src, col = HL_COLOR[r.sev] || "var(--ok)";
   return Pop.head(r.sev === "bad" ? "Pipe too high for its head lift" : "Pipe near its head-lift limit", { sub: `${r.fluid ? esc(r.fluid) + " · " : ""}${fmtNum(r.flagged?.length || 0)} of ${fmtNum(r.pipes)} pieces in this run`,
                   status: HL_TEXT[r.sev], color: col, iconName: r.fluid || undefined }) +
+    (s && !s.on ? Pop.why("bad", "Pump has no power: 0 m head lift") : Pop.why(r.sev === "bad" ? "bad" : "serious",
+      `Too high: pipe at ${fmtNum(r.top.z, 1)} m, fluid reaches ${fmtNum(r.ceil, 1)} m <small>(−${fmtNum(r.over, 1)} m)</small>`)) +
     Pop.sec("Head lift") +
     (s ? Pop.row("Pushed by", `${esc(s.name)}${s.kind === "building" ? Pop.unit("fluid output") : ""}`) + Pop.row("Source height", `${fmtNum(s.z, 1)}${Pop.unit("m")}`) +
          Pop.row("Head lift", s.on ? `${fmtNum(s.lift[0])}${Pop.unit(s.lift[2] > s.lift[0] ? `m · flow stops past ${fmtNum(s.lift[2])} m` : "m")}` : `<span class="bad-text">0 m · pump has no power</span>`) +
@@ -133,7 +148,6 @@ function runTip(r) {
     (r.fill != null ? Pop.sec("Right now") + Pop.row("Those pieces", `${Math.round(r.fill * 100)}%${Pop.unit("full")}`) +
        (r.fed != null ? Pop.row("Rest of the run", `${Math.round(r.fed * 100)}%${Pop.unit("full")}`) : "") +
        (r.live ? Pop.note(HL_LIVE[r.live]) : "") : "") +
-    Pop.note(r.sev === "bad" ? "Fix: a pump below this point, or lower the pipe" : "Flow may slow down here: a pump would help", "warn-text") +
     Pop.where({ x: r.top.x, y: r.top.y, z: r.top.z * 100 });
 }
 function pumpTip(p) {
@@ -141,10 +155,12 @@ function pumpTip(p) {
   const status = p.valve ? (p.limit >= 0 ? `Limit ${fmtNum(p.limit)} m³/min` : "Open") : !p.on ? "No power" : p.sev === "bad" ? "At max head lift" : p.sev === "warn" ? "Over design head lift" : p.flow ? "Pumping" : "Idle";
   const pct = p.design ? Math.min(1, (p.hl || 0) / p.max) : 0;
   return Pop.head(p.name || (p.valve ? "Valve" : "Pipeline Pump"), { id: shortId(p.id), sub: p.fluid ? esc(p.fluid) : "empty", status, color: col, iconName: p.name }) +
+    (p.valve ? "" : !p.on ? Pop.why("bad", "No power: pumps nothing") : p.sev !== "ok" && p.hl != null ? Pop.why(p.sev === "bad" ? "bad" : "serious",
+      `${p.sev === "bad" ? "At max head lift" : "Past design head lift"}: ${fmtNum(p.hl, 1)} of ${fmtNum(p.sev === "bad" ? p.max : p.design)} m <small>(+${Math.round(Math.max(0, p.hl - p.design) / p.design * 100)}%)</small>`) : "") +
     (p.valve ? "" : Pop.sec("Head lift") + Pop.row("Pushing now", `${p.hl == null ? "–" : fmtNum(p.hl, 1)}${Pop.unit(`m of ${fmtNum(p.design)} m design`)}`) +
        Pop.row("Gauge", `<span class="nowrap">${bar(pct, col)} ${Math.round(pct * 100)}%</span>`) +
        Pop.row("Flow stops at", `${fmtNum(p.max)}${Pop.unit("m")}`) +
-       (p.sev !== "ok" ? Pop.note(p.sev === "bad" ? "At its limit: nothing gets past. Add a pump lower down, or lower the pipe" : "Past its design head lift: the flow drops. Another pump higher up would help", "warn-text") : "")) +
+       "") +
     Pop.sec("Flow") + Pop.row("Now", `${p.flow == null ? "–" : fmtRate(p.flow)}${Pop.unit("m³/min")}`) +
     (p.limit != null && p.limit >= 0 ? Pop.row("Limited to", `${fmtNum(p.limit)}${Pop.unit("m³/min")}`) : "") +
     (!p.valve ? Pop.sec("Power") + Pop.row("Using", Pop.mw(p.mw)) : "") +
@@ -239,8 +255,11 @@ function netTooltip(n, seg) {
   const lift = seg?.h != null, belt = n.kind === "belt", t = seg?.t;
   const what = n.p && n.w ? "production + power" : n.p ? "production" : n.w ? "power" : "other";
   const kinds = Object.entries(n.touches);
+  const run = !belt && seg?.hl && seg.r && hlRunOf(seg.r);
   return Pop.head(`Mk.${t || "?"} ${lift ? "Conveyor Lift" : belt ? "Conveyor Belt" : "Pipeline"}`, { sub: `part of a ${n.kind} network`, status: what[0].toUpperCase() + what.slice(1),
                   color: belt ? BELT_COLOR[t] || BELT_COLOR[1] : PIPE_COLOR[t] || PIPE_COLOR[1] }) +
+    (run && run.src ? !run.src.on ? Pop.why("bad", "Pump has no power: 0 m head lift")
+      : Pop.why(seg.hl === "bad" ? "bad" : "serious", `Too high: piece at ${fmtNum(seg.z, 1)} m, fluid reaches ${fmtNum(run.ceil, 1)} m <small>(−${fmtNum(Math.max(0, seg.z - run.ceil), 1)} m)</small>`) : "") +
     Pop.sec("This piece") + Pop.row("Carries up to", belt ? `${fmtNum(BELT_IPM[t])}${Pop.unit("items/min")}` : `${fmtNum(PIPE_M3[t])}${Pop.unit("m³/min")}`) +
     (lift ? Pop.row("Lifts", `${fmtNum(seg.h, 1)}${Pop.unit("m " + (seg.up ? "up" : "down"))}`) : "") +
     (!belt && seg?.c != null ? (seg.fl ? Pop.item(seg.fl, `${Math.round(seg.c * 100)}%${Pop.unit("full")}`) : Pop.row("Holds", "empty")) +
@@ -265,7 +284,7 @@ function pipeHeadLift(seg) {
   return Pop.sec("Head lift") + Pop.row("Pushed by", `${esc(r.src.name)}${Pop.unit(`at ${fmtNum(r.src.z, 1)} m`)}`) +
     Pop.row("Reaches", r.src.on ? `${fmtNum(r.ceil, 1)}${Pop.unit(`m high (${fmtNum(r.src.lift[0])} m lift)`)}` : `<span class="bad-text">pump has no power</span>`) +
     (seg.nd != null ? Pop.row("This piece needs", `<span style="color:${col}">${fmtNum(seg.nd, 1)} m</span>${Pop.unit(HL_TEXT[seg.hl || "ok"])}`) : "") +
-    (seg.hl ? Pop.note(seg.hl === "bad" ? "Too high: fluid can't get up here. A pump lower down would fix it" : "Above the recommended head lift: flow may slow down", "warn-text") : "");
+    "";
 }
 
 // The power network on any map: MapView({ powerNet: circuits => bool }) adds power lines, poles, wall outlets,
@@ -335,6 +354,7 @@ function switchTip(x) {
 function pstorageTip(x) {
   const pi = x.PowerInfo || {}, g = PowerNet.gridOf(pi.CircuitID), t = v => v && v !== "00:00:00";
   return Pop.head("Power Storage", { id: shortId(x.ID), sub: "battery", status: g?.BatteryPercent != null ? `${fmtNum(g.BatteryPercent)}% charged` : null, color: POWER_COLOR }) +
+    (Pop.powerWhy(pi) || (g?.BatteryOutput > 0.1 ? Pop.why("serious", `Draining: −${fmtNum(g.BatteryOutput, 1)} MW${t(g.BatteryTimeEmpty) ? ` <small>· empty in ${g.BatteryTimeEmpty}</small>` : ""}`) : "")) +
     (g ? Pop.sec("Batteries on this grid") + Pop.row("Charge", `${fmtNum(g.BatteryPercent)}%`) +
       (g.BatteryCapacity ? Pop.row("Stored", `${fmtNum(g.BatteryCapacity * g.BatteryPercent / 100)}${Pop.unit(`of ${fmtNum(g.BatteryCapacity)} MWh`)}`) : "") +
       (g.BatteryInput ? Pop.row("Charging", `${fmtNum(g.BatteryInput, 1)}${Pop.unit("MW")}`) : "") + (g.BatteryOutput ? Pop.row("Supplying", `${fmtNum(g.BatteryOutput, 1)}${Pop.unit("MW")}`) : "") +
@@ -417,12 +437,22 @@ const Storage = {
 };
 // how full a storage is, as text: "12 / 24 slots" or "1,234 / 2,400 m³"
 const storageFill = s => s.kind === "fluid" ? `${fmtNum(s.content, s.content < 10 ? 1 : 0)} / ${fmtNum(s.cap)} m³` : s.slots ? `${fmtNum(s.used)} / ${fmtNum(s.slots)} slots` : `${fmtNum(s.used)} stacks`;
+// full storage; an uploader always holds a stack, so it's only stuck when the depot is at its limit for that item
+function storageWhy(s) {
+  if (s.cls === "Build_CentralStorage_C") {
+    const full = s.items.map(i => [i, Storage.cloud.find(c => c.name === i.name)]).find(([, c]) => c?.limit && c.amount >= c.limit);
+    return full ? Pop.why("bad", `Depot full: ${esc(full[0].name)} <small>${fmtNum(full[1].amount)} / ${fmtNum(full[1].limit)}</small>`) : "";
+  }
+  if (s.kind === "crate" || s.frac < 0.98) return "";
+  return Pop.why("bad", `Full: ${storageFill(s)}${s.kind === "fluid" && s.fill > s.drain ? ` <small>· +${fmtRate(s.fill - s.drain)} m³/min in than out</small>` : ""}`);
+}
 function storageTip(s) {
   if (!s) return "";
   const fullCol = s.frac >= 0.98 ? "var(--bad)" : s.frac >= 0.8 ? "var(--warn)" : "#b5e550";
   return Pop.head(s.type, { id: s.id ? shortId(s.id) : "", iconName: STORAGE_TYPES[s.cls]?.[3] || s.type,
                             sub: s.kind === "fluid" ? (s.fluid ? esc(s.fluid) : "empty") : s.kind === "crate" ? "crate" : `${s.items.length} kind${s.items.length === 1 ? "" : "s"} of item`,
                             status: s.kind === "crate" ? null : `${Math.round(s.frac * 100)}% full`, color: fullCol }) +
+    storageWhy(s) +
     Pop.sec("Contents") + Pop.row(s.kind === "fluid" ? "Holding" : "Slots used", storageFill(s)) +
     (s.kind === "fluid" ? Pop.row("Filling", `${fmtRate(s.fill)}${Pop.unit("m³/min")}`) + Pop.row("Draining", `${fmtRate(s.drain)}${Pop.unit("m³/min")}`) : Pop.items(s.items, { max: 10 })) +
     Pop.where(s.loc);
@@ -466,6 +496,7 @@ const tubeNet = id => { const n = Hyper.byId?.get(id); return !n ? "" : Pop.sec(
   Pop.row("Height range", `${fmtNum(n.z0)} – ${fmtNum(n.z1)}${Pop.unit("m")}`); };
 const entranceTip = e => Pop.head("Hypertube Entrance", { id: shortId(e.id), sub: "launches you into the tube", status: e.fuse ? "Fuse tripped" : e.mw ? "Powered" : "No power",
                                                         color: e.fuse || !e.mw ? "var(--bad)" : TUBE_COLOR }) +
+  (Pop.powerWhy({ CircuitID: e.circuit, FuseTriggered: e.fuse }) || (!e.mw ? Pop.why("bad", "No power") : "")) +
   Pop.sec("Entrance") + Pop.row("Power", Pop.mw(e.mw, e.max)) + Pop.grid(e.circuit) + Pop.where(e) + tubeNet(e.n);
 const exitTip = (x, net) => Pop.head("Open Tube End", { sub: "rides shoot out here", status: launchAngle(x.pitch), color: TUBE_COLOR }) +
   Pop.sec("Launch") + Pop.row("Points", launchAngle(x.pitch)) + Pop.row("Facing", Pop.compass(x.heading)) + Pop.where(x) + tubeNet(net);

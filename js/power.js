@@ -185,11 +185,22 @@ const Power = (() => {
       Pop.sec("Controls (orange on the map)") + Pop.row("Using", `${fmtNum(r.ctrl.use)}${Pop.unit(`of ${fmtNum(r.ctrl.max)} MW max`)}`) + list(r.ctrl) +
       (r.loop ? Pop.note("both sides are also connected another way", "warn-text") : "") + Pop.where(r.s.location);
   }
+  // why a generator isn't making power: fuse, no / too little fuel (what it burns at full output), not enough water
+  function genWhy(g) {
+    if (g.status === "fuse") return Pop.powerWhy({ ...g.pi, FuseTriggered: true });
+    // what it burns at full output (only when there's one obvious fuel: a burner takes lots of kinds)
+    const opts = g.raw.AvailableFuel || [], fuelName = g.fuel?.Name || (opts.length <= 3 ? opts[0]?.Name : null), e = fuelName && energy(fuelName);
+    const need = e ? `${esc(fuelName)} ${fmtRate(g.cap * 60 / e)}${fluidSet.has(fuelName) ? " m³" : ""}/min` : "", have = g.fuel?.Amount || 0;
+    if (g.status === "nofuel") return Pop.why("bad", `No fuel${need ? `: needs ${need}` : ""}`);
+    if (g.status === "lowfuel") return Pop.why("serious", `Low fuel: ${fmtNum(have, have < 10 ? 1 : 0)}${fuelName && fluidSet.has(fuelName) ? " m³" : ""} left${need ? ` <small>· needs ${need}</small>` : ""}`);
+    if (g.status === "nowater" && g.sup) return Pop.why("serious", `Starved: ${esc(g.sup.Name)}${Pop.short(g.sup.CurrentConsumed || 0, g.sup.MaxConsumed || 0, " m³/min")}${g.water != null ? ` <small>· tank ${pct(g.water)}</small>` : ""}`);
+    return "";
+  }
   // a generator's popup (also used by the Overview map, from the raw FRM reading)
   function genPop(raw) {
     const g = fromGen(raw), st = G_STATUS[g.status], fuelLeft = g.fuel && g.burn > 0 ? g.fuel.Amount / g.burn : null;
     const grid = groups.find(x => x.CircuitGroupID === g.pi?.CircuitGroupID);
-    return Pop.head(g.type, { id: shortId(g.id), sub: grid ? `on ${esc(gridName(grid))}` : "generator", status: st.label, color: st.color }) +
+    return Pop.head(g.type, { id: shortId(g.id), sub: grid ? `on ${esc(gridName(grid))}` : "generator", status: st.label, color: st.color }) + genWhy(g) +
       Pop.sec("Output") + Pop.row("Making", `${fmtNum(g.out, g.out < 10 ? 1 : 0)}${Pop.unit(`of ${fmtNum(g.cap)} MW`)}`) +
       Pop.row("Load", pct(g.cap ? g.out / g.cap * 100 : 0)) +
       Pop.row("Clock", `${pct(g.clock)}${g.shards ? Pop.unit(`· ${g.shards} shard${g.shards > 1 ? "s" : ""}`) : ""}`) +
@@ -202,7 +213,7 @@ const Power = (() => {
   // anything else that uses power
   const usePop = u => { const pi = u.PowerInfo || {}, on = pi.PowerConsumed > 0.11;
     return Pop.head(u.Name, { id: shortId(u.ID), sub: "uses power", status: pi.FuseTriggered ? "Fuse tripped" : pi.CircuitID < 0 ? "No grid" : on ? "Drawing power" : "Idle",
-                              color: pi.FuseTriggered || pi.CircuitID < 0 ? "var(--bad)" : on ? POWER_COLOR : "var(--muted)" }) +
+                              color: pi.FuseTriggered || pi.CircuitID < 0 ? "var(--bad)" : on ? POWER_COLOR : "var(--muted)" }) + Pop.powerWhy(pi) +
       Pop.sec("Power") + Pop.row("Drawing", Pop.mw(pi.PowerConsumed || 0, pi.MaxPowerConsumed)) + Pop.grid(pi.CircuitID) + Pop.where(u.location); };
 
   async function pollHistory() {
@@ -336,7 +347,7 @@ const Power = (() => {
       value: b.cur, cap: b.max, text: `<b>${fmtNum(b.cur, b.cur < 10 ? 1 : 0)}</b> <span class="muted">/ ${fmtNum(b.max, b.max < 10 ? 1 : 0)} MW</span>`,
       title: `${b.name}: ${fmtNum(b.cur, 1)} MW now, ${fmtNum(b.max, 1)} MW if all ran at once`,
     })), { color: "var(--s2)", capColor: "var(--track)" });
-    const unpowered = usage.filter(u => u.PowerInfo && u.PowerInfo.CircuitID === -1 && /Build_(Constructor|Smelter|Assembler|Foundry|Manufacturer|Refinery|Packager|Blender|HadronCollider|Converter|QuantumEncoder|Miner|WaterPump|OilPump|FrackingExtractor)/.test(u.ClassName || u.ID)).length;
+    const unpowered = usage.filter(u => u.PowerInfo && u.PowerInfo.CircuitID === -1 && /Build_(Constructor|Smelter|Assembler|Foundry|Manufacturer|Refinery|Packager|Blender|HadronCollider|Converter|QuantumEncoder|Miner|WaterPump|OilPump)/.test(u.ClassName || u.ID)).length;
     $("wUnpowered").textContent = unpowered ? `⚠ ${unpowered} production building${unpowered === 1 ? " is" : "s are"} not connected to any grid.` : "";
 
     renderUnits(g);

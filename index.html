@@ -68,6 +68,12 @@
   .cargo-pop .row small { font-weight: 400; color: var(--muted); font-size: 11px; }
   .cargo-pop .row span .icon { vertical-align: -3px; margin-right: 5px; }
   .cargo-pop .row.mp-hi b { color: var(--accent); }
+  /* machine hover: why it isn't at 100% (right under the title) */
+  .cargo-pop .mp-why { margin: 0 9px 6px; padding: 3px 8px; border-radius: 4px; border-left: 3px solid var(--c); font-weight: 600; color: var(--c);
+                       background: color-mix(in srgb, var(--c) 12%, transparent); }
+  .cargo-pop .mp-why small { font-weight: 400; color: var(--muted); font-size: 11px; }
+  .cargo-pop .mp-why.bad { --c: var(--bad); } .cargo-pop .mp-why.serious { --c: var(--serious); }
+  .cargo-pop .mp-why.info { --c: var(--info); } .cargo-pop .mp-why.muted { --c: var(--muted); }
   tr.cargo-open td.cargo { color: var(--text); box-shadow: inset 2px 0 0 #fa954980; }
   tr.sort-row th { overflow: hidden; text-overflow: ellipsis; }
   .rz { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 3; }
@@ -744,7 +750,8 @@ function fromTrain(t) {
   const cars = t.Vehicles || [];
   const locos = cars.filter(c => /Locomotive/i.test(c.ClassName)).length;
   return {
-    id, type: "Train", name: t.Name, status, error: t.Derailed ? "Derailed" : autoErr || t.Status, speed,
+    id, type: "Train", name: t.Name, status, error: t.Derailed ? "Derailed" : autoErr || t.Status, speed, derailed: !!t.Derailed,
+    errCode: `${t.SelfDriving || ""} ${t.Path || ""}`,
     consist: cars.length ? `${locos} loco${locos === 1 ? "" : "s"}+${cars.length - locos} car${cars.length - locos === 1 ? "" : "s"}` : "",
     route: stops, nextStop: stops.find(s => s.next)?.name || t.TrainStation || "",
     autopilot: t.Status === "Self-Driving", driver: t.Status === "Manual Driving" ? "(manual)" : "",
@@ -771,7 +778,7 @@ function fromDrone(d) {
   const stops = [d.HomeStation, d.HasPairedStation ? d.PairedStation : null].filter(Boolean);
   const inv = (d.Inventory || []).filter(i => i.Amount > 0);
   return {
-    id, type: "Drone", name: d.Name, status, error: portStatus, speed,
+    id, type: "Drone", name: d.Name, status, error: portStatus, speed, home: d.HomeStation, dest,
     route: stops.map(s => ({ name: s, next: s === dest })), nextStop: dest,
     autopilot: true, driver: "",
     items: inv.map(i => itemOf(i.Name, i.Amount)),
@@ -1227,7 +1234,7 @@ async function poll() {
   try {
     const [wheeled, trains, drones, ports] = await Promise.all([getJSON("getVehicles"), getJSON("getTrains").catch(() => []),
       getJSON("getDrone").catch(() => []), getJSON("getDroneStation").catch(() => null)]);
-    if (ports) dronePorts = ports;
+    if (ports) dronePorts = fixNames(ports);
     const next = wheeled.map(fromWheeled).concat(trains.map(fromTrain), drones.map(fromDrone));
     const now = performance.now();
     for (const v of next) {
@@ -1252,12 +1259,75 @@ async function poll() {
     $("conn").textContent = "offline: " + e.message;
   }
 }
+// FRM sends station names with accents double-encoded ("CafÃ©" for "Café"); timetables have them right
+const fixName = s => { try { return typeof s === "string" && /[ÃÂ]/.test(s) ? decodeURIComponent(escape(s)) : s; } catch { return s; } };
+const fixNames = list => (list || []).map(x => x && x.Name ? { ...x, Name: fixName(x.Name) } : x);
+
+// rail networks: track pieces whose ends meet (within 50 cm) are one network. at(loc) = the network of the track
+// nearest a place (a train, a station), so "can't reach" can tell "on another track" from "same track".
+let railNet = null;
+function buildRailNet(raw) {
+  const par = raw.map((_, i) => i), find = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
+  const cells = new Map(), C = 100, key = (x, y, z) => x + "," + y + "," + z;
+  raw.forEach((r, i) => [r.location0, r.location1].forEach(p => {
+    if (!p) return;
+    const cx = Math.round(p.x / C), cy = Math.round(p.y / C), cz = Math.round(p.z / C);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++)
+      for (const e of cells.get(key(cx + dx, cy + dy, cz + dz)) || [])
+        if (Math.hypot(e.p.x - p.x, e.p.y - p.y, e.p.z - p.z) < 50) par[find(i)] = find(e.i);
+    const k = key(cx, cy, cz); (cells.get(k) || cells.set(k, []).get(k)).push({ p, i });
+  }));
+  const pts = raw.flatMap((r, i) => (r.SplineData?.length ? r.SplineData : [r.location0, r.location1]).filter(Boolean).map(p => ({ p, i })));
+  return { at(l) {
+    let best = null, bd = 3000;   // 30 m
+    for (const q of pts) { const d = Math.hypot(q.p.x - l.x, q.p.y - l.y, q.p.z - l.z); if (d < bd) { bd = d; best = q; } }
+    return best ? find(best.i) : null;
+  } };
+}
+
+// one line under a vehicle's title when something's wrong
+function vehicleWhy(v) {
+  if (v.type === "Train") {
+    if (v.derailed) return Pop.why("bad", "Derailed");
+    if (v.status !== "error") return "";
+    if (!v.route?.length) return Pop.why("bad", "No stops in its timetable");
+    if (v.power) { const pw = Pop.powerWhy(v.power); if (pw) return pw; }
+    if (/Unreachable|NoPath|NoRoute|InvalidNextStop/i.test(v.errCode)) {
+      const name = v.nextStop, st = trainStations.find(s => s.Name === name);
+      if (!st) return Pop.why("bad", `Can't reach ${esc(name)}: station not found`);
+      const a = railNet?.at(v.loc), b = railNet?.at(st.location);
+      const far = v.loc ? ` <small>· ${fmtNum(Math.hypot(st.location.x - v.loc.x, st.location.y - v.loc.y) / 100)} m away</small>` : "";
+      if (a != null && b != null && a !== b) return Pop.why("bad", `Can't reach ${esc(name)}: on a different track${far}`);
+      return Pop.why("bad", `Can't reach ${esc(name)}: check signals / direction${far}`);
+    }
+    return Pop.why("bad", esc(trainErr(v.error) || v.error));
+  }
+  if (v.type === "Drone") {
+    const port = dronePorts.find(p => p.Name === v.home);
+    if (v.error === "Not Enough Fuel") {
+      const fuel = (port?.FuelInventory || []).filter(i => i.Amount > 0);
+      return Pop.why("bad", `Not enough fuel: home port has ${fuel.length ? fuel.map(i => `${fmtNum(i.Amount)} ${esc(i.Name)}`).join(", ") : "none"}`);
+    }
+    if (v.error === "Cannot Unload") return Pop.why("bad", `Can't unload: ${esc(v.dest || port?.PairedStation || "the other port")} is full`);
+    return "";
+  }
+  if (v.status === "error") return Pop.why("bad", esc(trainErr(v.error) || v.error));
+  if (v.hasFuel === false && v.autopilot && !v.driver) return Pop.why("bad", "Out of fuel");
+  return "";
+}
+// one line under a station's title when something's wrong
+function stationWhy(kind, s) {
+  const pw = Pop.powerWhy(s.PowerInfo);
+  if (pw) return pw;
+  if (kind === "drone" && !(s.PairedStation && s.PairedStation !== "None")) return Pop.why("serious", "Not paired with another port");
+  return "";
+}
 async function pollStatic() {
   const [ts, rs, ps, rl] = await Promise.allSettled([getJSON("getTruckStation"), getJSON("getTrainStation"), getJSON("getVehiclePaths"), getJSON("getTrainRails")]);
-  if (ts.status === "fulfilled") truckStations = ts.value;
-  if (rs.status === "fulfilled") trainStations = rs.value;
+  if (ts.status === "fulfilled") truckStations = fixNames(ts.value);
+  if (rs.status === "fulfilled") trainStations = fixNames(rs.value);
   if (ps.status === "fulfilled") paths = ps.value.map(p => ({ cart: /FactoryCart/i.test(p.ClassName), pts: p.PathPoints || [] }));
-  if (rl.status === "fulfilled") rails = rl.value.map(r => ({ pts: r.SplineData?.length ? r.SplineData : [r.location0, r.location1].filter(Boolean) }));
+  if (rl.status === "fulfilled") { rails = rl.value.map(r => ({ pts: r.SplineData?.length ? r.SplineData : [r.location0, r.location1].filter(Boolean) })); railNet = buildRailNet(rl.value); }
   renderLayerButtons();
 }
 
@@ -1382,20 +1452,20 @@ function stationPopHtml({ kind, s }, list) {
   const docked = dockedAt(s, list), dockRow = docked.length ? Pop.row("Vehicles here", docked.map(v => `${esc(v.type)} ${esc(shortId(v.id))}`).join(", ")) : "";
   if (kind === "truck") {
     const mode = s.LoadMode || "Idle";
-    return Pop.head(s.Name, { id: shortId(s.ID), sub: "truck station", status: mode, color: STATION_COLOR.truck }) +
+    return Pop.head(s.Name, { id: shortId(s.ID), sub: "truck station", status: mode, color: STATION_COLOR.truck }) + stationWhy(kind, s) +
       Pop.sec("Station") + (s.StationStatus ? Pop.row("Status", esc(s.StationStatus)) : "") + dockRow + stationPower(s) +
       Pop.sec("Inventory") + Pop.items(s.Inventory, { max: 10 }) +
       ((s.FuelInventory || []).some(i => i.Amount > 0) ? Pop.sec("Fuel for trucks") + Pop.items(s.FuelInventory) : "") + Pop.where(s.location);
   }
   if (kind === "train") {
     const plats = s.CargoInventory || [];
-    return Pop.head(s.Name, { id: shortId(s.ID), sub: "train station", status: `${plats.length} platform${plats.length === 1 ? "" : "s"}`, color: STATION_COLOR.train }) +
+    return Pop.head(s.Name, { id: shortId(s.ID), sub: "train station", status: `${plats.length} platform${plats.length === 1 ? "" : "s"}`, color: STATION_COLOR.train }) + stationWhy(kind, s) +
       Pop.sec("Station") + dockRow + stationPower(s) +
       (plats.map((pl, i) => Pop.sec(`Platform ${i + 1} · ${pl.LoadingMode || pl.Name || "freight"}${pl.DockingStatus && !/None/.test(pl.DockingStatus) ? " · " + pl.DockingStatus : ""}`) +
         Pop.items(pl.Inventory, { max: 6 })).join("") || Pop.note("no freight platforms")) + Pop.where(s.location);
   }
   const paired = s.PairedStation && s.PairedStation !== "None" ? esc(s.PairedStation) : `<span class="warn-text">not paired</span>`;
-  return Pop.head(s.Name, { id: shortId(s.ID || ""), sub: "drone port", status: s.DroneStatus || "No drone", color: STATION_COLOR.drone }) +
+  return Pop.head(s.Name, { id: shortId(s.ID || ""), sub: "drone port", status: s.DroneStatus || "No drone", color: STATION_COLOR.drone }) + stationWhy(kind, s) +
     Pop.sec("Port") + Pop.row("Paired with", paired) + stationPower(s) +
     ((s.FuelInventory || []).some(i => i.Amount > 0) ? Pop.sec("Batteries / fuel") + Pop.items(s.FuelInventory) : "") +
     Pop.sec("To send") + Pop.items(s.InputInventory) + Pop.sec("Received") + Pop.items(s.OutputInventory) + Pop.where(s.location);
@@ -1403,10 +1473,9 @@ function stationPopHtml({ kind, s }, list) {
 function vehiclePop(v) {
   const near = v.loc ? nearestStation(v) : null, stops = v.route || [];
   const title = v.name && v.name !== v.type ? `${v.type} · ${v.name}` : v.type;
-  const err = v.status === "error" && v.error ? Pop.row("Problem", `<span class="bad-text">${esc(trainErr(v.error) || v.error)}</span>`) : "";
   return Pop.head(title, { id: shortId(v.id), sub: v.consist ? esc(v.consist) : v.pathName ? esc(v.pathName) : v.autopilot ? "self-driving" : "manual",
-                           status: STATUS_LABEL[v.status], color: VEH_STATUS_COLOR[v.status] }) +
-    Pop.sec("Driving") + err + Pop.row("Speed", v.speed != null ? `${fmtNum(v.speed)}${Pop.unit("km/h")}` : "–") +
+                           status: STATUS_LABEL[v.status], color: VEH_STATUS_COLOR[v.status] }) + vehicleWhy(v) +
+    Pop.sec("Driving") + Pop.row("Speed", v.speed != null ? `${fmtNum(v.speed)}${Pop.unit("km/h")}` : "–") +
     (v.nextStop ? Pop.row("Next stop", esc(v.nextStop)) : "") +
     Pop.row("Autopilot", v.autopilot ? "on" : "off") + (v.driver ? Pop.row("Driver", esc(v.driver)) : "") +
     (near && near.name ? Pop.row("Nearest station", `${esc(near.name)}${Pop.unit(`${fmtNum(near.dist)} m`)}`) : "") +
@@ -1685,8 +1754,8 @@ every(pollStatic, 60000, showsNetwork);
 // station contents change constantly; refresh them faster than paths/rails
 every(async () => {
   const [ts, rs] = await Promise.allSettled([getJSON("getTruckStation"), getJSON("getTrainStation")]);
-  if (ts.status === "fulfilled") truckStations = ts.value;
-  if (rs.status === "fulfilled") trainStations = rs.value;
+  if (ts.status === "fulfilled") truckStations = fixNames(ts.value);
+  if (rs.status === "fulfilled") trainStations = fixNames(rs.value);
 }, 3000, showsNetwork);
 </script>
 <script src="/js/production.js"></script>
