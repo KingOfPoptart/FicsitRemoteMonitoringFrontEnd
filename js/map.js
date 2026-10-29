@@ -543,12 +543,7 @@ const MapCtx = {
     this.el.style.top = Math.min(y, innerHeight - r.height - 8) + "px";
   },
   close() { if (this.el) this.el.classList.remove("open"); },
-  go(mv, tab) {
-    const r = mv.canvas.getBoundingClientRect(), v = mv.view;
-    MapView.pending = { tab, cx: (r.width / 2 - v.ox) / v.s, cy: (r.height / 2 - v.oy) / v.s, s: v.s };
-    showTab(tab);
-    requestAnimationFrame(() => { for (const m of MapView.all) m.applyPending(); });   // a map that already exists and kept its size
-  },
+  go(mv, tab) { showTab(tab); },   // showTab carries the open map's view over (MapView.carry)
 };
 // Factory buildings on any map: machines (dots by status), generators, the HUB, the Space Elevator and AWESOME Sinks.
 // The Production / Power / Sink tabs draw their own richer versions instead (a map's own layer wins over a shared one).
@@ -653,7 +648,19 @@ const ResSrc = {
 const MAP_TABS = ["overview", "vehicles", "production", "power", "belts", "pipes", "sink", "progression"];
 
 class MapView {
-  static all = []; static pending = null;
+  static all = []; static pending = null; static last = null;
+  // changing tabs: the next tab's map opens on the same spot at the same zoom as the map you were looking at (or the
+  // last map you saw, when coming from a tab without one), so the map doesn't seem to jump. Called by showTab before it switches.
+  static carry(tab) {
+    const cur = MapView.all.find(m => m.tab === activeTab && m.canvas.clientWidth);
+    if (cur) MapView.last = cur.centre();
+    if (tab !== activeTab) MapView.pending = MapView.last && MAP_TABS.includes(tab) ? { tab, ...MapView.last } : null;
+  }
+  // the view as centre (image coords) + zoom, independent of the canvas size
+  centre() {
+    const r = this.canvas.getBoundingClientRect(), v = this.view;
+    return { cx: (r.width / 2 - v.ox) / v.s, cy: (r.height / 2 - v.oy) / v.s, s: v.s };
+  }
   constructor(el, opts) {
     // every map has every layer; the filters (which belts / grids / storage a tab shows) default to everything
     opts = this.opts = { ...opts, logistics: opts.logistics || (() => true), powerNet: opts.powerNet || (() => true),

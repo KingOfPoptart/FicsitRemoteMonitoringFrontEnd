@@ -1729,6 +1729,7 @@ new ResizeObserver(setHdr).observe(document.querySelector("header"));   // stats
 function showTab(tab) {
   tab = OLD_TABS[tab] || tab;
   if (!TABS[tab]) tab = "overview";
+  MapView.carry(tab);   // the new tab's map keeps the same spot and zoom
   activeTab = tab;
   try { localStorage.setItem("ft.tab", tab); } catch {}
   if (location.hash.slice(1) !== tab) window.history.replaceState(null, "", "#" + tab);
@@ -1745,6 +1746,7 @@ function showTab(tab) {
   addExpanders();
   if (tab === "vehicles") resize();
   wakePolls();   // catch up whatever this tab needs (its own polls, the shared map data) right away
+  requestAnimationFrame(() => { for (const m of MapView.all) m.applyPending(); });   // a map that already exists and kept its size
 }
 $("tabs").addEventListener("click", e => { const b = e.target.closest("button[data-tab]"); if (b) showTab(b.dataset.tab); });
 addEventListener("hashchange", () => showTab(location.hash.slice(1)));
