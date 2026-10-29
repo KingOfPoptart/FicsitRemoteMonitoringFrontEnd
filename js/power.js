@@ -443,7 +443,7 @@ const Power = (() => {
 
   // ---- markup + events ---------------------------------------------------------------------------
   function init() {
-    root.innerHTML = `
+    root.innerHTML = `<div class="mt-left">
       <div class="toolbar"><div class="seg-group" id="wGridGroup"><span class="lbl">Grid</span><span id="wGrids"></span></div>
         <div class="seg-group right"><span class="lbl">History</span><span id="wRange"></span></div></div>
       <div class="banner bad" id="wFuse"></div>
@@ -455,17 +455,17 @@ const Power = (() => {
           <section class="card w-gens" id="wGensCard"><div class="card-head"><h2>Generators &amp; switches</h2><span class="hint" id="wUnitCount"></span>
               <button class="b" id="wUnitClear">Clear filters</button></div>
             <div class="table-wrap dtw tall" id="wUnits"></div></section>
-        </div>
-        <div class="pcol">
-          <section class="card w-map"><div id="wMap"></div></section>
+          <div class="w-row">
           <section class="card w-layout" id="wLayoutCard"><div class="card-head"><h2>Grid layout</h2><span class="hint" id="wLayoutHint"></span></div>
             <div class="card-body" id="wLayout"></div></section>
           <section class="card w-break"><div class="break-cols">
             <div id="wGenCard"><div class="card-head"><h2>Generation</h2><span class="hint">output now · lighter bar = capacity</span></div><div id="wGen" class="hbars"></div></div>
             <div id="wUseCard"><div class="card-head"><h2>Consumption</h2><span class="hint">by building type · lighter bar = max</span></div><div id="wUse" class="hbars"></div>
               <p class="warn-text small" id="wUnpowered"></p></div></div></section>
+          </div>
         </div>
-      </div>`;
+      </div></div>
+      <section class="card map-panel w-map"><div id="wMap"></div></section>`;
     chart = new LineChart($("wChart"), { height: 260, unit: "MW", fill: true });
     battChart = new LineChart($("wBatt"), { height: 96, unit: "MWh", fmt: v => fmtNum(v, v < 100 ? 1 : 0), fill: true });
     const pillFor = r => { const st = unitStatus(r); return `<span class="pill" style="color:${st.color};background:color-mix(in srgb, ${st.color} 14%, transparent)" title="${st.title}">${st.label}</span>`; };

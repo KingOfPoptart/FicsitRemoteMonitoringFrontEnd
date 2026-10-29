@@ -185,7 +185,7 @@ function makeNetTab(kind) {
 
   function init() {
     root.classList.add("lg-tab");
-    root.innerHTML = `
+    root.innerHTML = `<div class="mt-left">
       <div class="tiles compact" id="${id("Tiles")}"></div>
       <div class="pgrid">
         <div class="pcol">
@@ -195,15 +195,13 @@ function makeNetTab(kind) {
           <section class="card lg-store"><div class="card-head"><h2>${BELT ? "Storage" : "Fluid buffers"}</h2><span class="hint" id="${id("StCount")}"></span>
             <button class="b" id="${id("StClear")}">Clear filters</button></div>
             <div class="table-wrap dtw tall" id="${id("Store")}"></div></section>
-        </div>
-        <div class="pcol">
-          <section class="card lg-map"><div id="${id("Map")}"></div></section>
           <div class="lg-row">
             <section class="card lg-tiers"><div class="card-head"><h2>By tier</h2><span class="hint">${BELT ? "pieces" : "pipe pieces"}</span></div><div class="card-body hbars" id="${id("Tiers")}"></div></section>
             <section class="card lg-side"><div class="card-head"><h2>${BELT ? "Dimensional Depot" : "Pumps"}</h2><span class="hint" id="${id("SideHint")}"></span></div><div class="card-body hbars" id="${id("Side")}"></div></section>
           </div>
         </div>
-      </div>`;
+      </div></div>
+      <section class="card map-panel lg-map"><div id="${id("Map")}"></div></section>`;
     const cols = [
       ...(BELT ? [] : [{ key: "fluid", label: "Fluid", minW: 104, val: r => fluid(r) || "~",
         filter: { value: r => fluid(r) || "Empty", noun: "fluids", label: v => v === "Empty" ? v : icon(v, "icon sm") + esc(v) },

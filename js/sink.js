@@ -180,7 +180,7 @@ const SinkTab = (() => {
   }
 
   function init() {
-    root.innerHTML = `
+    root.innerHTML = `<div class="mt-left">
       <div class="toolbar"><div class="seg-group right"><span class="lbl">History</span><span id="skRange"></span></div></div>
       <div class="tiles compact" id="skTiles"></div>
       <div class="pgrid">
@@ -189,14 +189,12 @@ const SinkTab = (() => {
           <section class="card sk-items"><div class="card-head"><h2>What's being sunk</h2><span class="hint" id="skItemHint"></span>
               <button class="b" id="skItemClear">Clear filters</button></div>
             <div class="table-wrap dtw tall" id="skItems"></div><p class="muted small sk-note" id="skNote"></p></section>
-        </div>
-        <div class="pcol">
-          <section class="card sk-map"><div id="skMap"></div></section>
           <section class="card sk-sinks"><div class="card-head"><h2>Sinks</h2><span class="hint" id="skSinkCount"></span>
               <button class="b" id="skSinkClear">Clear filters</button></div>
             <div class="table-wrap dtw tall" id="skSinks"></div></section>
         </div>
-      </div>`;
+      </div></div>
+      <section class="card map-panel sk-map"><div id="skMap"></div></section>`;
     chart = new LineChart($("skChart"), { height: 200, unit: "pts/min", fmt: v => Sink.k(v), empty: "No readings yet." });
     itemTable = new DataTable($("skItems"), [
       { key: "item", label: "Item", minW: 170, val: r => r.item, filter: { value: r => r.item, noun: "items", label: v => icon(v, "icon sm") + esc(v) }, cell: r => itemCell(r.item) },

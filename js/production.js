@@ -282,6 +282,7 @@ const Production = (() => {
   function renderDetail() {
     const it = items.get(selected);
     $("pDetailTitle").innerHTML = selected ? `${icon(selected)}<span>${esc(selected)}</span>` : "Item details";
+    $("pDetailTitle").closest(".p-detail").classList.toggle("none", !selected);   // nothing picked: a one-line strip, the tables get the room
     if (!it) { $("pDetailBody").innerHTML = `<p class="muted">${selected ? `No machine makes or uses ${esc(selected)} right now.` : "Click an item in the Items table to see where it's made and used, and to highlight those machines."}</p>${selected ? recipeList(selected) : ""}`; return; }
     const u = unitOf(it.name);
     const lines = (g, verb) => {
@@ -399,7 +400,7 @@ const Production = (() => {
 
   // ---- markup + events -----------------------------------------------------------------------
   function init() {
-    root.innerHTML = `
+    root.innerHTML = `<div class="mt-left">
       <div class="toolbar">
         <input class="f-input search" id="pSearch" placeholder="Search items, recipes, buildings…" value="${esc(ui.q)}">
         <div class="seg-group"><span class="lbl">Items</span><span id="pModes"></span></div>
@@ -407,7 +408,7 @@ const Production = (() => {
         <div class="seg-group right"><span class="lbl">History</span><span id="pRange"></span></div>
       </div>
       <div class="tiles compact" id="pTiles"></div>
-      <!-- left: the two tables (items, machines); right: a big map with the item details under it -->
+      <!-- left: items, machines, item details; right: the map (same place and size on every tab) -->
       <div class="pgrid">
         <div class="pcol">
           <section class="card p-items"><div class="card-head"><h2>Items</h2><span class="hint" id="pItemCount"></span>
@@ -418,13 +419,11 @@ const Production = (() => {
               <button class="b" id="pClear">Clear filters</button></div>
             <div class="focus-bar" id="pFocus"></div>
             <div class="table-wrap dtw tall" id="pMachines"></div></section>
-        </div>
-        <div class="pcol">
-          <section class="card p-map"><div id="pMap"></div></section>
           <section class="card p-detail"><div class="card-head"><h2 id="pDetailTitle" class="with-icon"></h2></div>
             <div class="detail-grid"><div id="pChart"></div><div id="pDetailBody"></div></div></section>
         </div>
-      </div>`;
+      </div></div>
+      <section class="card map-panel p-map"><div id="pMap"></div></section>`;
 
     itemTable = new DataTable($("pItems"), [
       { key: "name", label: "Item", minW: 140, val: r => r.name, cell: r => `<span class="with-icon">${icon(r.name)}${esc(r.name)}</span>`,

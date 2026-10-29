@@ -204,9 +204,8 @@ const Overview = (() => {
 
   function init() {
     root.innerHTML = `
-      <div class="ov-session" id="ovSession"></div>
-      <div class="cols ov-cols">
-        <div class="ov-left">
+      <div class="mt-left ov-left">
+        <div class="ov-session" id="ovSession"></div>
           <section class="card"><div class="card-head"><h2>Needs attention</h2></div><div id="ovAttn" class="attn-list"></div></section>
           <div class="ov-cards">
             <a class="card link ov-card ov-power" href="#power"><div class="card-head"><h2>Power</h2><span class="hint">→</span></div>
@@ -217,14 +216,13 @@ const Overview = (() => {
             <a class="card link ov-card ov-sink" href="#sink"><div class="card-head"><h2>AWESOME Sink</h2><span class="hint">→</span></div><div class="ov-body" id="ovSink"><p class="muted">Loading…</p></div></a>
             <a class="card link ov-card ov-prog" href="#progression"><div class="card-head"><h2>Progression</h2><span class="hint">→</span></div><div class="ov-body" id="ovProg"></div></a>
           </div>
-        </div>
-        <section class="card sticky ov-world"><div class="card-head"><h2>World</h2><span class="hint">click a marker to open it in its tab</span></div><div id="ovMap"></div></section>
-      </div>`;
+      </div>
+      <section class="card map-panel ov-world"><div id="ovMap"></div></section>`;
     chart = new LineChart($("ovChart"), { height: 140, unit: "MW", fill: true });
     map = new MapView($("ovMap"), {
       // the whole world: every kind of thing is in the Layers menu; on to start with: the factory, transport, the power
       // network, belts, pipes, storage and hypertubes (resource nodes and collectibles are there, off)
-      storeKey: "ov.map2", layerMenu: true, layers: [], drawsNetwork: true,
+      storeKey: "ov.map2", layerMenu: true, layers: [], drawsNetwork: true, hint: "click a marker to open it in its tab · scroll to zoom",
       world: { on: l => ["Factory", "Transport", "Stations", "Power network", "Belts", "Pipes", "Storage", "Hypertubes"].includes(l.group) },
       onClick: p => { if (p.tab) location.hash = p.tab; },
       draw: (c, now, mv) => drawNetwork(mv, k => mv.isOn(k)),   // roads, tracks, drone routes, stations (shared with Vehicles)

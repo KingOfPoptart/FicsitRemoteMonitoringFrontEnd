@@ -883,8 +883,9 @@ class MapView {
   resize() {
     const r = this.canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
     if (!r.width) return;
-    this.canvas.width = r.width * dpr; this.canvas.height = r.height * dpr;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // resetting the canvas size wipes it: only when the size really changed (showing a tab again doesn't)
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
     this.anim = null;
     // size changed (window resize, panel expanded/restored): keep showing the same area, scaled to the new size
     const last = this.lastSize, v = this.view;
@@ -895,9 +896,9 @@ class MapView {
       v.ox = r.width / 2 - cx * v.s; v.oy = r.height / 2 - cy * v.s;
     }
     this.lastSize = { w: r.width, h: r.height };
-    if (this.applyPending()) return;
+    this.applyPending();
     if (!this.fitted) this.fit();
-    this.draw();
+    this.paint();   // now, not next frame: a wiped canvas must never reach the screen (it flashed when changing tabs)
   }
   fitBox(pts, pad = 40, animate = false) {
     const r = this.canvas.getBoundingClientRect(); if (!r.width || !pts.length) return;

@@ -215,7 +215,7 @@ const Progression = (() => {
       : new Map(nodes.map(n => [n.ID, n.Exploited ? "#5fcf80" : "#ffffff"])));
     // frame the map once the collectibles and nodes have loaded (players arrive first and would otherwise set the zoom)
     if (!framed && data.getArtifacts && data.getResourceNode) { framed = true; map.autoFit(() => ui.node ? map.fitEmphasis() : map.fit()); }
-    $("pgNodeFilter").innerHTML = ui.node ? `Showing: <b>${esc(ui.node)}</b> <button class="b" data-clear-node>Show all</button>` : "Click a collectible or resource to find it";
+    $("pgNodeFilter").innerHTML = ui.node ? `Showing: <b>${esc(ui.node)}</b> <button class="b" data-clear-node>Show all</button>` : "click a collectible or resource to find it on the map";
   }
 
   function render() {
@@ -234,8 +234,8 @@ const Progression = (() => {
   }
 
   function init() {
-    // three columns: elevator + HUB + research | milestones + exploration | the map, full height (one screen on desktop)
-    root.innerHTML = `
+    // elevator + HUB + research | milestones + exploration on the left, the map on the right (same place on every tab)
+    root.innerHTML = `<div class="mt-left">
       <div class="pgrid">
         <div class="pcol">
           <section class="card g-elev"><div class="card-head"><h2>Space Elevator</h2><span class="hint">parts delivered, what the factory makes, time to finish</span></div><div class="card-body" id="pgElevator"></div></section>
@@ -244,12 +244,10 @@ const Progression = (() => {
         </div>
         <div class="pcol">
           <section class="card g-tiers"><div class="card-head"><h2>Milestones</h2><span class="hint">tiers open as the Space Elevator advances</span></div><div class="card-body" id="pgTiers"></div></section>
-          <section class="card g-world"><div class="card-head"><h2>Exploration</h2><span class="hint">click a collectible or resource to find it on the map</span></div><div class="card-body" id="pgWorld"></div></section>
+          <section class="card g-world"><div class="card-head"><h2>Exploration</h2><span class="hint" id="pgNodeFilter"></span></div><div class="card-body" id="pgWorld"></div></section>
         </div>
-        <div class="pcol">
-          <section class="card g-map"><div class="card-head"><h2>Exploration map</h2><span class="hint" id="pgNodeFilter"></span></div><div id="pgMap"></div></section>
-        </div>
-      </div>`;
+      </div></div>
+      <section class="card map-panel g-map"><div id="pgMap"></div></section>`;
     map = new MapView($("pgMap"), {
       storeKey: "pg.map", layerMenu: true, layers: [
         { key: "sloop", group: "Collectibles", label: "Somersloops", color: "#e66767", size: 4.5, shape: "diamond" },

@@ -329,14 +329,19 @@
     .onescreen .lc.lc-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
     .onescreen .lc.lc-fill .lc-box { flex: 1; min-height: 0; }
     .onescreen .lc.lc-fill .lc-box svg { position: absolute; top: 0; left: 0; }
-    #tab-production .f-input.search { width: 210px; }
-    #tab-production .pgrid { grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); }
-    #tab-production .p-items { flex: 1; } #tab-production .p-mach { flex: 1.15; }
-    #tab-production .p-map { flex: 2.3; } #tab-production .p-detail { flex: 1; overflow-y: auto; }
+    #tab-production .f-input.search { width: 170px; }
+    #tab-production .pgrid { grid-template-columns: minmax(0, 1fr); }
+    #tab-production .p-items { flex: 1; } #tab-production .p-mach { flex: 1.25; }
+    #tab-production .p-detail { flex: 0.9; overflow-y: auto; }
+    #tab-production .p-detail.none { flex: 0 0 auto; } #tab-production .p-detail.none #pChart { display: none; }
+    #tab-production .p-detail.none .detail-grid { display: block; } #tab-production .p-detail.none .card-head { margin-bottom: 2px; }
     #tab-production .detail-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
     #tab-production .detail-lists { grid-template-columns: 1fr; }
-    #tab-power .pgrid { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }   /* the table side gets more room */
-    #tab-power .w-chart { flex: 1.25; } #tab-power .w-gens { flex: 1.5; }
+    #tab-power .pgrid { grid-template-columns: minmax(0, 1fr); }
+    #tab-power .w-chart { flex: 1.1; } #tab-power .w-gens { flex: 1.4; }
+    #tab-power .w-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    #tab-power .w-row > .card { margin: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 10px 12px; }
+    #tab-power .w-row .break-cols { grid-template-columns: 1fr; }
     #tab-power .w-pb { flex: 1; min-height: 0; display: flex; gap: 14px; }
     #tab-power .w-graphs { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
     #tab-power #wChart { flex: 2.4; } #tab-power #wBatt { flex: 1; }
@@ -350,13 +355,13 @@
     .bp-stats > div:last-child { border-bottom: none; }
     .bp-stats span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
     .bp-stats b { font-size: 17px; font-weight: 600; } .bp-stats b small { font-size: 12px; font-weight: 400; color: var(--muted); }
-    #tab-power .w-break { flex: 1; overflow-y: auto; } #tab-power .w-layout { flex: 0 1 auto; max-height: 30%; }
+    #tab-power .w-row > .w-break { overflow-y: auto; }
     .sw-feed { color: var(--muted); font-size: 12px; } .sw-ctrl { font-size: 12px; }
     #wUnits td { white-space: normal; line-height: 1.35; }   /* wrap long fuel / controls text instead of cutting it */
-    .lg-tab .pgrid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+    .lg-tab .pgrid { grid-template-columns: minmax(0, 1fr); }
     .sw-lift { display: inline-block; width: 10px; height: 10px; border-radius: 2px; outline: 1px solid #0d1013; flex: none; }
-    .lg-tab .lg-nets, .lg-tab .lg-store { flex: 1; } .lg-tab .lg-map { flex: 2.2; }
-    .lg-tab .lg-row { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; }
+    .lg-tab .lg-nets, .lg-tab .lg-store { flex: 1; }
+    .lg-tab .lg-row { flex: 0.75; min-height: 0; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; }
     .lg-tab .hb.click { cursor: pointer; border-radius: 4px; } .lg-tab .hb.click:hover { background: #ffffff0d; }
     .lg-tab .lg-row > .card { margin: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 10px 12px; }
     .lg-tab table.dt tr.link, #tab-inventory table.dt tr.link { background: color-mix(in srgb, var(--accent) 7%, transparent); }   /* linked to the selected row in the other table */
@@ -364,11 +369,10 @@
     .lg-store td { white-space: normal; line-height: 1.35; } .lg-store .nowrap { white-space: nowrap; }
     #tab-inventory .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
     #tab-inventory .iv-players, #tab-inventory .iv-depot { flex: 1; }
-    #tab-sink .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-    #tab-sink .sk-chart { flex: 0 0 auto; } #tab-sink .sk-items { flex: 1; } #tab-sink .sk-map { flex: 1.3; } #tab-sink .sk-sinks { flex: 1; }
-    #tab-power .w-map { flex: 1.7; }   /* map on the right, with the grid layout and breakdowns under it */
+    #tab-sink .pgrid { grid-template-columns: minmax(0, 1fr); }
+    #tab-sink .sk-chart { flex: 0 0 auto; } #tab-sink .sk-items { flex: 1.2; } #tab-sink .sk-sinks { flex: 1; }
     .onescreen .card-body { flex: 1; min-height: 0; overflow-y: auto; }
-    #tab-progression .pgrid { grid-template-columns: minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 1.35fr); }
+    #tab-progression .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     #tab-progression .g-elev, #tab-progression .g-hub { flex: 0 0 auto; }   /* only as tall as their content */
     #tab-progression .g-other { flex: 1; }
     #tab-progression .g-tiers { flex: 1.15; } #tab-progression .g-world { flex: 1; }
@@ -386,7 +390,7 @@
   .xp-btn { position: absolute; top: 8px; right: 8px; z-index: 4; width: 26px; height: 26px; display: grid; place-items: center;
             background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; opacity: .75; }
   .xp-btn:hover { color: var(--accent); border-color: var(--accent); opacity: 1; }
-  .card.has-xp > .card-head, .map-col.has-xp > .map-head { padding-right: 34px; }
+  .card.has-xp > .card-head { padding-right: 34px; }
   .card.has-xp > .mapview .mv-head { padding-right: 34px; }
   .vt-table > .xp-btn { top: 12px; right: 0; }   /* beside the table's title, like the cards */
   .vt-head .b { margin-left: auto; } .vt-table.has-xp > .vt-head { padding-right: 34px; }
@@ -410,6 +414,24 @@
   .xp-on.p-detail #pChart { display: flex; flex-direction: column; min-height: 0; }
   .xp-on .tiers { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .p-detail:not(.xp-on) .lc .lc-box { height: 150px; flex: none; }   /* item chart: fixed height unless expanded */
+
+  /* every tab with a map: on desktop the map is a full-height column on the right, the same place and size on every
+     tab (so changing tabs doesn't move it); everything else is in the column on the left. Phones: map below. */
+  @media (min-width: 1200px) and (hover: hover) and (pointer: fine) {
+    :root { --mapw: clamp(480px, 40vw, 1300px); }
+    main.tab.maptab:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) var(--mapw); grid-template-rows: minmax(0, 1fr);
+      gap: 14px; align-items: stretch; height: calc(100vh - var(--hdr, 58px)); padding-bottom: 12px; }
+    .maptab > .mt-left { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    .maptab .tiles.compact { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+    .maptab .tiles.compact .t-sub { font-size: 11px; }
+    .maptab > .map-panel { margin: 0; padding: 10px 12px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    .map-panel > .mapview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .map-panel .mv-box { flex: 1; min-height: 0; }
+    .map-panel .mv-box canvas { height: 100%; min-height: 0; }
+  }
+  /* a legend drawn over the map (Vehicles), above the hint */
+  .mv-legend { position: absolute; left: 10px; right: 10px; bottom: 32px; pointer-events: none; font-size: 11px; gap: 4px 12px; }
+  .mv-legend span { background: rgba(13,16,19,.75); padding: 2px 7px; border-radius: 4px; }
 
   /* overview */
   .ov-session { margin: -2px 0 12px; font-size: 14px; }
@@ -525,19 +547,11 @@
   @media (max-width: 600px) { .hb { grid-template-columns: 1fr auto; } .hb-track { grid-column: 1 / -1; grid-row: 2; } }
   /* desktop (wide screen + mouse): map sits to the right of the table; phones/tablets keep it below */
   @media (min-width: 1200px) and (hover: hover) and (pointer: fine) {
-    #tab-vehicles { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 38%); gap: 18px; align-items: start; }
     #tab-vehicles[hidden] { display: none; }
     .table-wrap { max-height: calc(100vh - 110px); }
-    .map-col { position: sticky; top: 12px; }
-    .map-col .map-head { margin-top: 0; }
-    #vehMap .mv-box canvas { height: calc(100vh - 240px); }
     /* Vehicles and Overview fill the window height too (table / map stretch to the bottom) */
-    #tab-vehicles:not([hidden]) { height: calc(100vh - var(--hdr, 58px)); grid-template-rows: minmax(0, 1fr); align-items: stretch; padding-bottom: 12px; }
     #tab-vehicles .vt-table { display: flex; flex-direction: column; min-height: 0; }
     #tab-vehicles .table-wrap { flex: 1; min-height: 0; max-height: none; }
-    #tab-vehicles .map-col { position: relative; top: auto; display: flex; flex-direction: column; min-height: 0; }
-    #tab-overview:not([hidden]) { display: flex; flex-direction: column; height: calc(100vh - var(--hdr, 58px)); padding-bottom: 12px; }
-    #tab-overview .ov-cols { flex: 1; min-height: 0; align-items: stretch; }
     #tab-overview .ov-left { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
     #tab-overview .ov-left > .card { margin: 0; flex: 0 1 auto; max-height: 23%; display: flex; flex-direction: column; min-height: 0; }
     #tab-overview .attn-list { overflow-y: auto; min-height: 0; }
@@ -559,10 +573,6 @@
     #tab-overview #ovChart.lc-fill { display: flex; flex-direction: column; }
     #tab-overview #ovChart .lc-box { flex: 1; min-height: 0; }
     #tab-overview #ovChart .lc-box svg { position: absolute; top: 0; left: 0; }
-    #tab-overview .ov-world { position: relative; top: auto; display: flex; flex-direction: column; min-height: 0; margin: 0; }
-    #vehMap, #ovMap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-    #vehMap .mv-box, #ovMap .mv-box { flex: 1; min-height: 0; }
-    #vehMap .mv-box canvas, #ovMap .mv-box canvas { height: 100%; min-height: 0; }
   }
 </style>
 </head>
@@ -585,8 +595,8 @@
 </header>
 
 <div class="banner" id="banner"></div>
-<main id="tab-vehicles" class="tab">
-  <div class="vt-table">
+<main id="tab-vehicles" class="tab maptab">
+  <div class="vt-table mt-left">
   <div class="map-head vt-head"><h2>Vehicles</h2><span class="hint" id="fCount"></span><button class="b" id="fClear" onclick="filters = freshFilters(); closePopover(); applyFilters();">Clear filters</button></div>
   <div class="table-wrap" id="tableWrap">
     <table id="table">
@@ -600,11 +610,8 @@
   </div>
   </div>
 
-  <div class="map-col">
-  <div class="map-head">
-    <h2>Live map</h2>
-    <div class="map-info">
-      <div class="legend">
+  <section class="card map-panel veh-map">
+      <div class="legend mv-legend" id="vehLegend">
         <span><i style="background:#5fcf80"></i>moving</span><span><i style="background:#5fa8ef"></i>docking</span>
         <span><i style="background:#c5cad3"></i>stopped</span><span><i style="background:#c39cf7"></i>driven</span>
         <span><i style="background:#ef5f5f"></i>error</span>
@@ -612,23 +619,21 @@
         <span><i style="background:#c39cf7;border-radius:2px"></i>train station</span>
         <span><i style="background:#f06292;border-radius:2px"></i>drone port</span>
       </div>
-    </div>
-  </div>
   <div id="vehMap"></div>
-  </div>
+  </section>
 </main>
 <!-- shared floating boxes: the hover tooltip and the filter popover. They sit outside every tab, so they show on
      all of them (inside a hidden tab they'd be hidden too, whatever their position). -->
 <div class="popover" id="popover"></div>
 <div class="cargo-pop" id="cargoPop"></div>
-<main id="tab-overview" class="tab" hidden></main>
-<main id="tab-production" class="tab onescreen" hidden></main>
-<main id="tab-power" class="tab onescreen" hidden></main>
-<main id="tab-belts" class="tab onescreen" hidden></main>
-<main id="tab-pipes" class="tab onescreen" hidden></main>
+<main id="tab-overview" class="tab maptab" hidden></main>
+<main id="tab-production" class="tab onescreen maptab" hidden></main>
+<main id="tab-power" class="tab onescreen maptab" hidden></main>
+<main id="tab-belts" class="tab onescreen maptab" hidden></main>
+<main id="tab-pipes" class="tab onescreen maptab" hidden></main>
 <main id="tab-inventory" class="tab onescreen" hidden></main>
-<main id="tab-sink" class="tab onescreen" hidden></main>
-<main id="tab-progression" class="tab onescreen" hidden></main>
+<main id="tab-sink" class="tab onescreen maptab" hidden></main>
+<main id="tab-progression" class="tab onescreen maptab" hidden></main>
 
 <script src="/js/poll.js"></script>
 <script src="/js/charts.js"></script>
@@ -950,8 +955,8 @@ function applyWidths() {
 // so the table fits the panel; finally lock to fixed layout
 // how far each column may shrink when fitting the panel (text columns wrap, so they give up most)
 // (sized so content never clips: "Factory Cart" + image, "100%" + bar, 5-digit coords, "1 loco+2 cars")
-const MIN_COL_W = { route: 88, next: 94, near: 90, cargo: 76, driver: 66, id: 94, type: 130, status: 92,
-                    speed: 66, fill: 100, auto: 60, x: 56, y: 58, z: 44 };
+const MIN_COL_W = { route: 78, next: 84, near: 80, cargo: 70, driver: 66, id: 90, type: 130, status: 90,
+                    speed: 60, fill: 92, auto: 56, x: 56, y: 58, z: 44 };
 function layoutColumns() {
   if (!layoutPending || !vehicles.length) return;
   layoutPending = false;
@@ -1366,7 +1371,7 @@ const networkLayers = () => [
   { key: "dronePorts", group: "Stations", label: "Drone ports", swatch: "background:#f06292;width:9px;height:9px;border-radius:2px", count: () => dronePorts.length },
 ];
 const vmap = new MapView($("vehMap"), {
-  storeKey: "vt.layers", animate: () => mapMoving(), dim: 0.35, fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
+  storeKey: "vt.layers", animate: () => mapMoving(), fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
   layerMenu: true, drawsNetwork: true, world: { replaces: ["veh"] },   // its own vehicles (per type) instead of the shared arrows
   // a layer per vehicle type (picture + count), then the transport network; every other kind of thing is in the Layers menu, off
   layers: [...Object.keys(TYPES).map(t => ({ key: "v:" + t, group: "Vehicles", label: t, swatchHtml: typeImg(t),
@@ -1375,6 +1380,7 @@ const vmap = new MapView($("vehMap"), {
   fitTo: () => { const vs = onMap(); return (vs.length ? vs : vehicles).map(v => worldToImg(v.loc.x, v.loc.y)); },
   onPan: () => { if (followId) { followId = null; renderTable(); } },
 });
+vmap.canvas.parentElement.append($("vehLegend"));   // the colour legend sits on the map, like on the other tabs' hints
 const canvas = vmap.canvas, ctx = vmap.ctx, view = vmap.view;   // screen = img * s + o  (CSS px)
 
 function worldToImg(x, y) {
@@ -1683,12 +1689,12 @@ document.addEventListener("mousemove", e => {
 });
 
 // ---- expand any panel to full screen ------------------------------------------------
-// Every panel (cards, the Vehicles table and map) gets a button in its top-right corner that makes it fill the
+// Every panel (cards, the Vehicles table) gets a button in its top-right corner that makes it fill the
 // window over a dimmed page; the same button (or Esc) puts it back. Maps, charts and tables follow the new size.
 const XP_ICON = { open: '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
                   close: '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>' };
 function addExpanders() {
-  for (const el of document.querySelectorAll("main.tab .card, .vt-table, .map-col")) {
+  for (const el of document.querySelectorAll("main.tab .card, .vt-table")) {
     if (el.querySelector(":scope > .xp-btn")) continue;
     el.classList.add("has-xp");
     const b = document.createElement("button");
@@ -1746,7 +1752,7 @@ function showTab(tab) {
   addExpanders();
   if (tab === "vehicles") resize();
   wakePolls();   // catch up whatever this tab needs (its own polls, the shared map data) right away
-  requestAnimationFrame(() => { for (const m of MapView.all) m.applyPending(); });   // a map that already exists and kept its size
+  for (const m of MapView.all) if (m.tab === tab) m.resize();   // the map shows on its carried-over view in the very first frame
 }
 $("tabs").addEventListener("click", e => { const b = e.target.closest("button[data-tab]"); if (b) showTab(b.dataset.tab); });
 addEventListener("hashchange", () => showTab(location.hash.slice(1)));
