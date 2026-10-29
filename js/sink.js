@@ -195,7 +195,7 @@ const SinkTab = (() => {
         </div>
       </div></div>
       <section class="card map-panel sk-map"><div id="skMap"></div></section>`;
-    chart = new LineChart($("skChart"), { height: 200, unit: "pts/min", fmt: v => Sink.k(v), empty: "No readings yet." });
+    chart = new LineChart($("skChart"), { height: 200, fill: true, unit: "pts/min", fmt: v => Sink.k(v), empty: "No readings yet." });
     itemTable = new DataTable($("skItems"), [
       { key: "item", label: "Item", minW: 170, val: r => r.item, filter: { value: r => r.item, noun: "items", label: v => icon(v, "icon sm") + esc(v) }, cell: r => itemCell(r.item) },
       { key: "rate", label: "Made", num: true, minW: 74, title: "What the machines feeding the sinks make per minute now (some may go elsewhere at splitters)", val: r => r.rate,

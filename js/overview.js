@@ -206,16 +206,20 @@ const Overview = (() => {
     root.innerHTML = `
       <div class="mt-left ov-left">
         <div class="ov-session" id="ovSession"></div>
-          <section class="card"><div class="card-head"><h2>Needs attention</h2></div><div id="ovAttn" class="attn-list"></div></section>
-          <div class="ov-cards">
+        <div class="ov-stack">
+          <section class="card ov-attn"><div class="card-head"><h2>Needs attention</h2></div><div id="ovAttn" class="attn-list"></div></section>
             <a class="card link ov-card ov-power" href="#power"><div class="card-head"><h2>Power</h2><span class="hint">→</span></div>
               <div class="ov-power-side"><div id="ovPower"></div><div class="figs" id="ovPowerFigs"></div></div><div id="ovChart"></div></a>
+          <div class="ov-row">
             <a class="card link ov-card ov-prod" href="#production"><div class="card-head"><h2>Production</h2><span class="hint">→</span></div><div class="ov-body" id="ovProd"><p class="muted">Loading…</p></div></a>
+            <a class="card link ov-card ov-prog" href="#progression"><div class="card-head"><h2>Progression</h2><span class="hint">→</span></div><div class="ov-body" id="ovProg"></div></a>
+          </div>
+          <div class="ov-row">
             <a class="card link ov-card ov-veh" href="#vehicles"><div class="card-head"><h2>Vehicles</h2><span class="hint">→</span></div><div class="ov-body" id="ovVeh"></div></a>
             <a class="card link ov-card ov-logi" href="#belts"><div class="card-head"><h2>Belts &amp; pipes</h2><span class="hint">→</span></div><div class="ov-body" id="ovLogi"><p class="muted">Working out belts and pipes…</p></div></a>
             <a class="card link ov-card ov-sink" href="#sink"><div class="card-head"><h2>AWESOME Sink</h2><span class="hint">→</span></div><div class="ov-body" id="ovSink"><p class="muted">Loading…</p></div></a>
-            <a class="card link ov-card ov-prog" href="#progression"><div class="card-head"><h2>Progression</h2><span class="hint">→</span></div><div class="ov-body" id="ovProg"></div></a>
           </div>
+        </div>
       </div>
       <section class="card map-panel ov-world"><div id="ovMap"></div></section>`;
     chart = new LineChart($("ovChart"), { height: 140, unit: "MW", fill: true });

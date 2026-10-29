@@ -333,7 +333,7 @@
     #tab-production .pgrid { grid-template-columns: minmax(0, 1fr); }
     #tab-production .p-items { flex: 1; } #tab-production .p-mach { flex: 1.25; }
     #tab-production .p-detail { flex: 0.9; overflow-y: auto; }
-    #tab-production .p-detail.none { flex: 0 0 auto; } #tab-production .p-detail.none #pChart { display: none; }
+    #tab-production .p-detail.none { flex: 0 0 auto !important; } #tab-production .p-detail.none #pChart { display: none; }
     #tab-production .p-detail.none .detail-grid { display: block; } #tab-production .p-detail.none .card-head { margin-bottom: 2px; }
     #tab-production .detail-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
     #tab-production .detail-lists { grid-template-columns: 1fr; }
@@ -429,6 +429,28 @@
     .map-panel .mv-box { flex: 1; min-height: 0; }
     .map-panel .mv-box canvas { height: 100%; min-height: 0; }
   }
+  /* resizable panels (js/resize.js): a handle sits in each gap; desktop only */
+  .rs-h, .rs-map { display: none; }
+  @media (min-width: 1200px) and (hover: hover) and (pointer: fine) {
+    [data-rs-dir] { gap: 0 !important; }
+    [data-rs-dir="h"] { display: flex !important; }
+    [data-rs-dir="h"] > :not(.rs-h) { flex: 1 1 0; min-width: 0; }
+    .lg-tab .lg-row > .lg-tiers { flex-grow: 0.8; } .lg-tab .lg-row > .lg-side { flex-grow: 1.2; }
+    #tab-inventory .pgrid > .pcol:last-child { flex-grow: 1.1; }
+    .rs-h { display: block; flex: 0 0 var(--rs-gap, 12px); position: relative; z-index: 3; }
+    [data-rs-dir="v"] > .rs-h { cursor: row-resize; } [data-rs-dir="h"] > .rs-h { cursor: col-resize; }
+    .maptab > .mt-left { position: relative; }
+    .rs-map { display: block; position: absolute; top: 0; bottom: 0; right: -14px; width: 14px; cursor: col-resize; z-index: 3; }
+    .rs-h::after, .rs-map::after { content: ""; position: absolute; border-radius: 2px; background: var(--accent); opacity: 0; transition: opacity .12s; }
+    [data-rs-dir="v"] > .rs-h::after { left: 35%; right: 35%; top: calc(50% - 1.5px); height: 3px; }
+    [data-rs-dir="h"] > .rs-h::after, .rs-map::after { top: 35%; bottom: 35%; left: calc(50% - 1.5px); width: 3px; }
+    .rs-h:hover::after, .rs-map:hover::after, .rs-h.drag::after, .rs-map.drag::after { opacity: .85; }
+    body.rs-dragging { user-select: none; } body.rs-dragging * { cursor: inherit !important; }
+    body.rs-col { cursor: col-resize; } body.rs-row { cursor: row-resize; }
+    .rs-h:has(+ .p-detail.none) { pointer-events: none; }
+    /* squeezed to its title bar by a drag: only the title shows */
+    .rs-min.card > :not(.card-head):not(.xp-btn), .rs-min > .card > :not(.card-head):not(.xp-btn) { visibility: hidden; }   /* item details collapsed to a strip: nothing to resize */
+  }
   /* a legend drawn over the map (Vehicles), above the hint */
   .mv-legend { position: absolute; left: 10px; right: 10px; bottom: 32px; pointer-events: none; font-size: 11px; gap: 4px 12px; }
   .mv-legend span { background: rgba(13,16,19,.75); padding: 2px 7px; border-radius: 4px; }
@@ -445,7 +467,7 @@
   a.attn.warn { border-left-color: var(--warn); } a.attn.warn .ai { color: var(--warn); }
   a.attn.ok { border-left-color: var(--ok); } a.attn.ok .ai { color: var(--ok); }
   a.attn.info { border-left-color: var(--info); } a.attn.info .ai { color: var(--info); }
-  .ov-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 14px; }
+  .ov-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 14px; }
   a.card.link { display: block; color: inherit; text-decoration: none; }
   a.card.link:hover { border-color: #4a5260; }
   a.card.link:hover .card-head .hint { color: var(--accent); }
@@ -552,14 +574,14 @@
     /* Vehicles and Overview fill the window height too (table / map stretch to the bottom) */
     #tab-vehicles .vt-table { display: flex; flex-direction: column; min-height: 0; }
     #tab-vehicles .table-wrap { flex: 1; min-height: 0; max-height: none; }
-    #tab-overview .ov-left { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-    #tab-overview .ov-left > .card { margin: 0; flex: 0 1 auto; max-height: 23%; display: flex; flex-direction: column; min-height: 0; }
+    /* Needs attention, Power (full width), then Production · Progression / Vehicles · Belts & pipes · Sink: rows that can be resized */
+    #tab-overview .ov-stack { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+    #tab-overview .ov-attn { margin: 0; flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     #tab-overview .attn-list { overflow-y: auto; min-height: 0; }
-    /* Power across the top (shorter, full width), then Production · Progression / Vehicles · Logistics · Sink */
-    #tab-overview .ov-cards { flex: 1; min-height: 0; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-template-rows: 252px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
-    #tab-overview .ov-prod { grid-area: 2 / 1 / 3 / 4; } #tab-overview .ov-prog { grid-area: 2 / 4 / 3 / 7; }
-    #tab-overview .ov-veh { grid-area: 3 / 1 / 4 / 3; } #tab-overview .ov-logi { grid-area: 3 / 3 / 4 / 5; } #tab-overview .ov-sink { grid-area: 3 / 5 / 4 / 7; }
-    #tab-overview .ov-card.ov-power { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(250px, 0.8fr) minmax(0, 1.4fr);
+    #tab-overview .ov-stack > .ov-power { flex: 1.2 1 0; }
+    #tab-overview .ov-row { flex: 0.95 1 0; min-height: 0; display: flex; gap: 12px; }
+    #tab-overview .ov-row > .ov-card { flex: 1 1 0; min-width: 0; }
+    #tab-overview .ov-card.ov-power { display: grid; grid-template-columns: minmax(250px, 0.8fr) minmax(0, 1.4fr);
                               grid-template-rows: auto minmax(0, 1fr); column-gap: 18px; }
     #tab-overview .ov-power > .card-head { grid-column: 1 / -1; }
     #tab-overview .ov-power .ov-power-side { min-height: 0; overflow: hidden; }
@@ -1750,6 +1772,7 @@ function showTab(tab) {
   setExpanded(null);   // leaving a tab closes any full-screen panel
   for (const [k, m] of Object.entries(mods)) k === tab ? m.show() : m.hide();
   addExpanders();
+  Resize.scan();   // drag handles between the panels this tab just built
   if (tab === "vehicles") resize();
   wakePolls();   // catch up whatever this tab needs (its own polls, the shared map data) right away
   for (const m of MapView.all) if (m.tab === tab) m.resize();   // the map shows on its carried-over view in the very first frame
@@ -1779,6 +1802,7 @@ every(async () => {
 <script src="/js/logistics.js"></script>
 <script src="/js/inventory.js"></script>
 <script src="/js/sink.js"></script>
+<script src="/js/resize.js"></script>
 <script>itemsReady.then(() => showTab(activeTab));</script>
 </body>
 </html>
