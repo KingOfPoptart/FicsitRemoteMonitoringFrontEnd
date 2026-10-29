@@ -10,3 +10,7 @@ Thumbs.db
 # power/production history recorded by server.py
 history.json
 history.tmp
+
+# last known FRM answers (served while the game server is down)
+laststate.json.gz
+laststate.json.tmp

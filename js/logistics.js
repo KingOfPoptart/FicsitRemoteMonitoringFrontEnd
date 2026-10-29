@@ -297,7 +297,7 @@ function makeNetTab(kind) {
   }
 
   return {
-    show() { if (!inited) init(); Logistics.start(); Storage.start(); emphasize(); render(); setConn(true); },
+    show() { if (!inited) init(); Logistics.start(); Storage.start(); emphasize(); render(); },   // the connection dot follows the data fetches (getJSON)
     hide() {},
   };
 }

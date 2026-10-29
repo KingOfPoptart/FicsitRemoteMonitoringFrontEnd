@@ -63,6 +63,10 @@ const Overview = (() => {
   // ---- what needs attention, worst first -----------------------------------------------------
   function attention() {
     const out = [], add = (level, text, tab) => out.push({ level, text, tab });
+    if (stale) {   // the game server isn't answering: everything below is from the last state it reported
+      const t = new Date(stale.since), today = t.toDateString() === new Date().toDateString();
+      add("bad", `Game server is offline (since ${today ? t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : t.toLocaleString()}) — showing the last state it reported`, null);
+    }
     for (const g of d.getPower || []) {
       const name = (d.getPower.length > 1 ? `Grid ${g.CircuitGroupID}: ` : "");
       if (g.FuseTriggered) add("bad", `${name}fuse tripped — the grid is off`, "power");
@@ -121,8 +125,11 @@ const Overview = (() => {
 
     const items = attention();
     const ICON = { bad: "⛔", warn: "⚠", ok: "✓", info: "ℹ" };
-    $("ovAttn").innerHTML = items.length ? items.map(a => `<a class="attn ${a.level}" href="#${a.tab}"><span class="ai">${ICON[a.level]}</span><span>${esc(a.text)}</span><span class="go">${a.tab} →</span></a>`).join("")
+    // no tab: the "server offline" item, which flashes the connection light in the header instead of opening a tab
+    const html = items.length ? items.map(a => a.tab ? `<a class="attn ${a.level}" href="#${a.tab}"><span class="ai">${ICON[a.level]}</span><span>${esc(a.text)}</span><span class="go">${a.tab} →</span></a>`
+        : `<a class="attn ${a.level}" href="#" data-flash-dot title="Show the connection light"><span class="ai">${ICON[a.level]}</span><span>${esc(a.text)}</span><span class="go">status ↗</span></a>`).join("")
       : `<p class="muted">All good — nothing needs attention.</p>`;
+    if ($("ovAttn").dataset.html !== html) { $("ovAttn").innerHTML = html; $("ovAttn").dataset.html = html; }   // only when it changes: rebuilding it swallowed clicks
 
     // ---- Power: headline, chart (fills the card), key figures
     const gs = d.getPower || [], tot = k => gs.reduce((a, g) => a + g[k], 0);
@@ -207,7 +214,7 @@ const Overview = (() => {
       <div class="mt-left ov-left">
         <div class="ov-session" id="ovSession"></div>
         <div class="ov-stack">
-          <section class="card ov-attn"><div class="card-head"><h2>Needs attention</h2></div><div id="ovAttn" class="attn-list"></div></section>
+          <section class="card ov-attn"><div class="card-head"><h2>Needs attention</h2></div><div id="ovAttn" class="attn-list" onclick="if (event.target.closest('[data-flash-dot]')) { event.preventDefault(); flashDot('bad'); }"></div></section>
             <a class="card link ov-card ov-power" href="#power"><div class="card-head"><h2>Power</h2><span class="hint">→</span></div>
               <div class="ov-power-side"><div id="ovPower"></div><div class="figs" id="ovPowerFigs"></div></div><div id="ovChart"></div></a>
           <div class="ov-row">

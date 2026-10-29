@@ -31,6 +31,17 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
   .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   .dot.bad { background: var(--bad); }
+  .dot.stale { background: var(--bad); }
+  @keyframes dot-beacon-bad {
+    0%, 100% { background: var(--bad); box-shadow: 0 0 0 0 transparent; }
+    50% { background: #ff9a9a; box-shadow: 0 0 5px 2px rgba(239, 95, 95, .95), 0 0 16px 7px rgba(239, 95, 95, .5); }
+  }
+  @keyframes dot-beacon-ok {
+    0%, 100% { background: var(--ok); box-shadow: 0 0 0 0 transparent; }
+    50% { background: #a6f0bc; box-shadow: 0 0 5px 2px rgba(95, 207, 128, .95), 0 0 16px 7px rgba(95, 207, 128, .5); }
+  }
+  .dot[data-flash="bad"] { animation: dot-beacon-bad .5s ease-in-out 6; }
+  .dot[data-flash="ok"] { animation: dot-beacon-ok .5s ease-in-out 6; }
 
   .banner { margin: 12px 20px 0; padding: 8px 12px; border-radius: 6px; font-size: 13px;
             background: #f2c14e1a; border: 1px solid #f2c14e55; color: var(--warn); display: none; }
@@ -375,7 +386,7 @@
     #tab-inventory .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
     #tab-inventory .iv-players, #tab-inventory .iv-depot { flex: 1; }
     #tab-sink .pgrid { grid-template-columns: minmax(0, 1fr); }
-    #tab-sink .sk-chart { flex: 0 0 auto; } #tab-sink .sk-items { flex: 1.2; } #tab-sink .sk-sinks { flex: 1; }
+    #tab-sink .sk-chart { flex: 0.8; } #tab-sink .sk-items { flex: 1.2; } #tab-sink .sk-sinks { flex: 1; }   /* the chart fills its panel */
     .onescreen .card-body { flex: 1; min-height: 0; overflow-y: auto; }
     #tab-progression .pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     #tab-progression .g-elev, #tab-progression .g-hub { flex: 0 0 auto; }   /* only as tall as their content */
@@ -1260,10 +1271,15 @@ function renderStats() {
 
 // ---- data ---------------------------------------------------------------------
 // maxAge (s): accept a copy server.py fetched up to that long ago instead of asking FRM again
+// stale: the game server isn't answering and server.py handed back the last state it reported ({ at, since } in ms)
+let stale = null;
 async function getJSON(ep, maxAge) {
   const r = await fetch("/api/" + ep + (maxAge ? "?max_age=" + maxAge : ""), { cache: "no-store" });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error || r.status);
+  const at = r.headers.get("X-Stale");
+  stale = at ? { at: at * 1000, since: (r.headers.get("X-Down-Since") || at) * 1000 } : null;
+  setConn(true);   // live, or offline with the last known state (every tab, whatever it fetches)
   return j;
 }
 
@@ -1289,13 +1305,11 @@ async function poll() {
     const routesSupported = !wheeled.length || wheeled.some(c => Array.isArray(c.Route));
     $("banner").style.display = routesSupported ? "none" : "block";
     $("banner").textContent = "Route / Next stop for wheeled vehicles need the patched FRM build — this server runs stock FRM, which reports every route as the placeholder \"PathName\". Trains show their timetable either way.";
-    $("dot").className = "dot ok";
-    $("conn").textContent = "live · " + new Date().toLocaleTimeString();
+    setConn(true);
     renderStats(); renderHead(); renderTable(); layoutColumns(); renderLayerButtons();
     if (!fitted && vehicles.length) { vmap.autoFit(); fitted = true; }
   } catch (e) {
-    $("dot").className = "dot bad";
-    $("conn").textContent = "offline: " + e.message;
+    setConn(false, e.message);
   }
 }
 // FRM sends station names with accents double-encoded ("CafÃ©" for "Café"); timetables have them right
@@ -1755,9 +1769,30 @@ let activeTab = (() => {
   const h = OLD_TABS[location.hash.slice(1)] || location.hash.slice(1); if (TABS[h]) return h;
   try { const t = localStorage.getItem("ft.tab"); return TABS[OLD_TABS[t] || t] ? OLD_TABS[t] || t : "overview"; } catch { return "overview"; }
 })();
+// flash the connection dot like a signal light ("ok" green, "bad" red), e.g. Overview's "server offline" item
+function flashDot(kind) {
+  const dot = $("dot");
+  delete dot.dataset.flash; void dot.offsetWidth; dot.dataset.flash = kind;   // restart it if it's already running
+  dot.addEventListener("animationend", () => delete dot.dataset.flash, { once: true });
+}
 function setConn(ok, msg) {
+  // live <-> offline: the dot flashes like a signal light for a few seconds, red going offline, green coming back
+  // (a data attribute, so the class changes on every refresh don't cut the animation short)
+  const dot = $("dot"), wasLive = dot.classList.contains("ok"), wasDown = dot.classList.contains("stale") || dot.classList.contains("bad");
+  const live = ok && !stale;
+  if ((wasLive && !live) || (wasDown && live)) flashDot(live ? "ok" : "bad");
+  const when = t => { const d = new Date(t); return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString() : d.toLocaleString(); };
+  if (ok && stale) {   // the game server is down: what's shown is the last state it reported
+    $("dot").className = "dot stale";
+    // short, so the header keeps its height (the map below it mustn't move)
+    const d = new Date(stale.since), hm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("conn").textContent = "offline since " + (d.toDateString() === new Date().toDateString() ? hm : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm);
+    $("conn").parentElement.title = `The game server stopped answering at ${when(stale.since)}. Everything shown is the last state it reported (as of ${when(stale.at)}); it goes live again by itself once the server is back.`;
+    return;
+  }
   $("dot").className = ok ? "dot ok" : "dot bad";
   $("conn").textContent = ok ? "live · " + new Date().toLocaleTimeString() : "offline: " + msg;
+  $("conn").parentElement.title = "";
 }
 // header height, for tabs laid out to fit one screen (CSS var --hdr)
 const setHdr = () => document.documentElement.style.setProperty("--hdr", document.querySelector("header").offsetHeight + "px");

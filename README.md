@@ -115,6 +115,7 @@ Options:
 ## Notes
 - The map image, vehicle pictures and icons aren't included because they're Coffee Stain's game art. `fetch_assets.py` gets them on your own machine.
 - `server.py` serves the page and passes API calls through to FRM, so the browser never has to deal with cross-origin (CORS) restrictions.
+- **When the game server goes down** (shut down, restarting, a save loading), the dashboard keeps showing the last state it reported, and the header says "offline since …" with a red light instead of "live" (the light flashes red as the server goes down and green when it comes back). The Overview lists it first under Needs attention; click that to flash the light. `server.py` keeps FRM's last answer to every request and saves them to `laststate.json.gz` every few minutes and the moment FRM stops answering, so this also works after `server.py` itself restarts. It goes live again by itself once the server is back. History charts show a gap for the time it was down.
 - **Load on the game server**: FRM answers most calls on the game thread, so the dashboard tries to ask little:
   - each tab polls only what it shows, and maps fetch shared data (players, power network, storage, belts and pipes) only while a tab showing them is open;
   - a page in the background (another browser tab, a minimised window) polls at most once a minute and catches up when it's shown again;

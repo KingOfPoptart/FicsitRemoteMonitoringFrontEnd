@@ -17,9 +17,13 @@ and records power/production history so the charts have data from before the pag
 By default it only listens on this machine (127.0.0.1). Use --host 0.0.0.0 to reach it from other
 devices on your network. The FRM URL can also be set with the FRM_URL environment variable.
 History is saved to history.json next to this file, so it survives a restart.
+When FRM stops answering (game server down, restarting, a session loading), every /api call gets the last answer FRM
+gave instead, marked with an X-Stale header (when it's from); the page then says it's showing the last known state.
+Those answers are saved to laststate.json.gz, so this works after a restart of this server too.
 Run tools/fetch_assets.py once first to get the map image, vehicle pictures and icons.
 """
 import argparse
+import gzip
 import http.server
 import json
 import math
@@ -51,6 +55,9 @@ CACHE_S = 1.0
 SLOW_CACHE_S = dict.fromkeys(("getFactory", "getExtractor", "getGenerators", "getPowerUsage", "getCables", "getPowerPoles",
                               "getStorageInv", "getVehiclePaths", "getBelts", "getPipes", "getResourceNode", "getHypertube"), 4.0)
 HISTORY_FILE = ROOT / "history.json"
+LAST_FILE = ROOT / "laststate.json.gz"   # the last answer FRM gave for each endpoint (served while FRM is down)
+LAST_SAVE_S = 300
+OFFLINE_RETRY_S = 5   # while FRM is down: check this often whether it's back (pages get the last answer at once)
 KEEP_S = 24 * 3600
 POWER_EVERY_S, PROD_EVERY_S, SAVE_EVERY_S = 5, 15, 60
 
@@ -60,35 +67,141 @@ _cache, _cache_lock = {}, threading.Lock()
 _ep_locks = {ep: threading.Lock() for ep in ALLOWED}
 
 
+# ---- last known state: what FRM last answered, for when it's down -----------------------------
+_last, _last_lock = {}, threading.Lock()   # endpoint -> (unix time, body)
+_net = {"down_since": None, "dirty": False}
+_save_wake = threading.Event()
+
+
+def last_load():
+    try:
+        with gzip.open(LAST_FILE, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+        with _last_lock:
+            for ep, (t, body) in data.items():
+                if ep in ALLOWED:
+                    _last[ep] = (t, body.encode())
+    except (OSError, ValueError):
+        pass
+
+
+def last_save():
+    with _last_lock:
+        if not _net["dirty"]:
+            return
+        data = {ep: [t, body.decode("utf-8", "replace")] for ep, (t, body) in _last.items()}
+        _net["dirty"] = False
+    tmp = LAST_FILE.with_suffix(".tmp")
+    with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=5) as f:
+        json.dump(data, f, separators=(",", ":"))
+    os.replace(tmp, LAST_FILE)
+
+
+def last_saver():
+    while True:
+        _save_wake.wait(LAST_SAVE_S)   # every few minutes, and at once when FRM goes down
+        _save_wake.clear()
+        try:
+            last_save()
+        except OSError:
+            pass
+
+
+def last_snapshot():
+    """While FRM is up: every few minutes, fetch whatever no page has asked for lately, so the saved last state covers
+    every tab (not only the ones that happened to be open when the game server went down)."""
+    while True:
+        time.sleep(LAST_SAVE_S)
+        if _net["down_since"] is not None:
+            continue
+        for ep in sorted(ALLOWED - BLOCKED):
+            with _last_lock:
+                t = _last.get(ep, (0,))[0]
+            if time.time() - t >= LAST_SAVE_S:
+                frm(ep, 60)
+                if _net["down_since"] is not None:
+                    break
+                time.sleep(0.2)   # spread the load on the game thread
+
+
+def frm_down(why):
+    if _net["down_since"] is None:
+        with _last_lock:   # when FRM last answered (also right after this server restarts with FRM already down)
+            _net["down_since"] = max((t for t, _ in _last.values()), default=time.time())
+        print(f"FRM not answering ({why}) - serving the last known state")
+        _save_wake.set()
+
+
+def frm_prober():
+    """While FRM is down, check every few seconds whether it's back (in the background, so no page waits on it)."""
+    while True:
+        time.sleep(OFFLINE_RETRY_S)
+        if _net["down_since"] is None:
+            continue
+        try:
+            with urllib.request.urlopen(f"{FRM}/getPower", timeout=10) as r:
+                r.read()
+        except (urllib.error.URLError, OSError):   # HTTPError too: a 503 while a session loads isn't "back" yet
+            continue
+        with _cache_lock:
+            _cache.clear()   # nothing from before the gap counts as fresh
+        _net["down_since"] = None
+        print("FRM is answering again")
+
+
 def frm(endpoint, max_age=None):
-    """(status, body bytes) for an FRM endpoint; concurrent callers share one request."""
+    """(status, body bytes, stale) for an FRM endpoint; concurrent callers share one request. stale = None for a live
+    answer, else the unix time of the last answer FRM gave (served instead while FRM is down)."""
     if endpoint in BLOCKED:
-        return 503, b'{"error":"endpoint blocked (FRM_BLOCK)"}'
+        return 503, b'{"error":"endpoint blocked (FRM_BLOCK)"}', None
     if max_age is None:
         max_age = SLOW_CACHE_S.get(endpoint, CACHE_S)
     with _ep_locks[endpoint]:
         with _cache_lock:
             hit = _cache.get(endpoint)
         if hit and time.monotonic() - hit[0] < max_age:
-            return hit[1], hit[2]
+            return hit[1], hit[2], None
+        with _last_lock:
+            last = _last.get(endpoint)
+        # FRM is down: never wait on it (a refused connection to "localhost" alone takes Windows ~2 s): hand out the
+        # last answer, or fail at once if there isn't one. frm_prober() notices when it's back.
+        if _net["down_since"] is not None:
+            if last:
+                return 200, last[1], last[0]
+            return 502, b'{"error":"FRM not answering, and there is no earlier answer for this yet"}', None
+        unreachable = None
         try:
             with urllib.request.urlopen(f"{FRM}/{endpoint}", timeout=15) as r:
                 body, status = r.read(), 200
         except urllib.error.HTTPError as e:   # e.g. FRM's 503 while a session loads
             body, status = e.read() or b'{"error":"FRM error"}', e.code
+            if status == 503:
+                unreachable = "HTTP 503"
         except (urllib.error.URLError, OSError) as e:
             body, status = (b'{"error":"FRM not reachable - is the game/server up and its web server started (/frm http start)?","detail":"'
                             + str(e).replace('"', "'").encode() + b'"}'), 502
+            unreachable = str(e)
         if status == 200:   # don't cache errors: once FRM is back, the next call should reach it
             with _cache_lock:
                 _cache[endpoint] = (time.monotonic(), status, body)
-        return status, body
+            with _last_lock:
+                _last[endpoint] = (time.time(), body)
+                _net["dirty"] = True
+            return status, body, None
+        if unreachable:
+            frm_down(unreachable)
+        if last:   # FRM down, or this one endpoint failing: the last answer it gave
+            return 200, last[1], last[0]
+        return status, body, None
 
 
-def frm_json(endpoint, max_age=None):
-    status, body = frm(endpoint, max_age)
+def frm_json(endpoint, max_age=None, live=False):
+    """the endpoint's JSON; the last known answer while FRM is down, unless live (the history recorder: no fake samples)"""
+    status, body, stale = frm(endpoint, max_age)
     if status != 200:
         raise OSError(f"{endpoint}: HTTP {status}")
+    if live and stale:
+        raise OSError(f"{endpoint}: FRM not answering")
     return json.loads(body)
 
 
@@ -667,6 +780,8 @@ def logistics_worker():
         _logi_wake.clear()
         if not logistics_due():
             continue
+        if _net["down_since"] is not None and LOGI["json"]:   # FRM down: the last result still stands, nothing new to work out
+            continue
         LOGI["tried"] = time.monotonic()
         try:
             fac, ext, gens = frm_json("getFactory", 30), frm_json("getExtractor", 30), frm_json("getGenerators", 30)
@@ -934,21 +1049,21 @@ def recorder():
         t0 = time.monotonic()
         try:
             if "getSessionInfo" not in BLOCKED:
-                HIST.check_session(frm_json("getSessionInfo", 30).get("SessionName"))
-            HIST.add_power(frm_json("getPower"))
+                HIST.check_session(frm_json("getSessionInfo", 30, live=True).get("SessionName"))
+            HIST.add_power(frm_json("getPower", live=True))
             if t0 - last_prod >= PROD_EVERY_S:
                 last_prod = t0
-                fac, ext, gens = frm_json("getFactory"), frm_json("getExtractor"), frm_json("getGenerators")
+                fac, ext, gens = frm_json("getFactory", live=True), frm_json("getExtractor", live=True), frm_json("getGenerators", live=True)
                 gen = {}
                 for g in gens:
                     gen[g["Name"]] = gen.get(g["Name"], 0) + (g.get("RegulatedDemandProd") or 0)
                 HIST.add_prod(production_totals(fac, ext, gens), gen)
                 HIST.add_extractors(ext)
                 try:
-                    dna = frm_json("getExplorationSink")[0].get("TotalPoints", 0)
+                    dna = frm_json("getExplorationSink", live=True)[0].get("TotalPoints", 0)
                 except (OSError, ValueError, IndexError):
                     dna = 0
-                HIST.add_sink(frm_json("getResourceSink")[0]["TotalPoints"], dna)
+                HIST.add_sink(frm_json("getResourceSink", live=True)[0]["TotalPoints"], dna)
         except Exception:   # FRM down, a session loading, a cut-off or odd reply: just a gap in the chart
             pass
         if t0 - last_save >= SAVE_EVERY_S:
@@ -1008,7 +1123,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             max_age = min(60.0, float(urllib.parse.parse_qs(query)["max_age"][0]))
         except (KeyError, ValueError):
             max_age = None
-        self.send_body(*frm(endpoint, max_age))
+        status, body, stale = frm(endpoint, max_age)
+        # X-Stale: FRM isn't answering and this is what it last said (unix time); X-Down-Since: when it stopped
+        self.send_body(status, body, {"X-Stale": f"{stale:.0f}", "X-Down-Since": f"{_net['down_since'] or stale:.0f}"} if stale else None)
 
     def send_body(self, status, body, headers=None):
         self.send_response(status)
@@ -1049,6 +1166,10 @@ if __name__ == "__main__":
         FRM = args.frm.rstrip("/")
     if not (ROOT / "map.avif").exists():
         print("note: map.avif missing - run `python tools/fetch_assets.py --game-dir <Satisfactory install>` for the map background")
+    last_load()
+    threading.Thread(target=last_saver, daemon=True).start()
+    threading.Thread(target=last_snapshot, daemon=True).start()
+    threading.Thread(target=frm_prober, daemon=True).start()
     if not args.no_history:
         HIST.load()
         threading.Thread(target=recorder, daemon=True).start()
