@@ -166,5 +166,14 @@ const Resize = (() => {
     for (const p of parts(c)) { p.style.flex = ""; p.classList.remove("rs-min"); }
   });
 
-  return { scan };
+  // the header's "Reset layout" button: every tab's panels and the map back to their default sizes
+  function reset() {
+    store = {}; save();
+    try { localStorage.removeItem(MAPKEY); } catch {}
+    applyMapW();
+    for (const c of document.querySelectorAll("[data-rs]")) for (const p of parts(c)) { p.style.flex = ""; p.classList.remove("rs-min"); }
+  }
+  document.getElementById("resetLayout")?.addEventListener("click", reset);
+
+  return { scan, reset };
 })();

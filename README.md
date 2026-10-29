@@ -6,6 +6,8 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 
 ## Maps
 
+On a desktop every tab's map sits in the same place on the right, at the same size, and changing tabs keeps the same spot and zoom, so the map doesn't move or flash when you switch. The **Players** button beside Whole map centres on a player; click again for the next one (online players first, then A–Z; right-click goes back).
+
 Every tab's map shares the same parts: a Layers dropdown with **everything** — factory buildings, vehicles and their paths, stations, the power network, belts, pipes, storage, resource nodes, collectibles, hypertubes (tubes, entrances and the open ends rides launch from, with their angle) and players. Each tab starts with only what it's about switched on, plus players (the Overview starts with everything except resource nodes and collectibles); switch anything else on from the menu, and the page only fetches what's switched on. Right-click a map to open the same spot in another tab's map, and hover anything for a detailed popup. Machines, generators, vehicles, stations, storage, belts and pipes, power poles and switches, players, resource nodes and collectibles all show a title, a status badge and labelled rows: what it's doing, rates, contents, its power grid, height and position. Extractors also show what they took out over the last 10 minutes and hour, the most they can at their clock speed, what's unused, and the node's purity. Anything with a problem says why in one line under its title, with numbers: a machine that's "Starved: Coal −25/min (56%)" or has its "Output full", a generator with no fuel (and how much it burns), a train that can't reach its next station (on a different track, or check signals), a fuse that tripped (what the grid wants vs makes), full storage, a pump past its head lift, batteries draining.
 
 ![Hover popup](docs/screenshots/hover.png)
@@ -14,7 +16,7 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 
 ### Overview (home)
 - **Needs attention**: an overloaded grid or tripped fuse, max consumption over capacity, generators out of fuel or water, starved machines, items used faster than they're made, stuck vehicles (derailed, station unreachable, …), unconnected belt/pipe ends, AWESOME Sinks without power, milestones ready to unlock, coupons to spend. Each links to the tab that explains it.
-- **Summary cards**: power across the top (key figures and the four-line power chart), then production (status mix, top products, shortfalls), progression (Space Elevator and HUB parts), vehicles (per type, stuck ones by name), belts & pipes (totals by tier, head lift problems) and the AWESOME Sink (points per minute, time to the next coupon, the items earning the most).
+- **Summary cards** in rows: power (key figures and the four-line power chart); production (status mix, top products, shortfalls) and progression (Space Elevator and HUB parts); vehicles (per type, stuck ones by name), belts & pipes (totals by tier, head lift problems) and the AWESOME Sink (points per minute, time to the next coupon, the items earning the most).
 - **World map** of machines, generators, vehicles, players, the HUB, the Space Elevator, AWESOME Sinks, every belt and pipe, the power network (lines, poles, wall outlets, towers, switches, power storage), every storage container, fluid buffer and Dimensional Depot uploader, hypertubes, roads, rail, drone routes and truck / train stations, with a categorized Layers dropdown.
 
 ### Vehicles
@@ -26,6 +28,7 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 ![Production](docs/screenshots/production.png)
 - **Items**: producing, consuming and net per minute for every item (generators' fuel and water included), capacity and how much of it is in use. Click an item to see its history and highlight the machines that make (blue) and use (orange) it, in the table and on the map.
 - **Machines**: status (running, partial, starved, output full, paused, no power), productivity, input and output, clock speed, power shards, Somersloops and power draw. A filter under the columns (building, recipe, status, productivity, inputs, outputs, clock); click a row to find the machine on the map.
+- **Item details** under the two tables: the picked item's history, the machines that make and use it, and its recipes (a one-line strip until you pick an item).
 - The summary tiles are shortcuts: click "5 starved" to see those five.
 
 ### Power
@@ -35,7 +38,8 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 - **Power & batteries**: the power graph with a stored-charge graph (MWh) under it on the same time axis, beside a battery readout like the in-game Power Storage panel: charge gauge and %, time until full (or empty while draining), stored charge (e.g. 3,300 / 3,300 MWh) and charge rate.
 - **Generators & switches** in one table, with a filter under every column: each generator's output, fuel and water; each power switch's state, priority group (Undefined turns off first, then 8 … 1), what it's fed from and what it controls. Hover a switch to see its two sides on the map (supply blue, controlled orange).
 - **Grid layout**: each grid's sections, following the switches out from the generators.
-- Generation by generator type and consumption by building type, beside a map of the power network: lines, poles, wall outlets, towers, switches and power storage, with the selected grid bright and the rest faded.
+- Generation by generator type and consumption by building type, beside the grid layout.
+- A map of the power network: lines, poles, wall outlets, towers, switches and power storage, with the selected grid bright and the rest faded.
 
 ### Belts
 ![Belts](docs/screenshots/belts.png)
@@ -43,7 +47,7 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 - Totals: belts, lifts, splitters and mergers, unconnected ends, slots used across containers, depot items at their limit, and full storage (click those to list them).
 - **Belt networks table**: what each network feeds (production, power), the buildings it connects (storage included), its length, pieces, lifts, tier mix and bottleneck (the slowest tier, lifts included), and open ends. **Storage table**: type, contents, slots used, amount stored and the belts into it.
 - The two are **linked**: click a network (in the table or on the map) and the storage it reaches is pinned to the top of the Storage table and ringed on the map; click a storage and the belts into it are pinned and drawn on the map. Every column of both tables has a filter, and the map follows them.
-- Under the map: belt and lift pieces by tier, and every **Dimensional Depot** item against its limit (an uploader counts as full only when the depot can't take any more of its item).
+- Under the tables: belt and lift pieces by tier, and every **Dimensional Depot** item against its limit (an uploader counts as full only when the depot can't take any more of its item).
 - Lifts are drawn as small squares in their belt tier's colour with a ↕, on top of the belts.
 
 ### Pipes
@@ -51,7 +55,7 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 - Every pipe grouped into networks, and every **fluid buffer** (Fluid Buffer, Industrial Fluid Buffer), linked the same way as on the Belts tab.
 - Totals: pipes and junctions, pumps and valves (how many are pumping, their power), head lift problems, unconnected ends, m³ stored across buffers, and full buffers.
 - **Pipe networks table**: the fluid in each, what it feeds, what it connects, length, pieces, tiers, bottleneck, open ends and head lift. **Fluid buffers table**: contents, how full, fill / drain rate and the pipes into it.
-- Under the map: pipe pieces by tier, and every **pump** with its head-lift gauge (how high it's pushing now, against its design) and flow — click one to find it on the map.
+- Under the tables: pipe pieces by tier, and every **pump** with its head-lift gauge (how high it's pushing now, against its design) and flow — click one to find it on the map.
 - **Head lift**: liquids only climb so high above whatever pushes them — a pump (Mk.1 20 m, Mk.2 50 m), an extractor or machine output (10 m) or a fluid buffer (8 / 12 m); a little past that the flow drops, a few metres more and it stops. Head lift only passes through completely filled pipes, and a fluid buffer counts as one: a pump's push carries through a buffer once it's full; while it fills, past it only the buffer's own head lift counts, in proportion to how full it is. `server.py` splits the pipes at pumps and filling buffers into runs, finds what pushes each run and how high that reaches, and flags pipe pieces above it: a little over = **near limit** (yellow), past the point where flow stops = **too high** (red). The live contents of those pipes then say how sure that is (they stay empty while the rest of the run has fluid = almost certainly head lift; full anyway = not flagged). Flagged pipes are drawn dashed red / yellow with a ⚠ at the highest point (popup: what pushes it, from what height, how far over); the tile and the Head lift column list them, and the Overview shows them under what needs attention. Gases need no head lift and are skipped.
 - Hover a belt, pipe, lift, pump or storage on any map to see it; the maps have one layer per kind of storage building.
 - `server.py` works the networks out by following what each belt, lift and pipe end is plugged into (FRM's `ConnectedTo0` / `ConnectedTo1`), through splitters/mergers, junctions/pumps/valves and floor holes. With an FRM build that doesn't report those, it falls back to geometry (ends that meet, each lift joined to the nearest belt end at its height). A network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
@@ -79,7 +83,8 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 - Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline) as arrows pointing the way they face. **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview map shows them all, the Belts and Pipes maps one each.
 - Every table has its title and row count on the left, **Clear filters** on the right, and filters under the column headings.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
-- On a desktop browser each tab fits one screen; on phones the panels stack.
+- On a desktop browser each tab fits one screen, with the map on the right; on phones the panels stack and the map comes last.
+- **Resize anything** (desktop): drag the gap between two panels to give one more room, and drag the map's left edge to make it wider (one width for every tab). Pull a gap further and the panels after it squeeze down to their titles one by one; pull back and they open again in reverse. The top tiles resize sideways. Double-click a gap to put that group back, or use **Reset layout** under the clock in the header for everything. Sizes are remembered in your browser.
 - `server.py` records power (battery charge and capacity included), production and sink points history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened. It works out the belt and pipe networks every minute while a page shows them (every 5 minutes for a page in the background, not at all when nobody is looking).
 
 ## Requirements
@@ -115,4 +120,4 @@ Options:
   - a page in the background (another browser tab, a minimised window) polls at most once a minute and catches up when it's shown again;
   - `server.py` caches replies (1 s; 4 s for the big ones), so several open pages and the history recorder share requests, and the Overview reuses the recorder's machine snapshot.
   With one page open this costs FRM about 2–3 s of work a minute; the biggest single request (`getBelts`, a few hundred ms on a large factory) runs once a minute only while belts and pipes are on screen.
-- Code: `index.html` (page, Vehicles tab), `js/poll.js` (polling), `js/charts.js` (charts, tables, dropdowns), `js/map.js` (the shared map), and one file per other tab.
+- Code: `index.html` (page, Vehicles tab), `js/poll.js` (polling), `js/charts.js` (charts, tables, dropdowns), `js/map.js` (the shared map), `js/resize.js` (resizable panels), and one file per other tab.
