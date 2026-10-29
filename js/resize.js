@@ -166,12 +166,13 @@ const Resize = (() => {
     for (const p of parts(c)) { p.style.flex = ""; p.classList.remove("rs-min"); }
   });
 
-  // the header's "Reset layout" button: every tab's panels and the map back to their default sizes
+  // the header's "Reset layout" button: every tab's panels and the map back to their default sizes, every map's layers to its tab's default
   function reset() {
     store = {}; save();
     try { localStorage.removeItem(MAPKEY); } catch {}
     applyMapW();
     for (const c of document.querySelectorAll("[data-rs]")) for (const p of parts(c)) { p.style.flex = ""; p.classList.remove("rs-min"); }
+    MapView.defaultAllLayers();   // and what every map shows (its Layers menu)
   }
   document.getElementById("resetLayout")?.addEventListener("click", reset);
 

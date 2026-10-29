@@ -679,11 +679,11 @@ class MapView {
     this.storeKey = opts.storeKey + ".v3";
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(this.storeKey) || "{}"); } catch {}
-    for (const l of this.layers) l.on = saved[l.key] ?? l.on ?? true;
+    for (const l of this.layers) { l.def = l.on ?? true; l.on = saved[l.key] ?? l.def; }   // def: this tab's starting state (the menu's Default button)
     this.dragging = false; this.mouseWorld = null;
     el.classList.add("mapview");
     el.innerHTML = `<div class="mv-head"><div class="btns"></div><div class="btns right"><button class="b" data-act="fit">${esc(opts.fitLabel || "Fit")}</button><button class="b" data-act="world">Whole map</button><button class="b mv-pl" data-act="player" disabled></button></div></div>
-      <div class="mv-box"><canvas></canvas><div class="mv-hint">${esc(opts.hint || "scroll to zoom · drag to pan")}</div></div>`;
+      <div class="mv-box"><canvas></canvas><div class="mv-hint">${esc(opts.hint || "scroll to zoom · drag to pan")}</div><div class="mv-note" hidden></div></div>`;
     this.btns = el.querySelector(".mv-head .btns");
     this.plBtn = el.querySelector(".mv-pl");
     this.plBtn.addEventListener("contextmenu", e => { e.preventDefault(); this.nextPlayer(-1); });   // right-click: previous player
@@ -706,6 +706,7 @@ class MapView {
       this.menu.addEventListener("click", e => {
         const a = e.target.dataset.act;
         if (a === "all" || a === "none") this.setLayers(Object.fromEntries(this.layers.map(l => [l.key, a === "all"])));
+        if (a === "default") this.defaultLayers();
         if (a === "done") this.closeMenu();
         const g = e.target.closest("[data-group]");
         if (g) { const ls = this.layers.filter(l => (l.group || "") === g.dataset.group), on = !ls.every(l => l.on);
@@ -818,6 +819,12 @@ class MapView {
   all(visibleOnly) { return this.layers.filter(l => !visibleOnly || l.on).flatMap(l => this.points[l.key] || []); }
   find(id) { return this.all(false).find(p => p.id === id); }
   // turn layers on/off ({ key: bool }), remember it, redraw
+  defaultLayers() { this.setLayers(Object.fromEntries(this.layers.map(l => [l.key, l.def]))); }
+  // every map back to its tab's starting layers ("Reset layout"); maps not built yet just forget what was saved
+  static defaultAllLayers() {
+    try { for (const k of Object.keys(localStorage)) if (k.endsWith(".v3")) localStorage.removeItem(k); } catch {}
+    for (const m of MapView.all) m.defaultLayers();
+  }
   setLayers(changes) {
     for (const l of this.layers) if (l.key in changes) l.on = changes[l.key];
     try { localStorage.setItem(this.storeKey, JSON.stringify(Object.fromEntries(this.layers.map(x => [x.key, x.on])))); } catch {}
@@ -866,7 +873,7 @@ class MapView {
       const ls = this.layers.filter(l => (l.group || "") === g);
       return (g && groups.length > 1 ? `<div class="pop-group" data-group="${esc(g)}" title="Show / hide all ${esc(g.toLowerCase())}">${esc(g)}</div>` : "") + ls.map(row).join("");
     }).join("")}</div>
-      <div class="pop-foot"><button data-act="all">All</button><button data-act="none">None</button><button data-act="done">Done</button></div>`;
+      <div class="pop-foot"><button data-act="all">All</button><button data-act="none">None</button><button data-act="default" title="What this tab's map shows to start with">Default</button><button data-act="done">Done</button></div>`;
     // only when something changed (counts, ticks): rebuilding the open menu every refresh swallowed clicks and scrolled it back
     if (this.menuHtml === html && this.menu.childElementCount) return;
     const list = this.menu.querySelector(".pop-list"), top = list ? list.scrollTop : 0;
@@ -880,6 +887,14 @@ class MapView {
     placePopover(this.menu, btn);
   }
   closeMenu() { this.menu?.classList.remove("open"); }
+  // a short note over the top of the map, e.g. that the tab's filters hide some markers; its button calls onClick
+  setNote(html, onClick) {
+    const el = this.canvas.parentElement.querySelector(".mv-note");
+    this.noteClick = onClick;
+    if (el.dataset.html === html) return;   // only when it changes: rebuilding it under the mouse swallowed clicks
+    el.dataset.html = html; el.innerHTML = html; el.hidden = !html;
+    if (!el.dataset.wired) { el.dataset.wired = 1; el.addEventListener("click", e => { if (e.target.closest("button")) this.noteClick?.(); }); }
+  }
   resize() {
     const r = this.canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
     if (!r.width) return;

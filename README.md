@@ -60,12 +60,6 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 - Hover a belt, pipe, lift, pump or storage on any map to see it; the maps have one layer per kind of storage building.
 - `server.py` works the networks out by following what each belt, lift and pipe end is plugged into (FRM's `ConnectedTo0` / `ConnectedTo1`), through splitters/mergers, junctions/pumps/valves and floor holes. With an FRM build that doesn't report those, it falls back to geometry (ends that meet, each lift joined to the nearest belt end at its height). A network counts as production or power if it reaches a machine or a generator. It doesn't know what's on a belt or how full it is.
 
-### Inventory
-![Inventory](docs/screenshots/inventory.png)
-- **Player inventory**: what every player is carrying, one row per player and item, with the amount, the stacks it takes, and how many of that item the Dimensional Depot holds. Players who are online come first.
-- **Dimensional Depot**: every item in the depot with its amount, limit, how full it is, stacks, and how many players are carrying right now. Click "At the limit" to list the items that can't take any more uploads.
-- The two are **linked**: click an item in either table and it is marked in both, pinned to the top of the other one. Every column has a filter under it.
-
 ### Sink
 ![Sink](docs/screenshots/sink.png)
 - FICSIT Coupon income: points per minute in the last minute and over 10 minutes (the in-game sink graph's numbers), time until the next coupon and how far along it is, coupons waiting to be printed, total points and DNA points.
@@ -78,6 +72,12 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 ![Progression](docs/screenshots/progression.png)
 - Space Elevator phase with each part's delivered amount, how many are in storage, how fast the factory makes them and time to finish; the HUB's active milestone; milestones per tier (hover one to see what it unlocks: buildings, recipes and the machine that makes each, equipment, and what it still costs); MAM research; alternate recipes, AWESOME Shop and coupons.
 - Collectibles found (Somersloops, Mercer Spheres, power slugs) and resource nodes tapped. Click one to find the ones still out there on the map.
+
+### Inventory
+![Inventory](docs/screenshots/inventory.png)
+- **Player inventory**: what every player is carrying, one row per player and item, with the amount, the stacks it takes, and how many of that item the Dimensional Depot holds. Players who are online come first.
+- **Dimensional Depot**: every item in the depot with its amount, limit, how full it is, stacks, and how many players are carrying right now. Click "At the limit" to list the items that can't take any more uploads.
+- The two are **linked**: click an item in either table and it is marked in both, pinned to the top of the other one. Every column has a filter under it.
 
 ### Everywhere
 - Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline) as arrows pointing the way they face. **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview map shows them all, the Belts and Pipes maps one each.

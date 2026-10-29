@@ -321,6 +321,10 @@ const Production = (() => {
         label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${M_STATUS[m.status].label}` });
     }
     for (const [key, pts] of byType) map.setPoints(key, pts);
+    // the map follows the search and the Machines table's filters: say so when they hide machines
+    const all = machines.filter(m => m.loc).length, shown = vm.filter(m => m.loc).length;
+    map.setNote(shown < all ? `Showing ${fmtNum(shown)} of ${fmtNum(all)} machines: the search and the Machines table's filters hide the rest <button class="b">Show all</button>` : "",
+      () => { ui.q = ""; $("pSearch").value = ""; saveUi(); machineTable.clearFilters(); render(); map.fit(); });
     map.setEmphasis(focusItem ? new Map(vm.filter(relation).map(m => [m.id, relation(m) === "make" ? "var(--s1)" : "var(--s2)"])) : null);
     renderDetail();
   }

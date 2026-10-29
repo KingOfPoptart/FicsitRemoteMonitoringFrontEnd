@@ -287,6 +287,10 @@
   .mv-hint { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: var(--muted); background: rgba(13,16,19,.75);
              padding: 2px 7px; border-radius: 4px; pointer-events: none; }
   .mapview.short .mv-box canvas { height: 44vh; }
+  .mv-note { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+             padding: 5px 6px 5px 10px; border-radius: 6px; font-size: 12px; background: rgba(13,16,19,.88); border: 1px solid var(--accent); }
+  .mv-note[hidden] { display: none; }
+  .mv-note .b { margin-left: auto; height: 24px; padding: 0 10px; font-size: 12px; }
   .f-multi.mv-layers { width: auto; min-width: 130px; height: 28px; }
   .mv-menu { z-index: 40; min-width: 220px; }
   .mv-menu .mv-sw { width: 16px; display: inline-flex; justify-content: center; }
@@ -605,7 +609,7 @@
 <header>
   <h1><span>FICSIT</span> Monitor</h1>
   <nav class="tabs" id="tabs">
-    <button data-tab="overview">Overview</button><button data-tab="vehicles">Vehicles</button><button data-tab="production">Production</button><button data-tab="power">Power</button><button data-tab="belts">Belts</button><button data-tab="pipes">Pipes</button><button data-tab="inventory">Inventory</button><button data-tab="sink">Sink</button><button data-tab="progression">Progression</button>
+    <button data-tab="overview">Overview</button><button data-tab="vehicles">Vehicles</button><button data-tab="production">Production</button><button data-tab="power">Power</button><button data-tab="belts">Belts</button><button data-tab="pipes">Pipes</button><button data-tab="sink">Sink</button><button data-tab="progression">Progression</button><button data-tab="inventory">Inventory</button>
   </nav>
   <div class="stats" id="statsOv" data-for="overview" hidden></div>
   <div class="stats" id="stats" data-for="vehicles"></div>
@@ -618,7 +622,7 @@
   <div class="stats" id="statsSink" data-for="sink" hidden></div>
   <div class="conn-box">
     <div class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
-    <button class="b reset-layout" id="resetLayout" type="button" title="Put every panel and the map back to their default sizes, on every tab">Reset layout</button>
+    <button class="b reset-layout" id="resetLayout" type="button" title="Put every panel and the map back to their default sizes, and every map's layers back to the default, on every tab">Reset layout</button>
   </div>
 </header>
 
@@ -1746,8 +1750,8 @@ document.addEventListener("click", e => {
 addEventListener("keydown", e => { if (e.key === "Escape" && document.querySelector(".xp-on")) setExpanded(null); });
 
 // ---- tabs -----------------------------------------------------------------------
-// #overview / #vehicles / #production / #power / #belts / #pipes / #inventory / #sink / #progression in the URL, so a tab can be bookmarked; the last one is remembered
-const TABS = { overview: "Overview", vehicles: "Vehicles", production: "Production", power: "Power", belts: "Belts", pipes: "Pipes", inventory: "Inventory", sink: "Sink", progression: "Progression" };
+// #overview / #vehicles / #production / #power / #belts / #pipes / #sink / #progression / #inventory in the URL, so a tab can be bookmarked; the last one is remembered
+const TABS = { overview: "Overview", vehicles: "Vehicles", production: "Production", power: "Power", belts: "Belts", pipes: "Pipes", sink: "Sink", progression: "Progression", inventory: "Inventory" };
 const OLD_TABS = { logistics: "belts" };   // Logistics was split into Belts and Pipes: old bookmarks open Belts
 let activeTab = (() => {
   const h = OLD_TABS[location.hash.slice(1)] || location.hash.slice(1); if (TABS[h]) return h;
