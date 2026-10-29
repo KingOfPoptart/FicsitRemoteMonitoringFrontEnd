@@ -264,7 +264,6 @@ function makeNetTab(kind) {
       logistics: b => { const n = net(b.n); return !n || n.kind !== kind || passes(n); },   // the map follows both tables' filters
       storage: s => !mine(s) || stPasses(s),
       highlight: () => picked || (pickedSt ? [...linkedNets()] : null),
-      hint: `hover a ${noun}${BELT ? "" : ", pump"} or ${BELT ? "storage" : "buffer"} to see it · click it (or a row) to select it and what it connects to`,
       onNetClick: nid => { if (nid) pick(nid, true); else if (picked) pick(null, true); else if (pickedSt) pickStorage(null, true); },   // empty map = clear
       onClick: p => { if (p.storage) pickStorage(p.storage, true); else if (p.net && net(p.net)) pick(p.net, true); else if (p.pump?.n) pick(p.pump.n, true); },
       onNetHover: nid => {   // map hover -> the row lights up and scrolls into view

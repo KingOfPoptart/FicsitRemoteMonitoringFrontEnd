@@ -284,8 +284,6 @@
   .mv-box canvas { width: 100%; height: 62vh; min-height: 320px; display: block; border-radius: 8px; border: 1px solid var(--line);
                    background: #0d1013; cursor: grab; }
   .mv-box canvas.dragging { cursor: grabbing; }
-  .mv-hint { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: var(--muted); background: rgba(13,16,19,.75);
-             padding: 2px 7px; border-radius: 4px; pointer-events: none; }
   .mapview.short .mv-box canvas { height: 44vh; }
   .mv-note { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
              padding: 5px 6px 5px 10px; border-radius: 6px; font-size: 12px; background: rgba(13,16,19,.88); border: 1px solid var(--accent); }
@@ -458,8 +456,8 @@
     /* squeezed to its title bar by a drag: only the title shows */
     .rs-min.card > :not(.card-head):not(.xp-btn), .rs-min > .card > :not(.card-head):not(.xp-btn) { visibility: hidden; }   /* item details collapsed to a strip: nothing to resize */
   }
-  /* a legend drawn over the map (Vehicles), above the hint */
-  .mv-legend { position: absolute; left: 10px; right: 10px; bottom: 32px; pointer-events: none; font-size: 11px; gap: 4px 12px; }
+  /* a legend drawn over the map (Vehicles), bottom-left */
+  .mv-legend { position: absolute; left: 10px; right: 10px; bottom: 8px; pointer-events: none; font-size: 11px; gap: 4px 12px; }
   .mv-legend span { background: rgba(13,16,19,.75); padding: 2px 7px; border-radius: 4px; }
 
   /* overview */
@@ -1403,7 +1401,7 @@ const networkLayers = () => [
   { key: "dronePorts", group: "Stations", label: "Drone ports", swatch: "background:#f06292;width:9px;height:9px;border-radius:2px", count: () => dronePorts.length },
 ];
 const vmap = new MapView($("vehMap"), {
-  storeKey: "vt.layers", animate: () => mapMoving(), fitLabel: "Fit vehicles", hint: "scroll to zoom · drag to pan · click a row to follow",
+  storeKey: "vt.layers", animate: () => mapMoving(), fitLabel: "Fit vehicles",
   layerMenu: true, drawsNetwork: true, world: { replaces: ["veh"] },   // its own vehicles (per type) instead of the shared arrows
   // a layer per vehicle type (picture + count), then the transport network; every other kind of thing is in the Layers menu, off
   layers: [...Object.keys(TYPES).map(t => ({ key: "v:" + t, group: "Vehicles", label: t, swatchHtml: typeImg(t),

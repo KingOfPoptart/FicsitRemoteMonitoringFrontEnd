@@ -475,7 +475,6 @@ const Production = (() => {
       storeKey: "pt.map2", layerMenu: true, logistics: b => b.p,   // belts and pipes on production lines
       world: { replaces: ["machines"], on: l => l.group === "Belts" || l.group === "Pipes" },   // its machines (per type) instead of the shared dots
       layers: [...GAME_BUILDINGS, "Other"].map(b => ({ key: "b:" + b, group: "Machines", label: b, color: "var(--ok)", size: 4, swatchHtml: b === "Other" ? "" : icon(b, "icon sm") })),
-      hint: "markers follow the filters · click a machine row to find it",
       tooltip: p => { const m = machines.find(x => x.id === p.id); return m ? machinePop(m) : ""; },
       onHover: p => { if (p) machineTable.reveal(r => r.id === p.id); hl(p && p.id); },
     });

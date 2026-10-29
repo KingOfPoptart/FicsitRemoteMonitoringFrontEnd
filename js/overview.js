@@ -226,7 +226,7 @@ const Overview = (() => {
     map = new MapView($("ovMap"), {
       // the whole world: every kind of thing is in the Layers menu; on to start with: the factory, transport, the power
       // network, belts, pipes, storage and hypertubes (resource nodes and collectibles are there, off)
-      storeKey: "ov.map2", layerMenu: true, layers: [], drawsNetwork: true, hint: "click a marker to open it in its tab · scroll to zoom",
+      storeKey: "ov.map2", layerMenu: true, layers: [], drawsNetwork: true,
       world: { on: l => ["Factory", "Transport", "Stations", "Power network", "Belts", "Pipes", "Storage", "Hypertubes"].includes(l.group) },
       onClick: p => { if (p.tab) location.hash = p.tab; },
       draw: (c, now, mv) => drawNetwork(mv, k => mv.isOn(k)),   // roads, tracks, drone routes, stations (shared with Vehicles)

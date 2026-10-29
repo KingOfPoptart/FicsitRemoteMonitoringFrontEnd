@@ -62,7 +62,7 @@ const Pop = {
  *   fitTo() -> [image points], fitLabel   what the Fit button frames (default: the visible point layers)
  *   onPan()                         the user dragged the map
  *   extraTip(mx, my) -> html        hover popup for something drawn by draw() (canvas px), when no marker / belt is under the cursor
- *   hint, dim                       hint text bottom-left; darkening over the map image (0-1)
+ *   dim                             darkening over the map image (0-1)
  * })
  * setPoints(layerKey, [{ id, x, y, color?, label?, ... }]) — world coordinates (Unreal cm)
  */
@@ -683,7 +683,7 @@ class MapView {
     this.dragging = false; this.mouseWorld = null;
     el.classList.add("mapview");
     el.innerHTML = `<div class="mv-head"><div class="btns"></div><div class="btns right"><button class="b" data-act="fit">${esc(opts.fitLabel || "Fit")}</button><button class="b" data-act="world">Whole map</button><button class="b mv-pl" data-act="player" disabled></button></div></div>
-      <div class="mv-box"><canvas></canvas><div class="mv-hint">${esc(opts.hint || "scroll to zoom · drag to pan")}</div><div class="mv-note" hidden></div></div>`;
+      <div class="mv-box"><canvas></canvas><div class="mv-note" hidden></div></div>`;
     this.btns = el.querySelector(".mv-head .btns");
     this.plBtn = el.querySelector(".mv-pl");
     this.plBtn.addEventListener("contextmenu", e => { e.preventDefault(); this.nextPlayer(-1); });   // right-click: previous player

@@ -232,7 +232,6 @@ const SinkTab = (() => {
         { key: "sinks", group: "Sinks", label: "AWESOME Sinks", color: SINK_COLOR, size: 6.5, shape: "drain" },
         { key: "feeds", group: "Sinks", label: "Machines feeding them", color: FEED_COLOR, size: 3.2 },
       ],
-      hint: "click a sink to see what feeds it · scroll to zoom",
       onClick: p => { if (p.layer === "sinks") pick(p.id); else { const s = [...(p.sinks || [])][0]; if (s) pick(s); } },
       onHover: p => { for (const tr of $("skSinks").querySelectorAll("tr[data-sink]")) tr.classList.toggle("hl", !!p && (tr.dataset.sink === p.id || p.sinks?.has(tr.dataset.sink))); },
     });

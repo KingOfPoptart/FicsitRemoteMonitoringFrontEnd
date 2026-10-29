@@ -520,7 +520,6 @@ const Power = (() => {
       fitTo: () => grid().all ? [] : map.all(true).filter(p => p.circuits && inGrid(p.circuits)).map(p => p.ip),
       tooltip: p => { if (p.layer === "switches") { const r = switchRows().find(x => x.id === p.id); if (r) return switchPop(r); }
         return `<div class="row"><span>${esc(p.label)}</span></div>`; },
-      hint: "hover a switch to see what's on each side · click a row to find it",
       onHover: p => {
         hl(p && p.id); if (p) scrollRowIntoView($("wUnits").querySelector(`tr[data-gid="${CSS.escape(p.id)}"], tr[data-sw="${CSS.escape(p.id)}"]`));
         if (p && p.layer === "switches") { const r = switchRows().find(x => x.id === p.id); if (r) showSides(r); }
