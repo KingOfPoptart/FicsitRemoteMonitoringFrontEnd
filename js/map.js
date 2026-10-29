@@ -95,6 +95,12 @@ const Players = {
       label: `${p.Name}${p.Online ? " · online" + lookLabel(p.location.pitch) : " · offline"}`, name: p.Online ? p.Name : `${p.Name} (offline)`,
       rot: typeof p.location.rotation === "number" ? p.location.rotation - 90 : null,   // FRM: compass, 0 = north
       offline: !p.Online, color: p.Online ? PLAYER_COLOR : "#8c94a1" })));
+    mv.playerButton();
+  },
+  // who the map's player button steps through: online players first, then offline ones (last seen spot), each A-Z
+  order() {
+    return this.list.filter(p => p.location).sort((a, b) => (b.Online ? 1 : 0) - (a.Online ? 1 : 0) ||
+      String(a.Name).localeCompare(String(b.Name), undefined, { sensitivity: "base" }));
   },
 };
 
@@ -669,15 +675,19 @@ class MapView {
     for (const l of this.layers) l.on = saved[l.key] ?? l.on ?? true;
     this.dragging = false; this.mouseWorld = null;
     el.classList.add("mapview");
-    el.innerHTML = `<div class="mv-head"><div class="btns"></div><div class="btns right"><button class="b" data-act="fit">${esc(opts.fitLabel || "Fit")}</button><button class="b" data-act="world">Whole map</button></div></div>
+    el.innerHTML = `<div class="mv-head"><div class="btns"></div><div class="btns right"><button class="b" data-act="fit">${esc(opts.fitLabel || "Fit")}</button><button class="b" data-act="world">Whole map</button><button class="b mv-pl" data-act="player" disabled></button></div></div>
       <div class="mv-box"><canvas></canvas><div class="mv-hint">${esc(opts.hint || "scroll to zoom · drag to pan")}</div></div>`;
     this.btns = el.querySelector(".mv-head .btns");
+    this.plBtn = el.querySelector(".mv-pl");
+    this.plBtn.addEventListener("contextmenu", e => { e.preventDefault(); this.nextPlayer(-1); });   // right-click: previous player
+    this.playerButton();
     this.canvas = el.querySelector("canvas"); this.ctx = this.canvas.getContext("2d");
     this.view = { s: 0.1, ox: 0, oy: 0 };
     el.querySelector(".mv-head").addEventListener("click", e => {
       const b = e.target.closest("button"); if (!b) return;
       if (b.dataset.act === "fit") this.fit();
       else if (b.dataset.act === "world") this.fitWorld(true);
+      else if (b.dataset.act === "player") { this.nextPlayer(1); return; }
       else if (b.dataset.act === "layers") { this.menu.classList.contains("open") ? this.closeMenu() : this.openMenu(b); return; }
       else if (b.dataset.layer) this.setLayers({ [b.dataset.layer]: !this.isOn(b.dataset.layer) });
       this.draw();
@@ -929,6 +939,32 @@ class MapView {
   // a tab's one-time framing once its data has loaded: skipped if the map was opened on a spot from another tab
   autoFit(how = () => this.fit()) { if (!this.handedOver) how(); }
   fitWorld(animate = false) { this.fitBox([{ x: 0, y: 0 }, { x: IMG, y: IMG }], 6, animate); }
+  // player button (right of Whole map): each click centres on the next player — online first, then A-Z; right-click
+  // goes back. After 30 s without a click it starts again from the first online player.
+  nextPlayer(dir) {
+    const list = Players.order(); if (!list.length) return;
+    const fresh = this.plAt && performance.now() - this.plAt < 30000;
+    let i = fresh ? list.findIndex(p => p.ID === this.plId) : -1;
+    i = i < 0 ? (dir > 0 ? 0 : list.length - 1) : (i + dir + list.length) % list.length;
+    this.plId = list[i].ID; this.plAt = performance.now();
+    this.locate(this.plId);
+    this.playerButton();
+  }
+  playerButton() {
+    const b = this.plBtn; if (!b) return;
+    const list = Players.order(), on = list.filter(p => p.Online).length;
+    const cur = this.plAt && performance.now() - this.plAt < 30000 ? list.findIndex(p => p.ID === this.plId) : -1;
+    const icon = '<svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M2.5 15c.6-3.4 2.8-5 5.5-5s4.9 1.6 5.5 5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+    const text = cur >= 0 ? `${esc(list[cur].Name)}${list[cur].Online ? "" : " (offline)"} <span class="n">${cur + 1}/${list.length}</span>`
+                          : `Players <span class="n">${on ? `${on} online` : list.length ? "offline" : "–"}</span>`;
+    const html = icon + text, title = !list.length ? "No players to show" :
+      `Centre on ${cur >= 0 && list.length > 1 ? "the next" : "a"} player (online first, then A–Z) · right-click: previous`;
+    // only when it changes: rebuilding the button under the mouse made clicks miss
+    if (this.plHtml !== html) { b.innerHTML = html; this.plHtml = html; }
+    b.title = title; b.disabled = !list.length;
+    clearTimeout(this.plTimer);
+    if (cur >= 0) this.plTimer = setTimeout(() => this.playerButton(), 30000 - (performance.now() - this.plAt) + 50);   // back to "Players"
+  }
   // fly to a point and pulse it for a few seconds (turns its layer on if needed)
   locate(id) {
     const p = this.find(id); if (!p) return;

@@ -273,6 +273,10 @@
   .mv-head { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
   .mv-head .btns { display: flex; flex-wrap: wrap; gap: 6px; }
   .mv-head .btns.right { margin-left: auto; }
+  .mv-pl { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; white-space: nowrap; overflow: hidden; }
+  .mv-pl svg { flex: none; color: #22d3ee; }
+  .mv-pl .n { color: var(--muted); font-size: 11px; }
+  .mv-pl:disabled { opacity: .5; cursor: default; }
   .mv-box { position: relative; }
   .mv-box canvas { width: 100%; height: 62vh; min-height: 320px; display: block; border-radius: 8px; border: 1px solid var(--line);
                    background: #0d1013; cursor: grab; }
