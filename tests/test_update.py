@@ -205,9 +205,32 @@ class World:
         self.servers.append(s)
         return s
 
+    def leftovers(self):
+        """PIDs of processes still running from this test's temp folder (servers restarted by an update included)."""
+        if os.name == "nt":
+            r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:T) } "
+                                "| ForEach-Object { $_.ProcessId }"], capture_output=True, text=True,
+                               env={**os.environ, "T": self.tmp.name}, creationflags=NO_WINDOW)
+        else:
+            r = subprocess.run(["pgrep", "-f", self.tmp.name], capture_output=True, text=True)
+        return [int(p) for p in r.stdout.split() if p.strip().isdigit() and int(p) != os.getpid()]
+
     def close(self):
         for s in self.servers:
             s.kill()
+        for _ in range(3):   # anything that slipped through (e.g. started while the port was between two servers)
+            pids = self.leftovers()
+            if not pids:
+                break
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            time.sleep(1)
+        else:
+            print(f"WARNING: test servers still running: {self.leftovers()}")
         self.gh.httpd.shutdown()
         if not self.keep:
             shutil.rmtree(self.tmp, ignore_errors=True)
@@ -253,11 +276,19 @@ class Server:
         return self.log.read_text(encoding="utf-8", errors="replace")
 
     def kill(self):
-        for pid in self.pids:
+        # an update restarts the server as a new process (and --auto-update can do it again at any time), so keep
+        # stopping whatever answers on this port until nothing does
+        for _ in range(20):
+            for pid in list(self.pids):
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+            time.sleep(0.3)
             try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
+                self.status()
+            except Exception:
+                break
         self.logf.close()
 
 
@@ -506,8 +537,29 @@ def test_zip_checks(w):
         raise AssertionError(f"accepted a bad zip: {list(bad)}")
 
 
+def test_port_in_use(w):
+    """A second copy on a port that's taken must fail, not quietly share it (Windows allows that with SO_REUSEADDR)."""
+    c = w.git_copy("git-port", "v1.0")
+    s = w.serve(c)
+    p = subprocess.run([sys.executable, str(c / "server.py"), "--port", str(s.port), "--no-update-check", "--frm",
+                        "http://127.0.0.1:9"], cwd=str(c), capture_output=True, text=True, timeout=30,
+                       stdin=subprocess.DEVNULL)
+    assert p.returncode != 0 and ("10048" in p.stderr or "in use" in p.stderr.lower()), (p.returncode, p.stderr[-300:])
+    assert s.page_ok()
+
+
+def test_no_leftovers(w):
+    for s in w.servers:
+        s.kill()
+    w.servers.clear()
+    time.sleep(1)
+    left = w.leftovers()
+    assert not left, f"servers still running after being stopped: {left}"
+
+
 ORDER = [test_zip_checks, test_git_up_to_date, test_git_update_flow, test_git_own_commits, test_github_unreachable,
-         test_git_broken_release_rolls_back, test_zip_auto_update, test_zip_update_and_rollback, test_only_this_machine]
+         test_git_broken_release_rolls_back, test_zip_auto_update, test_zip_update_and_rollback, test_only_this_machine,
+         test_port_in_use, test_no_leftovers]
 
 
 def main():

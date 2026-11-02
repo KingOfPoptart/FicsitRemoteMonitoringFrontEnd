@@ -19,6 +19,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -89,10 +90,43 @@ def is_ancestor(a, b):
     return _git("merge-base", "--is-ancestor", a, b).returncode == 0
 
 
+def _roots_only():
+    """Windows: an SSL context trusting only the Windows *root* store. Python's default also trusts the intermediate
+    ("CA") store, and Windows can keep a cross-signed copy of a root there (e.g. USERTrust ECC signed by Comodo's AAA
+    Certificate Services) whose own issuer isn't installed: OpenSSL then builds the chain through it and fails with
+    "unable to get issuer certificate" (seen with api.github.com). Stricter than the default, not looser."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)   # verifies certificates and host names
+    n = 0
+    for der, enc, trust in ssl.enum_certificates("ROOT"):
+        if enc == "x509_asn" and (trust is True or "1.3.6.1.5.5.7.3.1" in trust):   # trusted for server auth
+            try:
+                ctx.load_verify_locations(cadata=der)
+                n += 1
+            except ssl.SSLError:
+                pass
+    return ctx if n else None
+
+
+def urlopen(req, timeout):
+    """urlopen that copes with the Windows certificate-store problem above: roots only first, then Python's default."""
+    if os.name == "nt":
+        try:
+            ctx = _roots_only()
+        except Exception:
+            ctx = None
+        if ctx:
+            try:
+                return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+            except urllib.error.URLError as e:
+                if not isinstance(e.reason, ssl.SSLCertVerificationError):
+                    raise
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
 def api(path):
     req = urllib.request.Request(API + path, headers={"Accept": "application/vnd.github+json", "User-Agent": "FICSIT-Monitor",
                                                       "X-GitHub-Api-Version": "2022-11-28"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urlopen(req, timeout=15) as r:
         return json.load(r)
 
 
@@ -273,7 +307,7 @@ def _apply_git(sha):
 
 def _download(url):
     req = urllib.request.Request(url, headers={"User-Agent": "FICSIT-Monitor", "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urlopen(req, timeout=60) as r:
         data = r.read(MAX_ZIP + 1)
     if len(data) > MAX_ZIP:
         raise UpdateError("the release zip is too big")

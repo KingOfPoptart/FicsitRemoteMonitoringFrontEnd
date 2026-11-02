@@ -1273,6 +1273,9 @@ if __name__ == "__main__":
     print(f"FICSIT monitor {version} on http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}  (FRM: {FRM})")
     # a page opening a tab fires a burst of requests at once: queue them instead of refusing (the default backlog is 5)
     http.server.ThreadingHTTPServer.request_queue_size = 128
+    # On Windows SO_REUSEADDR lets a second copy listen on a port that's already in use (requests then go to either one
+    # at random): without it, a second copy fails with "port in use" instead.
+    http.server.ThreadingHTTPServer.allow_reuse_address = os.name != "nt"
     while True:
         # started by an update, or serving again after one was undone: the old server may still be letting go of the port
         for tries in range(60 if updater.RESTARTED or updater.RESUME.is_set() else 1, 0, -1):
