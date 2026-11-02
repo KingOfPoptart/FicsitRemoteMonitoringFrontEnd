@@ -148,7 +148,7 @@ const SinkTab = (() => {
 
   function placeSinks() {
     if (!map || !data) return;
-    map.setPoints("sinks", rows.map(r => ({ id: r.id, x: r.x, y: r.y, color: r.on ? SINK_COLOR : "var(--bad)", tip: () => sinkTip(r) })));
+    map.setPoints("sinks", rows.map(r => ({ id: r.id, x: r.x, y: r.y, color: r.on ? SINK_COLOR : "var(--bad)", st: r.on ? "on" : "off", tip: () => sinkTip(r) })));
     const seen = new Map();
     for (const r of rows) for (const f of r.feeds) {
       const p = seen.get(f.src) || { id: f.src, x: f.x, y: f.y, items: new Map(), sinks: new Set() };
@@ -229,7 +229,7 @@ const SinkTab = (() => {
       storeKey: "sk.map", layerMenu: true, world: { on: l => l.group === "Belts" || l.group === "Pipes" },
       // only the belts that end at a sink (their whole network, back to the machines)
       logistics: b => b.n && !!Logistics.byId?.get(b.n)?.touches?.["AWESOME Sink"], layers: [
-        { key: "sinks", group: "Sinks", label: "AWESOME Sinks", color: SINK_COLOR, size: 6.5, shape: "drain" },
+        { key: "sinks", group: "Sinks", label: "AWESOME Sinks", color: SINK_COLOR, size: 6.5, shape: "drain", legend: "sinks" },
         { key: "feeds", group: "Sinks", label: "Machines feeding them", color: FEED_COLOR, size: 3.2 },
       ],
       onClick: p => { if (p.layer === "sinks") pick(p.id); else { const s = [...(p.sinks || [])][0]; if (s) pick(s); } },

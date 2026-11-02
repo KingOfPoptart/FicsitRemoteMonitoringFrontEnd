@@ -548,11 +548,11 @@ const MapCtx = {
 // Factory buildings on any map: machines (dots by status), generators, the HUB, the Space Elevator and AWESOME Sinks.
 // The Production / Power / Sink tabs draw their own richer versions instead (a map's own layer wins over a shared one).
 const FACTORY_LAYERS = () => [
-  { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6 },
-  { key: "gens", group: "Factory", label: "Generators", color: "#e879f9", size: 5, shape: "diamond" },   // fuchsia; red = not running
+  { key: "machines", group: "Factory", label: "Machines", color: "var(--ok)", size: 2.6, legend: "machines" },
+  { key: "gens", group: "Factory", label: "Generators", color: "#e879f9", size: 5, shape: "diamond", legend: "gensOnOff" },   // fuchsia; red = not running
   { key: "hub", group: "Factory", label: "The HUB", color: "#fa9549", size: 6.5, shape: "square" },
   { key: "elevator", group: "Factory", label: "Space Elevator", color: "#fa9549", size: 8, shape: "triangle" },
-  { key: "sinks", group: "Factory", label: "AWESOME Sinks", color: "#818cf8", size: 6, shape: "drain" },   // red = no power
+  { key: "sinks", group: "Factory", label: "AWESOME Sinks", color: "#818cf8", size: 6, shape: "drain", legend: "sinks" },   // red = no power
 ];
 const hubTip = o => { const t = (FactorySrc.d.getHUBTerminal || [])[0], ms = t?.HasActiveMilestone ? t.ActiveMilestone : null;
   return Pop.head(o.Name, { sub: "your base", status: `HUB upgrade ${o.HUBLevel ?? "?"}`, color: "#fa9549" }) +
@@ -584,14 +584,14 @@ const FactorySrc = {
   push(mv) {
     const pt = (o, extra) => o.location && { id: o.ID, x: o.location.x, y: o.location.y, ...extra }, prod = this.prod;
     if (prod) {
-      mv.setShared("machines", prod.machines.filter(m => m.loc).map(m => ({ id: m.id, x: m.loc.x, y: m.loc.y, color: Production.M_STATUS[m.status].color,
+      mv.setShared("machines", prod.machines.filter(m => m.loc).map(m => ({ id: m.id, x: m.loc.x, y: m.loc.y, color: Production.M_STATUS[m.status].color, st: m.status,
         label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${Production.M_STATUS[m.status].label}`, tab: "production",
         tip: () => Production.machinePop(this.prod.machines.find(x => x.id === m.id) || m) })));
-      mv.setShared("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "#e879f9" : "var(--bad)", tab: "power",
+      mv.setShared("gens", (prod.gens || []).map(g => pt(g, { label: `${g.Name} · ${fmtNum(g.RegulatedDemandProd || 0)} MW`, color: g.RegulatedDemandProd > 0 ? "#e879f9" : "var(--bad)", st: g.RegulatedDemandProd > 0 ? "on" : "off", tab: "power",
         tip: () => Power.genPop(g) })).filter(Boolean));
     }
     mv.setShared("hub", (this.d.getTradingPost || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => hubTip(o) })).filter(Boolean));
-    if (this.sinks) mv.setShared("sinks", this.sinks.map(s => ({ id: s.id, x: s.x, y: s.y, color: s.on ? SINK_COLOR : "var(--bad)", tab: "sink",
+    if (this.sinks) mv.setShared("sinks", this.sinks.map(s => ({ id: s.id, x: s.x, y: s.y, color: s.on ? SINK_COLOR : "var(--bad)", st: s.on ? "on" : "off", tab: "sink",
       label: `AWESOME Sink · ${s.feeds.length ? `up to ${Sink.k(Sink.feedPts(s))} points/min` : "nothing traced in"}${s.on ? "" : " · no power"}`, tip: () => Sink.tip(s) })));
     mv.setShared("elevator", (this.d.getSpaceElevator || []).map(o => pt(o, { label: o.Name, tab: "progression", tip: () => elevatorTip(o) })).filter(Boolean));
   },
@@ -611,7 +611,7 @@ const VehSrc = {
     for (const f of this.listeners) f();
   },
   push(mv) {
-    mv.setShared("veh", this.list.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], tab: "vehicles",
+    mv.setShared("veh", this.list.filter(v => v.loc).map(v => ({ id: v.id, x: v.loc.x, y: v.loc.y, rot: v.rot, color: VEH_COLOR[v.status], st: v.status, tab: "vehicles",
       label: `${v.type} ${shortId(v.id)} · ${STATUS_LABEL[v.status]}${v.nextStop ? " → " + v.nextStop : ""}`, tip: () => vehiclePop(this.list.find(x => x.id === v.id) || v) })));
   },
 };
@@ -645,10 +645,30 @@ const ResSrc = {
   },
 };
 
+// Map legend: layers whose markers are coloured by status name a set here (layer.legend); the legend shows the set
+// once, with the layer's marker shape. Every other layer that's on gets one entry with its own swatch.
+const LEGEND_SETS = {
+  machines:  { name: "Machines", list: () => Production.M_STATUS },
+  gens:      { name: "Generators", shape: "diamond", list: () => Power.G_STATUS },
+  gensOnOff: { name: "Generators", shape: "diamond", list: () => ({ on: { label: "Running", color: "#e879f9" }, off: { label: "Not running", color: "var(--bad)" } }) },
+  vehicles:  { name: "Vehicles", shape: "arrow", list: () => ({ moving: { label: "Moving", color: VEH_COLOR.moving }, docking: { label: "Docking", color: VEH_COLOR.docking },
+               stopped: { label: "Stopped", color: VEH_COLOR.stopped }, driven: { label: "Driven", color: VEH_COLOR.driven }, error: { label: "Problem", color: VEH_COLOR.error } }) },
+  sinks:     { name: "AWESOME Sinks", shape: "drain", list: () => ({ on: { label: "Powered", color: "#818cf8" }, off: { label: "No power", color: "var(--bad)" } }) },
+};
+
+const STATION_LAYER = { truck: "truckStations", train: "trainStations", drone: "dronePorts" };
+
 const MAP_TABS = ["overview", "vehicles", "production", "power", "belts", "pipes", "sink", "progression"];
 
 class MapView {
   static all = []; static pending = null; static last = null;
+  // the legend is on or off for every map at once (Legend button, saved)
+  static legendOn = (() => { try { return localStorage.getItem("ft.legend") !== "0"; } catch { return true; } })();
+  static toggleLegend() {
+    MapView.legendOn = !MapView.legendOn;
+    try { localStorage.setItem("ft.legend", MapView.legendOn ? "1" : "0"); } catch {}
+    for (const m of MapView.all) m.renderLegend();
+  }
   // changing tabs: the next tab's map opens on the same spot at the same zoom as the map you were looking at (or the
   // last map you saw, when coming from a tab without one), so the map doesn't seem to jump. Called by showTab before it switches.
   static carry(tab) {
@@ -668,7 +688,7 @@ class MapView {
     const world = opts.world || {}, inOn = world.on || (() => false), replaces = new Set(world.replaces || []);
     for (const l of opts.layers) l.own = true;   // the tab's own layers: on as they say
     this.ownKeys = new Set(opts.layers.map(l => l.key));
-    const shared = [...FACTORY_LAYERS(), { key: "veh", group: "Transport", label: "Vehicles", color: "#5fcf80", size: 5, shape: "arrow" }, ...networkLayers(),
+    const shared = [...FACTORY_LAYERS(), { key: "veh", group: "Transport", label: "Vehicles", color: "#5fcf80", size: 5, shape: "arrow", legend: "vehicles" }, ...networkLayers(),
                     ...powerLayers(opts.powerNet), ...logisticsLayers(opts.logistics), ...storageLayers(opts.storage), ...RESOURCE_LAYERS(),
                     ...hypertubeLayers(opts.hypertubes), playerLayer()].filter(l => !this.ownKeys.has(l.key) && !replaces.has(l.key));
     for (const l of shared) l.on = l.key === "players" || !!inOn(l);   // shared: off unless this tab is about them (players always on)
@@ -682,10 +702,14 @@ class MapView {
     for (const l of this.layers) { l.def = l.on ?? true; l.on = saved[l.key] ?? l.def; }   // def: this tab's starting state (the menu's Default button)
     this.dragging = false; this.mouseWorld = null;
     el.classList.add("mapview");
-    el.innerHTML = `<div class="mv-head"><div class="btns"></div><div class="btns right"><button class="b" data-act="fit">${esc(opts.fitLabel || "Fit")}</button><button class="b" data-act="world">Whole map</button><button class="b mv-pl" data-act="player" disabled></button></div></div>
-      <div class="mv-box"><canvas></canvas><div class="mv-note" hidden></div></div>`;
+    el.innerHTML = `<div class="mv-head"><div class="btns"></div><div class="btns right"><button class="b" data-act="fit">${esc(opts.fitLabel || "Fit")}</button><button class="b" data-act="world">Whole map</button><button class="b mv-pl" data-act="player" disabled></button><button class="b mv-lgb" data-act="legend" title="Show / hide the legend (all maps)">Legend</button></div></div>
+      <div class="mv-box"><canvas></canvas><div class="mv-top"><div class="mv-note" hidden></div><div class="mv-lg" hidden></div></div></div>`;
     this.btns = el.querySelector(".mv-head .btns");
     this.plBtn = el.querySelector(".mv-pl");
+    this.lgBtn = el.querySelector(".mv-lgb"); this.lgEl = el.querySelector(".mv-lg");
+    this.lgEl.addEventListener("mouseover", e => this.legendHover(e));
+    this.lgEl.addEventListener("mouseleave", e => this.legendHover(e));
+    el.querySelector("canvas").addEventListener("mouseleave", () => this.markLegend(null));
     this.plBtn.addEventListener("contextmenu", e => { e.preventDefault(); this.nextPlayer(-1); });   // right-click: previous player
     this.playerButton();
     this.canvas = el.querySelector("canvas"); this.ctx = this.canvas.getContext("2d");
@@ -695,6 +719,7 @@ class MapView {
       if (b.dataset.act === "fit") this.fit();
       else if (b.dataset.act === "world") this.fitWorld(true);
       else if (b.dataset.act === "player") { this.nextPlayer(1); return; }
+      else if (b.dataset.act === "legend") { MapView.toggleLegend(); return; }
       else if (b.dataset.act === "layers") { this.menu.classList.contains("open") ? this.closeMenu() : this.openMenu(b); return; }
       else if (b.dataset.layer) this.setLayers({ [b.dataset.layer]: !this.isOn(b.dataset.layer) });
       this.draw();
@@ -757,6 +782,12 @@ class MapView {
                     : opts.extraTip ? opts.extraTip(e.clientX - r.left, e.clientY - r.top)   // things the tab draws itself (stations, moving vehicles)
                     : this.stationTip(e.clientX - r.left, e.clientY - r.top);
       if (tip) showPopAt(tip, e.clientX, e.clientY); else hideCargoPop();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      let sel = p ? this.pointSel(p) : seg ? { key: hit.key } : this.opts.legendAt ? this.opts.legendAt(mx, my) : null;
+      if (!sel && !p && !seg && !this.opts.drawsNetwork && NET_KEYS().some(k => this.isOn(k))) {
+        const st = stationAt(mx, my, this); if (st) sel = { key: STATION_LAYER[st.kind] };
+      }
+      this.markLegend(sel);
       this.canvas.style.cursor = p || seg || tip ? "pointer" : "";
     });
     this.canvas.addEventListener("mouseleave", () => {
@@ -778,7 +809,46 @@ class MapView {
       requestAnimationFrame(loop);
     }
   }
-  isOn(key) { return !!this.layers.find(l => l.key === key)?.on; }
+  isOn(key) {
+    const l = this.layers.find(x => x.key === key), f = this.pass;
+    if (!l?.on) return false;
+    return !f || (f.keys ? f.keys.has(key) : l.legend === f.set);   // during the legend's redraw pass: only what's hovered there
+  }
+  // for things a tab draws itself with status colours (Vehicles): draw it in the legend's redraw pass?
+  lgWants(set, st) { const f = this.pass; return !f || (!f.keys && f.set === set && (f.st == null || f.st === st)); }
+  // a point's legend entry: its status in a status set, else its layer
+  pointSel(p) {
+    const l = this.layers.find(x => x.key === p.layer); if (!l) return null;
+    if (!l.legend || !LEGEND_SETS[l.legend]) return { key: l.key };
+    const st = p.st ?? Object.entries(LEGEND_SETS[l.legend].list() || {}).find(([, e]) => e.color === p.color)?.[0];
+    return { set: l.legend, st };
+  }
+  // light up the legend entry for what's under the cursor on the map (null: none)
+  markLegend(sel) {
+    const k = sel ? JSON.stringify(sel) : "";
+    if (k === this.lgSelKey) return;
+    this.lgSel = sel; this.lgSelKey = k; this.applyLegendMark();
+  }
+  applyLegendMark() {
+    const sel = this.lgSel;
+    for (const e of this.lgEl?.querySelectorAll("span[data-key], span[data-st]") || [])
+      e.classList.toggle("hl", !!sel && (sel.key ? e.dataset.key === sel.key : e.dataset.set === sel.set && e.dataset.st === sel.st));
+  }
+  // hovering the legend: that entry (or heading: its whole group) stays bright on the map, the rest dims
+  legendHover(e) {
+    const t = e.target.closest?.("[data-key], [data-set], [data-group]");
+    // over a gap between rows (or the box's padding): keep what's lit, or the map flashes; leaving the box clears it
+    if (!t && e.type !== "mouseleave") return;
+    let f = null;
+    if (t?.dataset.key) f = { keys: new Set([t.dataset.key]) };
+    else if (t?.dataset.set) f = { set: t.dataset.set, st: t.dataset.st ?? null };
+    else if (t?.dataset.group) f = { keys: new Set(this.lgGroups?.get(t.dataset.group) || []) };
+    const k = f ? JSON.stringify({ ...f, keys: f.keys && [...f.keys] }) : "";
+    if (k === this.lgFocusKey) return;
+    this.lgFocus = f; this.lgFocusKey = k;
+    this.lgEl.classList.toggle("focus", !!f);
+    this.draw();
+  }
   stationTip(mx, my) {   // truck / train stations and drone ports drawn by drawNetwork, on maps that don't handle them
     if (this.opts.drawsNetwork || !NET_KEYS().some(k => this.isOn(k))) return null;
     const st = stationAt(mx, my, this); return st ? stationPopHtml(st) : null;
@@ -794,7 +864,7 @@ class MapView {
   // the belt / pipe under the cursor (image coords), among the ones this map shows; null if none within ~7 px
   nearestSegment(ix, iy) {
     const tol = 7 / this.view.s, keep = this.opts.logistics;
-    let best = null, bd = tol;
+    let best = null, bd = tol, bestKey = null;
     for (const [kind, list] of [["belt", Logistics.belts], ["pipe", Logistics.pipes]]) for (const b of list) {
       if (!this.isOn(kind + b.t) || !keep(b)) continue;
       const ip = b.ip || (b.ip = b.pts.map(([x, y]) => worldToImg(x, y)));
@@ -804,15 +874,15 @@ class MapView {
         const a = ip[i - 1], c = ip[i], dx = c.x - a.x, dy = c.y - a.y, L = dx * dx + dy * dy;
         const t = L ? Math.max(0, Math.min(1, ((ix - a.x) * dx + (iy - a.y) * dy) / L)) : 0;
         const d = Math.hypot(ix - (a.x + t * dx), iy - (a.y + t * dy));
-        if (d < bd) { bd = d; best = b; }
+        if (d < bd) { bd = d; best = b; bestKey = kind + b.t; }
       }
     }
     if (this.isOn("lifts")) for (const l of Logistics.lifts) {   // a lift marker wins over the belt under it
       if (!keep(l)) continue;
       const q = l.ip || (l.ip = worldToImg(l.x, l.y)), d = Math.hypot(ix - q.x, iy - q.y) * 0.5;
-      if (d < bd) { bd = d; best = l; }
+      if (d < bd) { bd = d; best = l; bestKey = "lifts"; }
     }
-    return best && { seg: best, d: bd * this.view.s };   // distance in screen px
+    return best && { seg: best, d: bd * this.view.s, key: bestKey };   // distance in screen px
   }
   // what "Fit" frames: visible points, not counting top layers (players), who arrive first and are always in one spot
   framePoints() { return this.layers.filter(l => l.on && !l.top).flatMap(l => this.points[l.key] || []); }
@@ -851,7 +921,56 @@ class MapView {
     if (!l.own && NET_KEYS().includes(l.key) && !paths.length && !rails.length && !truckStations.length) return "–";
     return l.count ? l.count() : (this.points[l.key] || []).length;
   }
+  // what the markers on this map mean: status colours of the status-coloured layers that are on, then a key for the
+  // other layers that are on and have something to show. Only rebuilt when it changes.
+  renderLegend() {
+    if (!this.lgEl) return;
+    const on = MapView.legendOn;
+    this.lgBtn.classList.toggle("on", on);
+    const sets = [], plain = [];
+    for (const l of on ? this.layers : []) {
+      const n = this.layerCount(l);
+      if (!l.on || !(n > 0)) continue;
+      if (l.legend && LEGEND_SETS[l.legend]) { if (!sets.includes(l.legend)) sets.push(l.legend); }
+      else plain.push(l);
+    }
+    // one line per entry under a heading per status set / layer group
+    const item = (attrs, sw, text) => `<span ${attrs}>${sw}${esc(text)}</span>`, head = (attrs, t) => `<b ${attrs}>${esc(t)}</b>`;
+    let html = sets.map(k => {
+      const s = LEGEND_SETS[k];
+      return head(`data-set="${k}"`, s.name) + Object.entries(s.list() || {}).map(([st, e]) =>
+        item(`data-set="${k}" data-st="${esc(st)}"`, this.swatch({ shape: s.shape, color: e.color }), e.label)).join("");
+    }).join("");
+    this.lgGroups = new Map();
+    for (const l of plain) { const g = l.group || "Other"; if (!this.lgGroups.has(g)) this.lgGroups.set(g, []); this.lgGroups.get(g).push(l.key); }
+    for (const [g, keys] of this.lgGroups)
+      html += head(`data-group="${esc(g)}"`, g) + keys.map(k => this.layers.find(l => l.key === k)).map(l => item(`data-key="${esc(l.key)}"`, this.swatch(l), l.label)).join("");
+    if (html !== this.lgHtml) { this.lgEl.innerHTML = html; this.lgHtml = html; this.applyLegendMark(); }
+    this.lgEl.hidden = !html;
+    this.layoutLegend();
+  }
+  // the legend is a column; when it's taller than the room on the map it flows into more columns, so nothing is cut
+  // off. A heading that would end a column moves to the top of the next one, with its items.
+  layoutLegend() {
+    const el = this.lgEl;
+    if (!el || el.hidden || !el.childElementCount) return;
+    for (const sp of el.querySelectorAll("i.sp")) sp.remove();
+    el.style.gridTemplateRows = "";
+    const box = this.canvas.parentElement.getBoundingClientRect(), first = el.firstElementChild.getBoundingClientRect();
+    if (!box.height) return;
+    const cs = getComputedStyle(el), pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const rowH = first.height + (parseFloat(cs.rowGap) || 0);
+    const room = box.bottom - 10 - (el.getBoundingClientRect().top + pad);
+    const rows = Math.max(4, Math.floor((room + (parseFloat(cs.rowGap) || 0)) / rowH));
+    let i = 0;
+    for (const c of [...el.children]) {
+      if (c.tagName === "B" && i % rows === rows - 1) { const sp = document.createElement("i"); sp.className = "sp"; el.insertBefore(sp, c); i++; }
+      i++;
+    }
+    el.style.gridTemplateRows = `repeat(${Math.min(i, rows)}, auto)`;
+  }
   renderButtons() {
+    this.renderLegend();
     if (this.opts.layerMenu) {
       const on = this.layers.filter(l => l.on).length;
       // only when it changes: rebuilding the button on every refresh made clicks on it miss
@@ -893,6 +1012,7 @@ class MapView {
     this.noteClick = onClick;
     if (el.dataset.html === html) return;   // only when it changes: rebuilding it under the mouse swallowed clicks
     el.dataset.html = html; el.innerHTML = html; el.hidden = !html;
+    this.layoutLegend();   // the legend sits under the note
     if (!el.dataset.wired) { el.dataset.wired = 1; el.addEventListener("click", e => { if (e.target.closest("button")) this.noteClick?.(); }); }
   }
   resize() {
@@ -901,6 +1021,7 @@ class MapView {
     // resetting the canvas size wipes it: only when the size really changed (showing a tab again doesn't)
     const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    this.layoutLegend();
     this.anim = null;
     // size changed (window resize, panel expanded/restored): keep showing the same area, scaled to the new size
     const last = this.lastSize, v = this.view;
@@ -1033,24 +1154,37 @@ class MapView {
       if (sw > 0 && sh > 0) ctx.drawImage(mapImg, sx, sy, sw, sh, v.ox + sx * v.s, v.oy + sy * v.s, sw * v.s, sh * v.s);
       ctx.fillStyle = `rgba(10,12,16,${this.opts.dim ?? 0.45})`; ctx.fillRect(0, 0, r.width, r.height);
     }
-    if (this.opts.powerNet) { ctx.save(); drawPowerLines(this, this.opts.powerNet); ctx.restore(); }
-    if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.(), this.hoverNet); ctx.restore(); }   // under everything else
-    if (this.opts.hypertubes) { ctx.save(); drawHypertubes(this, this.opts.hypertubes); ctx.restore(); }
-    if (!this.opts.drawsNetwork && NET_KEYS().some(k => this.isOn(k))) { ctx.save(); drawNetwork(this, k => this.isOn(k)); ctx.restore(); }
-    if (this.opts.draw) { ctx.save(); this.opts.draw(ctx, performance.now(), this); ctx.restore(); }
+    const under = () => {   // lines and the tab's own drawing, under the markers
+      if (this.opts.powerNet) { ctx.save(); drawPowerLines(this, this.opts.powerNet); ctx.restore(); }
+      if (this.opts.logistics) { ctx.save(); drawLogistics(this, this.opts.logistics, this.opts.highlight?.(), this.hoverNet); ctx.restore(); }   // under everything else
+      if (this.opts.hypertubes) { ctx.save(); drawHypertubes(this, this.opts.hypertubes); ctx.restore(); }
+      if (!this.opts.drawsNetwork && NET_KEYS().some(k => this.isOn(k))) { ctx.save(); drawNetwork(this, k => this.isOn(k)); ctx.restore(); }
+      if (this.opts.draw) { ctx.save(); this.opts.draw(ctx, performance.now(), this); ctx.restore(); }
+    };
+    under();
+    // a legend entry is hovered: dim everything, then draw what it stands for again on top (this.pass makes isOn() say yes only to that)
+    const lf = this.lgFocus;
+    if (lf) {
+      ctx.fillStyle = "rgba(10,12,16,.72)"; ctx.fillRect(0, 0, r.width, r.height);
+      this.pass = lf; try { under(); } finally { this.pass = null; }
+    }
+    const lgHit = (p, l) => lf.keys ? lf.keys.has(l.key) : l.legend === lf.set && (lf.st == null || this.pointSel(p)?.st === lf.st);
+    const bright = [];
     const marked = [], emph = [], top = [];
     for (const l of this.layers) {
       if (!l.on) continue;
-      if (l.top) { for (const p of this.points[l.key] || []) top.push([p, this.toScreen(p.ip), l, Math.max(l.size, this.radius(l))]); continue; }   // never shrink below its size
+      if (l.top) { for (const p of this.points[l.key] || []) if (!lf || lgHit(p, l)) top.push([p, this.toScreen(p.ip), l, Math.max(l.size, this.radius(l))]); continue; }   // never shrink below its size
       const rad = this.radius(l);
       for (const p of this.points[l.key] || []) {
         const s = this.toScreen(p.ip);
         if (s.x < -10 || s.y < -10 || s.x > r.width + 10 || s.y > r.height + 10) continue;
         if (p.id === this.hoverId || (this.focus && p.id === this.focus.id)) { marked.push([p, s, l, rad]); continue; }
+        if (lf) { if (lgHit(p, l)) bright.push([p, s, l, rad]); else this.mark(p, s, l, rad, 0.12); continue; }
         if (this.emphasis?.has(p.id)) { emph.push([p, s, l, rad]); continue; }
         this.mark(p, s, l, rad, this.opts.fade?.(p) ? 0.18 : this.emphasis ? 0.25 : this.hoverId || this.focus ? 0.6 : 1);
       }
     }
+    for (const [p, s, l, rad] of bright) this.mark(p, s, l, rad + 0.8, 1);   // what the hovered legend entry stands for
     for (const [p, s, l, rad] of emph) {   // emphasised points: full colour with a coloured ring, above the faded rest
       ctx.strokeStyle = cssColor(this.emphasis.get(p.id)); ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(s.x, s.y, rad + 4, 0, Math.PI * 2); ctx.stroke();

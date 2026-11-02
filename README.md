@@ -71,6 +71,8 @@ To start it with Windows, make a shortcut in the Startup folder (Win+R → `shel
 
 On a desktop every tab's map sits in the same place on the right, at the same size, and changing tabs keeps the same spot and zoom, so the map doesn't move or flash when you switch. The **Players** button beside Whole map centres on a player; click again for the next one (online players first, then A–Z; right-click goes back).
 
+Every map has a **legend** in its top-left corner: the status colours of what's switched on (machines, generators, vehicles, sinks) and a key for every other layer, grouped like the Layers menu. Hover a legend entry to dim everything else on the map (an "Output full" entry lights up just the backed-up machines; a heading lights up its whole group), and hover something on the map to light up its legend entry. The **Legend** button next to Players hides or shows it on every map.
+
 Every tab's map shares the same parts: a Layers dropdown with **everything** — factory buildings, vehicles and their paths, stations, the power network, belts, pipes, storage, resource nodes, collectibles, hypertubes (tubes, entrances and the open ends rides launch from, with their angle) and players. Each tab starts with only what it's about switched on, plus players (the Overview starts with everything except resource nodes and collectibles); switch anything else on from the menu, and the page only fetches what's switched on. Right-click a map to open the same spot in another tab's map, and hover anything for a detailed popup. Machines, generators, vehicles, stations, storage, belts and pipes, power poles and switches, players, resource nodes and collectibles all show a title, a status badge and labelled rows: what it's doing, rates, contents, its power grid, height and position. Extractors also show what they took out over the last 10 minutes and hour, the most they can at their clock speed, what's unused, and the node's purity. Anything with a problem says why in one line under its title, with numbers: a machine that's "Starved: Coal −25/min (56%)" or has its "Output full", a generator with no fuel (and how much it burns), a train that can't reach its next station (on a different track, or check signals), a fuse that tripped (what the grid wants vs makes), full storage, a pump past its head lift, batteries draining.
 
 ![Hover popup](docs/screenshots/hover.png)
@@ -90,7 +92,7 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 ### Production
 ![Production](docs/screenshots/production.png)
 - **Items**: producing, consuming and net per minute for every item (generators' fuel and water included), capacity and how much of it is in use. Click an item to see its history and highlight the machines that make (blue) and use (orange) it, in the table and on the map.
-- **Machines**: status (running, partial, starved, output full, paused, no power), productivity, input and output, clock speed, power shards, Somersloops and power draw. A filter under the columns (building, recipe, status, productivity, inputs, outputs, clock); click a row to find the machine on the map.
+- **Machines**: status (running ≥99% / <99% productivity, starved, output full, paused, no power) with what a stopped or slow machine is stuck on under it (the backed-up output, e.g. Polymer Resin on a Fuel refinery, or the missing input), productivity, input and output, clock speed, power shards, Somersloops and power draw. A filter under the columns (building, recipe, status, productivity, inputs, outputs, clock); click a row to find the machine on the map.
 - **Item details** under the two tables: the picked item's history, the machines that make and use it, and its recipes (a one-line strip until you pick an item).
 - The summary tiles are shortcuts: click "5 starved" to see those five.
 
@@ -143,7 +145,7 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 - The two are **linked**: click an item in either table and it is marked in both, pinned to the top of the other one. Every column has a filter under it.
 
 ### Everywhere
-- Every map has a **Layers** dropdown, X/Y coordinates under the cursor, and shows players (online and offline) as arrows pointing the way they face. **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview map shows them all, the Belts and Pipes maps one each.
+- Every map has a **Layers** dropdown, a **legend**, X/Y coordinates under the cursor, and shows players (online and offline) as arrows pointing the way they face. **Right-click** a map to open the same spot, at the same zoom, in another tab's map. The Production map shows the belts and pipes of production lines; the Overview map shows them all, the Belts and Pipes maps one each.
 - Every table has its title and row count on the left, **Clear filters** on the right, and filters under the column headings.
 - Every panel has a **full-screen** button (Esc to close). Table columns can be resized (double-click an edge to fit) and sorted.
 - On a desktop browser each tab fits one screen, with the map on the right; on phones the panels stack and the map comes last.

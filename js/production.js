@@ -6,12 +6,13 @@ const Production = (() => {
   const POLL_MS = 5000;
   const RANGES = [["10m", 10], ["1h", 60], ["6h", 360], ["24h", 1440]];
   // machine states, worst first; colours are status colours (each always shown with its label)
+  const RUN_OK = 99;   // productivity (%) that counts as running fine; below it = "Running <99%"
   const M_STATUS = {
     nopower: { label: "No power", color: "var(--bad)", title: "Fuse tripped or not connected to a grid" },
     starved: { label: "Starved", color: "var(--serious)", title: "Stopped: waiting for input" },
     full:    { label: "Output full", color: "var(--info)", title: "Stopped: output is backed up" },
-    partial: { label: "Partial", color: "var(--warn)", title: "Running, but below 90% productivity (input arrives too slowly or output backs up now and then)" },
-    running: { label: "Running", color: "var(--ok)", title: "Running at 90% productivity or more" },
+    partial: { label: `Running <${RUN_OK}%`, color: "var(--warn)", title: `Running, but below ${RUN_OK}% productivity (input arrives too slowly or output backs up now and then)` },
+    running: { label: `Running ≥${RUN_OK}%`, color: "var(--ok)", title: `Running at ${RUN_OK}% productivity or more` },
     paused:  { label: "Paused", color: "var(--muted)", title: "Switched off (standby)" },
     norecipe:{ label: "No recipe", color: "var(--muted)", title: "No recipe set" },
   };
@@ -42,7 +43,7 @@ const Production = (() => {
     if (m.IsPaused) return "paused";
     // resource well extractors have no power plug: the pressurizer is what's powered
     if (!/FrackingExtractor/.test(m.ClassName) && (m.PowerInfo?.FuseTriggered || m.PowerInfo?.CircuitID === -1)) return "nopower";
-    if (m.IsProducing) return m.eff >= 90 ? "running" : "partial";
+    if (m.IsProducing) return m.eff >= RUN_OK ? "running" : "partial";
     const out = (m.OutputInventory?.length ? m.OutputInventory : prod) || [];
     if (out.some(o => o.MaxAmount > 0 && o.Amount >= o.MaxAmount * 0.9)) return "full";
     // between cycles while waiting for input: only "starved" if it has barely produced lately (productivity is a moving average)
@@ -206,6 +207,15 @@ const Production = (() => {
 
   // ---- render ----------------------------------------------------------------------------
   const statusPill = s => `<span class="pill" style="color:${M_STATUS[s].color};background:color-mix(in srgb, ${M_STATUS[s].color} 14%, transparent)" title="${M_STATUS[s].title}">${M_STATUS[s].label}</span>`;
+  // the pill, plus what the machine is stuck on (backed-up output / missing input) when it's stopped or slow
+  function statusCell(r) {
+    const s = r.status === "full" || r.status === "starved" || r.status === "partial" ? stuckOn(r) : null;
+    if (!s) return statusPill(r.status);
+    const what = s.kind === "full" ? "Output full" : "Waiting for";
+    return statusPill(r.status) + `<div class="stuck" title="${what}: ${esc(s.items.map(i => i.name).join(", "))}">` +
+      (r.status === "partial" ? (s.kind === "full" ? "Backed up: " : "Short: ") : "") +
+      s.items.map(i => `${icon(i.name, "icon sm")}<span>${esc(i.name)}</span>`).join(" ") + `</div>`;
+  }
   const rateCell = (v, name) => `${fmtRate(v)}${isFluid(name) ? ` <span class="muted u">m³</span>` : ""}`;
   const netCell = it => {
     const v = it.net, eps = Math.max(0.01, it.prod * 0.015);
@@ -267,7 +277,7 @@ const Production = (() => {
       tile("all", "Show all machines (clear filters)", `<div class="t-label">Machines</div><div class="t-val">${fmtNum(machines.length)}</div>
         <div class="t-sub">${tl("production", `${fmtNum(machines.filter(m => !m.extractor).length)} production`, "Show only production machines")} · ${tl("extractors", `${fmtNum(machines.filter(m => m.extractor).length)} extractors`, "Show only extractors")}</div>`) +
       tile("working", "Show machines that are running", `<div class="t-label">Working</div><div class="t-val">${fmtNum(active)} <small>${pct(active / Math.max(1, machines.length) * 100)}</small></div>
-        <div class="t-sub">${tl("partial", `${counts.partial} below 90% productivity`, "Show only machines below 90% productivity")}</div>`) +
+        <div class="t-sub">${tl("partial", `${counts.partial} below ${RUN_OK}% productivity`, `Show only machines below ${RUN_OK}% productivity`)}</div>`) +
       tile("stopped", "Show machines that are stopped", `<div class="t-label">Stopped</div><div class="t-val">${fmtNum(machines.length - active)}</div><div class="t-sub">${idle || "none"}</div>`) +
       tile("eff", "Sort machines by productivity, lowest first (average of machines that have a recipe and aren't paused)",
         `<div class="t-label">Average productivity</div><div class="t-val">${pct(avgEff)}</div><div class="t-sub">${bar(avgEff / 100, "var(--s1)")}across active machines</div>`) +
@@ -285,7 +295,7 @@ const Production = (() => {
     return [
       { v: "all", label: "All", st: [], n: machines.length, title: "Every machine" },
       { v: "working", label: "Working", st: ["running", "partial"], title: "Running or partly running" },
-      { v: "partial", label: "Below 90%", st: ["partial"], dot: M_STATUS.partial.color, title: M_STATUS.partial.title },
+      { v: "partial", label: M_STATUS.partial.label, st: ["partial"], dot: M_STATUS.partial.color, title: M_STATUS.partial.title },
       { v: "stopped", label: "Stopped", st: STOPPED, title: "Not producing, for any reason" },
       ...STOPPED.filter(k => sc[k]).map(k => ({ v: k, label: M_STATUS[k].label, st: [k], dot: M_STATUS[k].color, title: M_STATUS[k].title })),
     ].map(o => ({ ...o, n: o.n ?? n(o.st) }));
@@ -359,7 +369,7 @@ const Production = (() => {
     const byType = new Map(map.layers.filter(l => l.key.startsWith("b:")).map(l => [l.key, []]));
     for (const m of vm) if (m.loc) {
       const key = byType.has("b:" + m.building) ? "b:" + m.building : "b:Other";
-      byType.get(key).push({ id: m.id, x: m.loc.x, y: m.loc.y, color: M_STATUS[m.status].color,
+      byType.get(key).push({ id: m.id, x: m.loc.x, y: m.loc.y, color: M_STATUS[m.status].color, st: m.status,
         label: `${m.building}${m.recipe ? " · " + m.recipe : ""} · ${M_STATUS[m.status].label}` });
     }
     for (const [key, pts] of byType) map.setPoints(key, pts);
@@ -392,25 +402,31 @@ const Production = (() => {
   // an output that can't fit another cycle's worth = blocked; an input holding less than one cycle needs = starved.
   // Productivity is the game's moving average, so a machine that just recovered still reads low for a while.
   const SLOOP_SLOTS = { Constructor: 1, Smelter: 1, Assembler: 2, Foundry: 2, Refinery: 2, Converter: 2, Manufacturer: 4, Blender: 4, "Particle Accelerator": 4, "Quantum Encoder": 4 };
-  function whyPop(m) {
-    if (m.status === "norecipe" || m.status === "paused") return "";
-    if (m.status === "nopower") return Pop.powerWhy({ CircuitID: m.circuitId, FuseTriggered: m.fuse });
-    if (m.eff >= 99.5) return "";
+  // What a stopped / slow machine is stuck on: { kind: "full", items: [backed-up outputs] }, { kind: "starved", items: [short inputs] },
+  // or null. Used by the map hover and the machines table's Status cell.
+  function stuckOn(m) {
+    if (m.status === "norecipe" || m.status === "paused" || m.status === "nopower" || m.eff >= 99.5) return null;
     const cyc = cycles.get(m.recipeCls), boost = 1 + (m.sloops || 0) / (SLOOP_SLOTS[m.building] || 1);
     const have = (list, name) => list.find(i => i.Name === name);
-    const lost = o => Pop.short(o.cur, o.max, unitOf(o.name));
     // output first: a backed-up machine stops taking input, so its inputs look full
     const backed = m.outputs.filter(o => {
       const b = have(m.inv.out, o.name), n = b?.Amount || 0, cap = b?.MaxAmount || 0, per = (cyc?.outs.get(o.name) || 0) * boost;
       return cap > 0 && (n >= cap * 0.8 || (per && n + per > cap));
     });
-    if (backed.length) return Pop.why("info", `Output full: ${backed.map(o => esc(o.name)).join(", ")}${lost(backed[0])}`);
+    if (backed.length) return { kind: "full", items: backed };
     // starved: under two cycles' worth in the buffer (nearly empty when the recipe isn't known)
     const starved = m.extractor ? [] : m.inputs.filter(i => {
       const b = have(m.inv.in, i.name), n = b?.Amount || 0, cap = b?.MaxAmount || 0, per = cyc?.ins.get(i.name) || 0;
       return per ? n < per * 2 : n < cap * 0.1;
     });
-    if (starved.length) return Pop.why("serious", `Starved: ${starved.map(i => esc(i.name) + lost(i)).join(", ")}`);
+    return starved.length ? { kind: "starved", items: starved } : null;
+  }
+  function whyPop(m) {
+    if (m.status === "nopower") return Pop.powerWhy({ CircuitID: m.circuitId, FuseTriggered: m.fuse });
+    if (m.status === "norecipe" || m.status === "paused" || m.eff >= 99.5) return "";
+    const lost = o => Pop.short(o.cur, o.max, unitOf(o.name)), s = stuckOn(m);
+    if (s?.kind === "full") return Pop.why("info", `Output full: ${s.items.map(o => esc(o.name)).join(", ")}${lost(s.items[0])}`);
+    if (s?.kind === "starved") return Pop.why("serious", `Starved: ${s.items.map(i => esc(i.name) + lost(i)).join(", ")}`);
     return m.outputs[0] ? Pop.why("muted", `Catching up, buffers OK${lost(m.outputs[0])}`) : "";
   }
   function machinePop(m) {
@@ -494,7 +510,7 @@ const Production = (() => {
       { key: "status", label: "Status", minW: 96,
         filter: { value: r => r.status, noun: "statuses", get: () => ui.st, set: v => { ui.st = v; saveUi(); },
                   all: () => Object.entries(M_STATUS).map(([k, v]) => ({ value: k, label: `<i class="sw" style="background:${v.color}"></i> ${esc(v.label)}` })) },
-        val: r => Object.keys(M_STATUS).indexOf(r.status), cell: r => statusPill(r.status) },
+        val: r => Object.keys(M_STATUS).indexOf(r.status), cell: statusCell },
       { key: "eff", label: "Productivity", minW: 104,
         filter: { value: r => r.eff >= 90 ? "90–100%" : r.eff >= 50 ? "50–89%" : r.eff > 0 ? "1–49%" : "0%", noun: "",
                   all: () => ["90–100%", "50–89%", "1–49%", "0%"].map(value => ({ value })) }, num: true, val: r => r.eff, cell: r => `${bar(r.eff / 100, "var(--s1)")}${pct(r.eff)}` },
@@ -516,7 +532,7 @@ const Production = (() => {
       // one layer per machine type (with its icon) so the dropdown can show/hide each; markers stay coloured by status
       storeKey: "pt.map2", layerMenu: true, logistics: b => b.p,   // belts and pipes on production lines
       world: { replaces: ["machines"], on: l => l.group === "Belts" || l.group === "Pipes" },   // its machines (per type) instead of the shared dots
-      layers: [...GAME_BUILDINGS, "Other"].map(b => ({ key: "b:" + b, group: "Machines", label: b, color: "var(--ok)", size: 4, swatchHtml: b === "Other" ? "" : icon(b, "icon sm") })),
+      layers: [...GAME_BUILDINGS, "Other"].map(b => ({ key: "b:" + b, group: "Machines", label: b, color: "var(--ok)", size: 4, legend: "machines", swatchHtml: b === "Other" ? "" : icon(b, "icon sm") })),
       tooltip: p => { const m = machines.find(x => x.id === p.id); return m ? machinePop(m) : ""; },
       onHover: p => { if (p) machineTable.reveal(r => r.id === p.id); hl(p && p.id); },
     });

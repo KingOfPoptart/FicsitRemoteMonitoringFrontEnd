@@ -357,7 +357,7 @@ const Power = (() => {
     renderUnits(g);
     if (sideShown) showSides(switchRows().find(r => r.id === sideShown.id) || null);   // keep the map highlight current
     const pt = (u, extra) => u.location && { id: u.ID || u.id, x: u.location.x, y: u.location.y, ...extra };
-    map.setPoints("gens", gens.filter(x => x.raw.location).map(x => pt(x.raw, { circuits: [x.pi?.CircuitID], color: G_STATUS[x.status].color,
+    map.setPoints("gens", gens.filter(x => x.raw.location).map(x => pt(x.raw, { circuits: [x.pi?.CircuitID], color: G_STATUS[x.status].color, st: x.status,
       label: `${x.type} · ${G_STATUS[x.status].label} · ${fmtNum(x.out, 0)} MW`, tip: () => genPop(x.raw) })));
     map.setPoints("use", usage.filter(u => u.PowerInfo?.MaxPowerConsumed > 0).map(u => pt(u, { circuits: [u.PowerInfo.CircuitID],
       label: `${u.Name} · ${fmtNum(u.PowerInfo.PowerConsumed, 1)} MW (max ${fmtNum(u.PowerInfo.MaxPowerConsumed, 1)})`, tip: () => usePop(u) })).filter(Boolean));
@@ -517,7 +517,7 @@ const Power = (() => {
       // the selected grid only: its generators and consumers, and its part of the power network
       storeKey: "pw.map2", layerMenu: true, world: { on: l => l.group === "Power network" }, layers: [
         // points and lines not on the selected grid fade (All grids: nothing fades), see fade below
-        { key: "gens", group: "Power", label: "Generators", color: "var(--ok)", size: 5, shape: "diamond" },
+        { key: "gens", group: "Power", label: "Generators", color: "var(--ok)", size: 5, shape: "diamond", legend: "gens" },
         { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, on: false },
       ],
       fade: p => p.circuits ? !grid().all && !inGrid(p.circuits) : false,   // other grids fade
@@ -564,6 +564,7 @@ const Power = (() => {
 
   return {
     genPop,   // the Overview map's generator hover
+    G_STATUS,   // the map legend
     show() {
       if (!chart) init();
       PowerNet.need();   // the switch and pole tables use the shared power network
