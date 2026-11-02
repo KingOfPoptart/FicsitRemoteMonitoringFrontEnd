@@ -218,9 +218,11 @@ ITEMS = load_items()
 WASTE = {"Uranium Fuel Rod": ("Uranium Waste", 50), "Plutonium Fuel Rod": ("Plutonium Waste", 10)}
 
 
-def production_totals(factories, extractors, generators):
+def production_totals(factories, extractors, generators, prod_stats=None):
     """{item: [produced/min, consumed/min]} over every machine, including what generators burn."""
     tot = {}
+    fuel_of = fuel_picker(generators)
+    scale = fuel_scale(prod_stats, factories, generators, fuel_of)
 
     def add(name, i, v):
         if v:
@@ -231,17 +233,63 @@ def production_totals(factories, extractors, generators):
         for c in m.get("ingredients") or []:
             add(c["Name"], 1, c.get("CurrentConsumed", 0))
     for g in generators:
-        for name, rate in generator_burn(g):
+        for name, rate in generator_burn(g, fuel_of, scale):
             add(name, 1 if rate > 0 else 0, abs(rate))
     return tot
 
 
-def generator_burn(g):
-    """[(item, per min)] a generator uses right now; negative = produced (nuclear waste)."""
-    mw = g.get("RegulatedDemandProd") or 0
-    out = []
-    fuel = next((f for f in g.get("FuelInventory") or [] if f.get("Amount", 0) > 0
+def loaded_fuel(g):
+    return next((f for f in g.get("FuelInventory") or [] if f.get("Amount", 0) > 0
                  and ITEMS.get(f["Name"], {}).get("energy")), None)
+
+
+def fuel_picker(generators):
+    """g -> fuel it burns. FuelInventory is empty while a generator burns its last piece, so a running
+    generator with an empty tank is taken to burn what most generators of its type have loaded."""
+    counts = {}
+    for g in generators:
+        f = loaded_fuel(g)
+        if f:
+            n = counts.setdefault(g.get("Name"), {})
+            n[f["Name"]] = n.get(f["Name"], 0) + 1
+    common = {t: max(n, key=n.get) for t, n in counts.items()}
+
+    def pick(g):
+        f = loaded_fuel(g)
+        if f or not (g.get("RegulatedDemandProd") or 0) > 0 or g.get("Name") not in common:
+            return f
+        return {"Name": common[g["Name"]], "Amount": 0}
+    return pick
+
+
+def fuel_scale(prod_stats, factories, generators, fuel_of):
+    """{fuel: 0..1}. A generator short on fuel stalls on and off, which one snapshot of RegulatedDemandProd
+    can't see. FRM's getProdStats averages that over time once it lists fluids (FRM #324; older builds get
+    fuel use wrong), so each fuel's generator total becomes FRM's figure minus what machines use, at most
+    what those generators burn at full power. Returns the factor to apply to each generator's snapshot rate."""
+    ps = {p.get("Name"): p for p in prod_stats or []}
+    if not any(p.get("Type") in ("Liquid", "Gas") for p in ps.values()):
+        return {}
+    own, full = {}, {}
+    for g in generators:
+        f = fuel_of(g)
+        if f:   # stalled generators with fuel count toward full power, not toward the snapshot rate
+            e = ITEMS[f["Name"]]["energy"]
+            own[f["Name"]] = own.get(f["Name"], 0) + (g.get("RegulatedDemandProd") or 0) * 60 / e
+            full[f["Name"]] = full.get(f["Name"], 0) + (g.get("ProductionCapacity") or 0) * 60 / e
+    scale = {}
+    for fuel, rate in own.items():
+        if rate > 0 and fuel in ps:
+            machine_use = sum(c.get("CurrentConsumed", 0) for m in factories for c in m.get("ingredients") or [] if c.get("Name") == fuel)
+            scale[fuel] = min(full[fuel], max(0.0, ps[fuel].get("CurrentConsumed", 0) - machine_use)) / rate
+    return scale
+
+
+def generator_burn(g, fuel_of=loaded_fuel, scale=None):
+    """[(item, per min)] a generator uses right now; negative = produced (nuclear waste)."""
+    out = []
+    fuel = fuel_of(g)
+    mw = (g.get("RegulatedDemandProd") or 0) * ((scale or {}).get(fuel["Name"], 1) if fuel else 1)
     if mw > 0 and fuel:
         rate = mw * 60 / ITEMS[fuel["Name"]]["energy"]
         out.append((fuel["Name"], rate))
@@ -1057,7 +1105,11 @@ def recorder():
                 gen = {}
                 for g in gens:
                     gen[g["Name"]] = gen.get(g["Name"], 0) + (g.get("RegulatedDemandProd") or 0)
-                HIST.add_prod(production_totals(fac, ext, gens), gen)
+                try:
+                    ps = frm_json("getProdStats", live=True)
+                except Exception:
+                    ps = None
+                HIST.add_prod(production_totals(fac, ext, gens, ps), gen)
                 HIST.add_extractors(ext)
                 try:
                     dna = frm_json("getExplorationSink", live=True)[0].get("TotalPoints", 0)

@@ -61,7 +61,38 @@ const Production = (() => {
     return o;
   }
 
-  function aggregate(machines, gens) {
+  // Which fuel a generator burns. FuelInventory is empty while it burns its last piece, so a running generator
+  // with an empty tank is taken to burn what most generators of its type have loaded.
+  const loadedFuel = g => (g.FuelInventory || []).find(f => f.Amount > 0 && energy(f.Name)) || null;
+  function fuelPicker(gens) {
+    const byType = new Map();
+    for (const g of gens) {
+      const f = loadedFuel(g);
+      if (!f) continue;
+      const n = byType.get(g.Name) || new Map();
+      n.set(f.Name, (n.get(f.Name) || 0) + 1);
+      byType.set(g.Name, n);
+    }
+    const common = new Map([...byType].map(([t, n]) => [t, [...n].sort((a, b) => b[1] - a[1])[0][0]]));
+    return g => loadedFuel(g) || ((g.RegulatedDemandProd || 0) > 0 && common.has(g.Name) ? { Name: common.get(g.Name), Amount: 0 } : null);
+  }
+  // A generator short on fuel stalls on and off, which one snapshot of RegulatedDemandProd can't see. FRM's
+  // getProdStats averages that over time once it lists fluids (FRM #324; older builds get fuel use wrong), so
+  // each fuel's generator total becomes FRM's figure minus what machines use, at most what those generators
+  // burn at full power. {fuel: factor for each generator's snapshot rate}
+  function fuelScale(prodStats, machines, own, full) {
+    const ps = new Map((prodStats || []).map(p => [p.Name, p]));
+    if (![...ps.values()].some(p => p.Type === "Liquid" || p.Type === "Gas")) return new Map();
+    const scale = new Map();
+    for (const [fuel, rate] of own) {
+      if (!(rate > 0) || !ps.has(fuel)) continue;
+      const machineUse = machines.reduce((a, m) => a + m.inputs.reduce((b, i) => b + (i.name === fuel ? i.cur : 0), 0), 0);
+      scale.set(fuel, Math.min(full.get(fuel), Math.max(0, ps.get(fuel).CurrentConsumed - machineUse)) / rate);
+    }
+    return scale;
+  }
+
+  function aggregate(machines, gens, prodStats) {
     const map = new Map();
     const get = name => {
       if (!map.has(name)) map.set(name, { id: name, name, fluid: isFluid(name), prod: 0, cons: 0, maxProd: 0, maxCons: 0, producers: new Map(), consumers: new Map() });
@@ -76,10 +107,19 @@ const Production = (() => {
       for (const i of m.inputs) { const it = get(i.name); it.cons += i.cur; it.maxCons += i.max; group(it.consumers, m.building + "|" + m.recipe, m.building, m.recipe, i.cur, i.max); }
     }
     // generators burn fuel (and coal/nuclear ones drink water); same maths as server.py
+    const fuelOf = fuelPicker(gens), own = new Map(), full = new Map();
     for (const g of gens) {
-      const mw = g.RegulatedDemandProd || 0, cap = g.ProductionCapacity || 0;
-      const fuel = (g.FuelInventory || []).find(f => f.Amount > 0 && energy(f.Name));
+      const fuel = fuelOf(g);
+      if (!fuel) continue;   // stalled generators with fuel count toward full power, not toward the snapshot rate
+      const e = energy(fuel.Name);
+      own.set(fuel.Name, (own.get(fuel.Name) || 0) + (g.RegulatedDemandProd || 0) * 60 / e);
+      full.set(fuel.Name, (full.get(fuel.Name) || 0) + (g.ProductionCapacity || 0) * 60 / e);
+    }
+    const scale = fuelScale(prodStats, machines, own, full);
+    for (const g of gens) {
+      const cap = g.ProductionCapacity || 0, fuel = fuelOf(g);
       if (fuel) {
+        const mw = (g.RegulatedDemandProd || 0) * (scale.get(fuel.Name) ?? 1);
         const e = energy(fuel.Name), rate = mw * 60 / e, max = cap * 60 / e, it = get(fuel.Name);
         it.cons += rate; it.maxCons += max; group(it.consumers, g.Name + "|fuel", g.Name, "fuel", rate, max);
         if (WASTE[fuel.Name]) {
@@ -94,6 +134,7 @@ const Production = (() => {
       }
     }
     for (const it of map.values()) it.net = it.prod - it.cons;
+    map.fuelScale = scale;   // the Power tab uses it for its per-type fuel totals
     return map;
   }
 
@@ -109,10 +150,11 @@ const Production = (() => {
   // machines + per-item totals, also used by the Overview tab
   // maxAge (s): an older copy server.py already has will do (its history recorder fetches these every 15 s)
   async function snapshot(maxAge) {
-    const [fac, ext, gens] = await Promise.all([getJSON("getFactory", maxAge), getJSON("getExtractor", maxAge), getJSON("getGenerators", maxAge).catch(() => [])]);
+    const [fac, ext, gens, ps] = await Promise.all([getJSON("getFactory", maxAge), getJSON("getExtractor", maxAge),
+      getJSON("getGenerators", maxAge).catch(() => []), getJSON("getProdStats", maxAge).catch(() => null)]);
     loadCycles();
     const ms = fac.map(m => fromMachine(m, false)).concat(ext.map(m => fromMachine(m, true)));
-    return { machines: ms, items: aggregate(ms, gens), gens };
+    return { machines: ms, items: aggregate(ms, gens, ps), gens };
   }
   // FRM ProducedIn class -> building name; recipes made anywhere else (build gun, workbench, equipment workshop) aren't production recipes
   const RECIPE_BUILDINGS = { Build_SmelterMk1_C: "Smelter", Build_FoundryMk1_C: "Foundry", Build_ConstructorMk1_C: "Constructor",
@@ -511,7 +553,7 @@ const Production = (() => {
   }
 
   return {
-    snapshot, isShort, M_STATUS, machinePop, RECIPE_BUILDINGS, pollExtractors, machine: id => machines.find(m => m.id === id),   // the Overview map uses the same machine hover
+    snapshot, isShort, M_STATUS, fuelPicker, machinePop, RECIPE_BUILDINGS, pollExtractors, machine: id => machines.find(m => m.id === id),   // the Overview map uses the same machine hover
     show() {
       if (!itemTable) init();
       poll(); pollHistory();

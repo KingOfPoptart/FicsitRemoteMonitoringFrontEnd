@@ -99,11 +99,13 @@ const Power = (() => {
     if (water != null && water < 10) return "nowater";
     return (g.DynamicProdCapacity || 0) > 0 ? "standby" : "lowfuel";
   }
+  let fuelOf = g => null;   // Production.fuelPicker over the last getGenerators answer
+  let fuelScale = new Map();   // fuel -> averaged / right-now generator burn, from Production.snapshot
   function fromGen(g) {
-    const fuel = (g.FuelInventory || []).find(f => energy(f.Name)) || null;
-    const burn = fuel && g.RegulatedDemandProd ? g.RegulatedDemandProd * 60 / energy(fuel.Name) : 0;
+    const fuel = (g.FuelInventory || []).find(f => energy(f.Name)) || null, burning = fuelOf(g);
+    const burn = burning && g.RegulatedDemandProd ? g.RegulatedDemandProd * 60 / energy(burning.Name) : 0;
     return { id: g.ID, type: g.Name, status: genStatus(g), out: g.RegulatedDemandProd || 0, cap: g.ProductionCapacity || 0,
-      load: g.LoadPercentage || 0, clock: g.CurrentPotential ?? 100, shards: g.PowerShards || 0, fuel, burn,
+      load: g.LoadPercentage || 0, clock: g.CurrentPotential ?? 100, shards: g.PowerShards || 0, fuel: fuel || burning, burning, burn,
       sup: g.Supplement && g.Supplement.Name !== "N/A" ? g.Supplement : null, water: waterPct(g), pi: g.PowerInfo, raw: g };
   }
 
@@ -115,8 +117,9 @@ const Power = (() => {
     } catch (e) { setConn(false, e.message); }
   }
   async function pollDetail() {
-    const [g, u] = await Promise.allSettled([getJSON("getGenerators"), getJSON("getPowerUsage")]);
-    if (g.status === "fulfilled") gens = g.value.map(fromGen);
+    const [g, u, p] = await Promise.allSettled([getJSON("getGenerators"), getJSON("getPowerUsage"), Production.snapshot(20)]);
+    if (p.status === "fulfilled") fuelScale = p.value.items.fuelScale || new Map();
+    if (g.status === "fulfilled") { fuelOf = Production.fuelPicker(g.value); gens = g.value.map(fromGen); }
     if (u.status === "fulfilled") usage = u.value;
     sortGroups(); render();
   }
@@ -320,7 +323,8 @@ const Power = (() => {
     for (const x of gens.filter(x => onGrid(x.pi, g))) {
       const t = byType.get(x.type) || { type: x.type, n: 0, on: 0, out: 0, cap: 0, fuels: new Map() };
       t.n++; if (x.status === "running") t.on++; t.out += x.out; t.cap += x.cap;
-      if (x.burn) t.fuels.set(x.fuel.Name, (t.fuels.get(x.fuel.Name) || 0) + x.burn);
+      // averaged like the Production tab: a generator short on fuel stalls on and off (x.burn is right now)
+      if (x.burn) t.fuels.set(x.burning.Name, (t.fuels.get(x.burning.Name) || 0) + x.burn * (fuelScale.get(x.burning.Name) ?? 1));
       byType.set(x.type, t);
     }
     hbars($("wGen"), [...byType.values()].sort((a, b) => b.cap - a.cap).map(t => ({
