@@ -14,3 +14,9 @@ history.tmp
 # last known FRM answers (served while the game server is down)
 laststate.json.gz
 laststate.json.tmp
+
+# updater (zip installs): files the last update wrote, and a copy of what it replaced
+.update-files
+.update-tag
+.update-backup/
+*.update-tmp

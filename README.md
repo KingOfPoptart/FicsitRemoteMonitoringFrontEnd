@@ -4,6 +4,69 @@ A live web dashboard for a Satisfactory world: how the factory is doing at a gla
 
 ![Overview](docs/screenshots/overview.png)
 
+## Requirements
+- Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
+- Python 3.9+ (standard library only; [Pillow](https://pypi.org/project/pillow/) is optional, for resizing pictures).
+- **FRM 1.5.4 or newer** for everything this dashboard shows. Older builds still work, with less: vehicles have no routes or next stops and stay frozen whenever no player is nearby; power poles, wall outlets and towers are missing from the maps (power lines and switches still show); fluid buffers are missing, storage slots used are estimated from stack sizes and the Dimensional Depot shows amounts without limits; belt / lift / pipe networks are worked out from positions (some lines through conveyor lifts come out split), and the Sink tab can't tell what feeds each sink.
+- **Head lift** and the Pipes tab's pumps need FRM [PR #320](https://github.com/porisius/FicsitRemoteMonitoring/pull/320) (pipe contents and flow, each pump's head lift, and which pipe ends are a building's fluid output — not released yet). Without it the Head lift tile says so and pumps aren't shown.
+- **FRM 1.5.5** (the next release) adds which machine recipes are unlocked, each generator's water level and where a player is looking. Until then the Production tab shows recipes without locked / unlocked, the water level is estimated from the water in the generator, and the maps show players' direction but not whether they're looking up or down.
+
+## Install and setup
+
+### 1. Turn on the FRM web server
+1. Install the **Ficsit Remote Monitoring** mod with the [Satisfactory Mod Manager](https://smm.ficsit.app/), on the game or dedicated server that hosts your world.
+2. Start its web server: type `/frm http start` in the game chat, or turn on its autostart setting so it starts with the world.
+3. Check it answers: open http://localhost:8080/getPower in a browser on the machine running the game. You should see JSON text. (8080 is FRM's default port; if FRM runs on another machine, use that machine's address.)
+
+### 2. Install Python
+Python 3.9 or newer. On Windows, get it from [python.org](https://www.python.org/downloads/) and tick **Add python.exe to PATH** in the installer, or run `winget install Python.Python.3.12`. Nothing else is needed: the monitor only uses Python's standard library. [Pillow](https://pypi.org/project/pillow/) (`pip install pillow`) is optional and makes the downloaded pictures smaller.
+
+### 3. Get the monitor
+Pick one:
+- **Download (simplest):** on the [Releases](https://github.com/KingOfPoptart/FicsitRemoteMonitoringFrontEnd/releases) page, download the latest release's **Source code (zip)** and extract it to a folder of its own, e.g. `C:\FICSIT Monitor`.
+- **git:** `git clone https://github.com/KingOfPoptart/FicsitRemoteMonitoringFrontEnd.git`
+
+Both can update themselves later from the page (see [Updating](#updating)).
+
+### 4. Fetch the map and pictures (once)
+The map image, vehicle pictures and icons are Coffee Stain's game art, so they aren't included. Open a terminal in the monitor's folder (in Explorer: right-click the folder → **Open in Terminal**) and run:
+```sh
+python tools/fetch_assets.py --game-dir "<Satisfactory install folder>"
+```
+`--game-dir` is a Satisfactory or SatisfactoryDedicatedServer folder **with FRM installed** (the map image comes from FRM's files). For Steam: right-click Satisfactory → **Manage** → **Browse local files**, and copy that path. The pictures and icons come from the [Satisfactory wiki](https://satisfactory.wiki.gg), so this step needs internet.
+
+### 5. Run it
+```sh
+python server.py
+```
+Then open http://localhost:8090. Leave the window open: closing it stops the monitor. The header shows **live** with a green light once it's talking to FRM.
+
+Options:
+- `--frm http://<host>:8080`, or set `FRM_URL`, if FRM runs on another machine.
+- `--host 0.0.0.0` to open the dashboard from other devices on your network (http://<this PC's address>:8090). Windows may ask to allow Python through the firewall: allow it on private networks.
+- `--port` to use a port other than 8090.
+- `--no-history` to not record power, production and sink history.
+- `--auto-update` to install new releases by itself (see [Updating](#updating)).
+- `--no-update-check` to never ask GitHub for new releases.
+
+To start it with Windows, make a shortcut in the Startup folder (Win+R → `shell:startup`) with the target `python "C:\FICSIT Monitor\server.py"` (your folder, plus any options) and **Start in** set to the monitor's folder.
+
+`items.json` (every item in the game, with fuel energy values) is included. To regenerate it after a game update, run `python tools/generate_items.py --game-dir "<Satisfactory install>"`.
+
+### Troubleshooting
+- **"offline: FRM not answering"**: FRM's web server isn't running, or isn't at the address the monitor uses. Check step 1, and `--frm` if FRM runs on another machine. While the game server is down, the dashboard shows the last state it saw ("offline since …").
+- **No map background**: run step 4 (look for `map.avif` in the monitor's folder).
+- **`python` isn't recognised**: Python isn't on PATH. Reinstall it with **Add python.exe to PATH** ticked, or use `py server.py`.
+- **Port 8090 already in use**: another copy is already running, or use `--port 8091`.
+
+## Updating
+`server.py` checks this repo's [releases](https://github.com/KingOfPoptart/FicsitRemoteMonitoringFrontEnd/releases) a few seconds after it starts and then every 6 hours. When there's a newer one, an **Update to vX** button shows next to Reset layout (hover it for what's new). Click it on the computer running the monitor: it installs the release, restarts itself (a few seconds) and the page reloads. Pages opened from other devices show that a release is out but can't install it. With `--auto-update` it installs releases without asking; open pages then offer a reload.
+- A `git clone` updates with `git pull`-style fast-forward to the release tag. It's left alone (the button says why) when it has uncommitted changes, commits of its own, or is on a branch other than `main`.
+- A copy downloaded as a zip downloads the release zip and copies it over the folder. Files the repo doesn't ship (`history.json`, `laststate.json.gz`, `map.avif`, `img/`) are never touched.
+- If the new version doesn't start, the update is undone and the old one keeps running; the button says "Update failed" with the reason.
+- If GitHub can't be reached, the check only prints a line in the server window and tries again in an hour. The dashboard isn't affected.
+- Only published releases count; drafts, pre-releases and commits pushed without a release are never offered.
+
 ## Maps
 
 On a desktop every tab's map sits in the same place on the right, at the same size, and changing tabs keeps the same spot and zoom, so the map doesn't move or flash when you switch. The **Players** button beside Whole map centres on a player; click again for the next one (online players first, then A–Z; right-click goes back).
@@ -87,31 +150,6 @@ Every tab's map shares the same parts: a Layers dropdown with **everything** —
 - **Resize anything** (desktop): drag the gap between two panels to give one more room, and drag the map's left edge to make it wider (one width for every tab). Pull a gap further and the panels after it squeeze down to their titles one by one; pull back and they open again in reverse. The top tiles resize sideways. Double-click a gap to put that group back, or use **Reset layout** under the clock in the header for everything. Sizes are remembered in your browser.
 - `server.py` records power (battery charge and capacity included), production and sink points history (every 5 s / 15 s, 24 hours kept, saved to `history.json`), so charts have data from before the page was opened. It works out the belt and pipe networks every minute while a page shows them (every 5 minutes for a page in the background, not at all when nobody is looking).
 
-## Requirements
-- Satisfactory 1.2 with the **Ficsit Remote Monitoring** mod, with its web server started (`/frm http start` in game chat, or its autostart setting turned on).
-- Python 3.9+ (standard library only; [Pillow](https://pypi.org/project/pillow/) is optional, for resizing pictures).
-- **FRM 1.5.4 or newer** for everything this dashboard shows. Older builds still work, with less: vehicles have no routes or next stops and stay frozen whenever no player is nearby; power poles, wall outlets and towers are missing from the maps (power lines and switches still show); fluid buffers are missing, storage slots used are estimated from stack sizes and the Dimensional Depot shows amounts without limits; belt / lift / pipe networks are worked out from positions (some lines through conveyor lifts come out split), and the Sink tab can't tell what feeds each sink.
-- **Head lift** and the Pipes tab's pumps need FRM [PR #320](https://github.com/porisius/FicsitRemoteMonitoring/pull/320) (pipe contents and flow, each pump's head lift, and which pipe ends are a building's fluid output — not released yet). Without it the Head lift tile says so and pumps aren't shown.
-- **FRM 1.5.5** (the next release) adds which machine recipes are unlocked, each generator's water level and where a player is looking. Until then the Production tab shows recipes without locked / unlocked, the water level is estimated from the water in the generator, and the maps show players' direction but not whether they're looking up or down.
-
-## Setup
-```sh
-# one time: map image (from your FRM install), vehicle pictures and item/building icons (from the Satisfactory wiki)
-python tools/fetch_assets.py --game-dir "<path to Satisfactory or SatisfactoryDedicatedServer>"
-
-# run it
-python server.py
-```
-Then open http://localhost:8090.
-
-Options:
-- `--frm http://<host>:8080`, or set `FRM_URL`, if FRM runs on another machine.
-- `--host 0.0.0.0` to open the dashboard from other devices on your network.
-- `--port` to use a port other than 8090.
-- `--no-history` to not record power, production and sink history.
-
-`items.json` (every item in the game, with fuel energy values) is included. To regenerate it after a game update, run `python tools/generate_items.py --game-dir "<Satisfactory install>"`.
-
 ## Notes
 - The map image, vehicle pictures and icons aren't included because they're Coffee Stain's game art. `fetch_assets.py` gets them on your own machine.
 - `server.py` serves the page and passes API calls through to FRM, so the browser never has to deal with cross-origin (CORS) restrictions.
@@ -121,4 +159,5 @@ Options:
   - a page in the background (another browser tab, a minimised window) polls at most once a minute and catches up when it's shown again;
   - `server.py` caches replies (1 s; 4 s for the big ones), so several open pages and the history recorder share requests, and the Overview reuses the recorder's machine snapshot.
   With one page open this costs FRM about 2–3 s of work a minute; the biggest single request (`getBelts`, a few hundred ms on a large factory) runs once a minute only while belts and pipes are on screen.
-- Code: `index.html` (page, Vehicles tab), `js/poll.js` (polling), `js/charts.js` (charts, tables, dropdowns), `js/map.js` (the shared map), `js/resize.js` (resizable panels), and one file per other tab.
+- **Making a release**: push to `main`, then publish a GitHub release with a new tag (`vMAJOR.MINOR.PATCH`) on that commit; its description is what the Update button shows. `VERSION` is filled in with the commit by GitHub when it builds the release zip (`.gitattributes` export-subst), which is how zip copies know their version. `python tests/test_update.py` tests the updater end to end against a fake GitHub (about 30 s).
+- Code: `index.html` (page, Vehicles tab), `js/poll.js` (polling), `js/update.js` + `updater.py` (updates), `js/charts.js` (charts, tables, dropdowns), `js/map.js` (the shared map), `js/resize.js` (resizable panels), and one file per other tab.

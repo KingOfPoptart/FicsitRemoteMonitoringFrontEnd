@@ -25,8 +25,14 @@
   .stats { display: flex; gap: 18px; flex-wrap: wrap; }
   .stat b { font-size: 16px; margin-right: 4px; }
   .conn-box { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-block: -4px; }
-  button.b.reset-layout { font-size: 11px; line-height: 1; padding: 0 8px; height: 18px; color: var(--muted); }
-  button.b.reset-layout:hover { color: var(--text); }
+  .hdr-btns { display: flex; gap: 6px; }
+  .hdr-btns button[hidden] { display: none; }
+  button.b.hdr-btn { font-size: 11px; line-height: 1; padding: 0 8px; height: 18px; color: var(--muted); }
+  button.b.hdr-btn:hover { color: var(--text); }
+  button.b.update { color: var(--accent); border-color: var(--accent); }
+  button.b.update.ready { color: var(--ok); border-color: var(--ok); }
+  button.b.update.bad { color: var(--bad); border-color: var(--bad); }
+  button.b.update.busy, button.b.update.muted { color: var(--muted); border-color: var(--line); cursor: default; }
   .conn { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
   .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
@@ -631,7 +637,10 @@
   <div class="stats" id="statsSink" data-for="sink" hidden></div>
   <div class="conn-box">
     <div class="conn"><span class="dot" id="dot"></span><span id="conn">connecting…</span></div>
-    <button class="b reset-layout" id="resetLayout" type="button" title="Put every panel and the map back to their default sizes, and every map's layers back to the default, on every tab">Reset layout</button>
+    <div class="hdr-btns">
+      <button class="b hdr-btn update" id="updateBtn" type="button" hidden></button>
+      <button class="b hdr-btn" id="resetLayout" type="button" title="Put every panel and the map back to their default sizes, and every map's layers back to the default, on every tab">Reset layout</button>
+    </div>
   </div>
 </header>
 
@@ -1846,6 +1855,7 @@ every(async () => {
 <script src="/js/inventory.js"></script>
 <script src="/js/sink.js"></script>
 <script src="/js/resize.js"></script>
+<script src="/js/update.js"></script>
 <script>itemsReady.then(() => showTab(activeTab));</script>
 </body>
 </html>

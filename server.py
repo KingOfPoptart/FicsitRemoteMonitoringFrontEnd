@@ -1,7 +1,7 @@
 """FICSIT monitor - serves the page, proxies Ficsit Remote Monitoring (FRM) so the browser has no CORS issues,
 and records power/production history so the charts have data from before the page was opened.
 
-  python server.py [--port 8090] [--host 127.0.0.1] [--frm http://localhost:8080] [--no-history]
+  python server.py [--port 8090] [--host 127.0.0.1] [--frm http://localhost:8080] [--no-history] [--auto-update] [--no-update-check]
 
 /api/<endpoint>  ->  <FRM URL>/<endpoint>   (responses cached 1 s, big ones 4 s, so several open pages don't multiply FRM load)
 /hist/power?mins=60       power history per grid (sampled every 5 s, kept 24 h)
@@ -13,6 +13,8 @@ and records power/production history so the charts have data from before the pag
 /logistics                every belt, conveyor lift and pipe (tier, production / power) and their networks, plus pipe head
                           lift: pumps and pipe runs higher than their source can push (worked out every 60 s while a page
                           shows them, every 5 min for a page in the background, else not at all)
+/update/status            this version, and whether a newer GitHub release is out (checked every 6 h; see updater.py)
+POST /update              install it and restart (only from this machine); POST /update/check: check GitHub now
 
 By default it only listens on this machine (127.0.0.1). Use --host 0.0.0.0 to reach it from other
 devices on your network. The FRM URL can also be set with the FRM_URL environment variable.
@@ -35,6 +37,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import updater
 
 ROOT = pathlib.Path(__file__).parent
 ALLOWED = {"getFactoryCart", "getVehicles", "getTruckStation", "getVehiclePaths", "getTrains", "getTrainStation",
@@ -1163,10 +1167,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             data = (HIST.power_json(mins) if path == "/hist/power" else HIST.prod_json(mins) if path == "/hist/production"
                     else HIST.sink_json(mins))
             return self.send_body(200, json.dumps(data, separators=(",", ":")).encode())
+        if path == "/update/status":
+            return self.send_body(200, json.dumps(updater.status(self.is_local())).encode())
         if (path in ("/", "/index.html", "/items.json", "/map.avif") or re.fullmatch(r"/js/[a-z0-9-]+\.js", path)
                 or re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path)):
             return super().do_GET()
         self.send_error(404)
+
+    def is_local(self):
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def do_POST(self):
+        path = self.path.partition("?")[0]
+        if path not in ("/update", "/update/check"):
+            return self.send_error(404)
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        # Only from this machine. The custom header can't be sent by another website's page without a CORS preflight
+        # (which this server never allows), so a site you visit can't start one either.
+        if not self.is_local():
+            return self.send_body(403, b'{"error":"updates can only be started on the computer running the monitor"}')
+        if self.headers.get("X-Ficsit-Update") != "1":
+            return self.send_body(403, b'{"error":"missing X-Ficsit-Update header"}')
+        if path == "/update/check":
+            updater.check()
+            return self.send_body(200, json.dumps(updater.status(True)).encode())
+        ok, reason = updater.start_apply()
+        self.send_body(202 if ok else 409, json.dumps({"started": ok, "error": reason}).encode())
 
     def proxy(self, endpoint, query=""):
         if endpoint not in ALLOWED:
@@ -1203,7 +1229,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith(("/api/", "/hist/", "/sinks", "/hypertubes")):  # polling would flood the console
+        if not self.path.startswith(("/api/", "/hist/", "/sinks", "/hypertubes", "/update/status")):  # polling would flood the console
             super().log_message(fmt, *args)
 
 
@@ -1213,6 +1239,8 @@ if __name__ == "__main__":
     ap.add_argument("--host", default="127.0.0.1", help="interface to listen on (0.0.0.0 = all, for LAN access)")
     ap.add_argument("--frm", help="FRM base URL (default: $FRM_URL or http://localhost:8080)")
     ap.add_argument("--no-history", action="store_true", help="don't record power/production history")
+    ap.add_argument("--auto-update", action="store_true", help="install new GitHub releases by itself (default: the page offers them)")
+    ap.add_argument("--no-update-check", action="store_true", help="never ask GitHub whether there's a newer release")
     args = ap.parse_args()
     if args.frm:
         FRM = args.frm.rstrip("/")
@@ -1226,7 +1254,35 @@ if __name__ == "__main__":
         HIST.load()
         threading.Thread(target=recorder, daemon=True).start()
     threading.Thread(target=logistics_worker, daemon=True).start()
-    print(f"FICSIT monitor on http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}  (FRM: {FRM})")
+
+    def save_state():   # before an update restarts the server: the new one loads these
+        with _last_lock:
+            _net["dirty"] = True
+        last_save()
+        if not args.no_history:
+            HIST.save()
+
+    httpd = None
+    local = "127.0.0.1" if args.host in ("0.0.0.0", "", "::") else args.host
+    updater.configure(lambda: httpd, save_state, f"http://{'[' + local + ']' if ':' in local else local}:{args.port}")
+    updater.run(enabled=not args.no_update_check, auto=args.auto_update)
+    try:
+        version = updater.local()["version"]
+    except Exception:
+        version = "(version unknown)"
+    print(f"FICSIT monitor {version} on http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}  (FRM: {FRM})")
     # a page opening a tab fires a burst of requests at once: queue them instead of refusing (the default backlog is 5)
     http.server.ThreadingHTTPServer.request_queue_size = 128
-    http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    while True:
+        # started by an update, or serving again after one was undone: the old server may still be letting go of the port
+        for tries in range(60 if updater.RESTARTED or updater.RESUME.is_set() else 1, 0, -1):
+            try:
+                httpd = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
+                break
+            except OSError:
+                if tries == 1:
+                    raise
+                time.sleep(0.5)
+        updater.RESUME.clear()
+        httpd.serve_forever()   # returns when an update hands over to the new version
+        updater.RESUME.wait()   # ... which only comes back here when the update was undone
