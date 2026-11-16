@@ -18,8 +18,9 @@ const COLLECTIBLES = [
   { name: "Blue Power Slug", total: 596, color: "#3987e5", note: "1 power shard each" },
   { name: "Yellow Power Slug", total: 389, color: "#c98500", note: "2 power shards each" },
   { name: "Purple Power Slug", total: 257, color: "#d55181", note: "5 power shards each" },
+  { name: "Hard Drive", total: null, color: "#f2c14e", note: "alternate recipes via MAM research" },
 ];
-const COL_LAYER = name => name === "Somersloop" ? "sloop" : name === "Mercer Sphere" ? "sphere" : "slug";
+const COL_LAYER = name => name === "Hard Drive" ? "harddrive" : name === "Somersloop" ? "sloop" : name === "Mercer Sphere" ? "sphere" : "slug";
 const fmtDur = mins => !isFinite(mins) || mins < 0 ? "–" : mins < 1 ? "<1 min" : mins < 60 ? `${Math.round(mins)} min` : mins < 48 * 60 ? `${(mins / 60).toFixed(1)} h` : `${(mins / 1440).toFixed(1)} days`;
 
 // shared by the Overview tab too
@@ -47,20 +48,57 @@ function milestoneTiers(schematics) {
   return Object.values(tiers).sort((a, b) => a.tier - b.tier);
 }
 
+// Drop pods report all crash sites, unlike the remaining-only artifact endpoints.
+function validDropPods(value) {
+  return Array.isArray(value) && value.every(p => p && typeof p.Looted === "boolean");
+}
+function remainingDropPods(value) {
+  return (Array.isArray(value) ? value : []).filter(p => p && p.Looted === false);
+}
+function dropPodRequirement(p) {
+  const item = p.RequiredItem;
+  if (p.CostType === "Item" && item?.Name && Number.isFinite(item.Amount) && item.Amount > 0)
+    return `${fmtNum(item.Amount)} × ${esc(item.Name)}`;
+  if (Number.isFinite(p.RequiredPower) && p.RequiredPower > 0)
+    return `${fmtNum(p.RequiredPower)} MW`;
+  if (/^(none|free|no cost)$/i.test(p.CostType || "")) return "None";
+  return "Not reported by FRM";
+}
+function dropPodTip(p) {
+  return Pop.head("Hard Drive", { iconName: "Hard Drive", sub: p.Opened === true ? "drop pod opened" :"drop pod not opened yet", status: p.Opened === true ? "Opened" : p.Opened === false ? "Closed" : "Unknown", color: COLLECTIBLES.find(c => c.name === "Hard Drive")?.color || "var(--accent)" }) +
+    Pop.sec("Drop pod") + Pop.row("Opened", p.Opened === true ? "Yes" : p.Opened === false ? "No" : "Unknown") +
+    Pop.row("Looted", "No") + Pop.row(p.Opened === true ? "Original opening requirement" : "Opening requirement", dropPodRequirement(p)) +
+    (p.Opened === true ? Pop.note("Already open: collect the Hard Drive inside.") : "") + Pop.where(p.location);
+}
+
 const Progression = (() => {
   let data = {}, timers = [], map, framed = false, tipOn = false;
+  let dropPodState = "loading";
   const root = $("tab-progression");
   const ui = (() => { try { return { node: "", ...JSON.parse(localStorage.getItem("pg.ui") || "{}") }; } catch { return { node: "" }; } })();
 
   async function load(eps) {
     const res = await Promise.allSettled(eps.map(e => getJSON(e)));
-    eps.forEach((e, i) => { if (res[i].status === "fulfilled") data[e] = res[i].value; });
+    eps.forEach((e, i) => {
+      const r = res[i];
+      if (e === "getDropPod") {
+        if (r.status === "fulfilled" && validDropPods(r.value)) {
+          // Normalize the all-pods response to the remaining-only collectible format.
+          COLLECTIBLES.find(c => c.name === "Hard Drive").total = r.value.length;
+          data[e] = remainingDropPods(r.value).map(p => ({ ...p, Name: "Hard Drive" }));
+          dropPodState = "ready";
+        } else {
+          // A failed refresh must not erase the last good collectible snapshot.
+          dropPodState = Array.isArray(data[e]) ? "stale" : "unavailable";
+        }
+      } else if (r.status === "fulfilled") data[e] = r.value;
+    });
     if (res.some(r => r.status === "fulfilled")) setConn(true); else setConn(false, res[0].reason?.message || "error");
     render();
   }
   const fast = () => load(["getSpaceElevator", "getHUBTerminal", "getResourceSink", "getProdStats", "getWorldInv", "getCloudInv"]);
   const slow = () => load(["getSchematics", "getResearchTrees", "getTradingPost", "getSessionInfo", "getRecipes"]);
-  const world = () => load(["getArtifacts", "getPowerSlug", "getResourceNode"]);
+  const world = () => load(["getArtifacts", "getPowerSlug", "getDropPod", "getResourceNode"]);
 
   const rateOf = name => (data.getProdStats || []).find(p => p.Name === name)?.CurrentProd || 0;
   const stockOf = name => ((data.getWorldInv || []).find(p => p.Name === name)?.Amount || 0) + ((data.getCloudInv || []).find(p => p.Name === name)?.Amount || 0);
@@ -153,7 +191,7 @@ const Progression = (() => {
   }
 
   function renderWorld() {
-    const left = name => [...(data.getArtifacts || []), ...(data.getPowerSlug || [])].filter(a => a.Name === name).length;
+    const left = name => [...(data.getArtifacts || []), ...(data.getPowerSlug || []), ...(data.getDropPod || [])].filter(a => a.Name === name).length;
     const loaded = data.getArtifacts && data.getPowerSlug;
     const nodes = data.getResourceNode || [];
     const byRes = new Map();
@@ -165,10 +203,10 @@ const Progression = (() => {
     const tapped = nodes.filter(n => n.Exploited).length;
     return `
       <h3>Collectibles found</h3>
-      <div class="hbars">${COLLECTIBLES.map(c => { const found = loaded ? c.total - left(c.name) : 0;
+      <div class="hbars">${COLLECTIBLES.map(c => { const ready = loaded && c.total != null, found = ready ? c.total - left(c.name) : 0;
         return `<div class="hb${ui.node === c.name ? " on" : ""}" data-node="${esc(c.name)}" title="${esc(c.note)} · click to find the ones still out there"><div class="hb-label"><span class="with-icon">${icon(c.name, "icon sm")}<span>${esc(c.name)}<br><span class="muted sub">${esc(c.note)}</span></span></span></div>
-          <div class="hb-track"><i class="cap" style="width:100%;background:var(--track)"></i><i style="width:${found / c.total * 100}%;background:var(--s1)"></i></div>
-          <div class="hb-val">${loaded ? `<b>${found}</b> <span class="muted">/ ${c.total}</span>` : "…"}</div></div>`; }).join("")}</div>
+          <div class="hb-track"><i class="cap" style="width:100%;background:var(--track)"></i><i style="width:${ready && c.total ? found / c.total * 100 : 0}%;background:var(--s1)"></i></div>
+          <div class="hb-val"${c.total == null && dropPodState === "unavailable" ? ' title="Drop-pod data unavailable"' : ""}>${ready ? `<b>${found}</b> <span class="muted">/ ${c.total}</span>` : c.total == null && dropPodState === "unavailable" ? "unavailable" : "…"}</div></div>`; }).join("")}</div>
       <h3>Resource nodes tapped · ${tapped} of ${nodes.length} <span class="muted sub">(incl. wells and geysers)</span></h3>
       <div class="hbars">${[...byRes.values()].sort((a, b) => b.tapped - a.tapped || a.name.localeCompare(b.name)).map(r =>
         `<div class="hb${ui.node === r.name ? " on" : ""}" data-node="${esc(r.name)}" title="Click to show only ${esc(r.name)} on the map"><div class="hb-label"><span class="with-icon">${icon(r.name, "icon sm")}<span>${esc(r.name)}<br><span class="muted sub">${r.pureT}/${r.pure} pure tapped</span></span></span></div>
@@ -201,6 +239,7 @@ const Progression = (() => {
     map.setPoints("sloop", (data.getArtifacts || []).filter(a => a.Name === "Somersloop").map(a => pt(a, { label: "Somersloop", tip: () => collectTip(a) })));
     map.setPoints("sphere", (data.getArtifacts || []).filter(a => a.Name === "Mercer Sphere").map(a => pt(a, { label: "Mercer Sphere", tip: () => collectTip(a) })));
     map.setPoints("slug", (data.getPowerSlug || []).map(a => pt(a, { label: a.Name, color: col(a.Name), tip: () => collectTip(a) })));
+    map.setPoints("harddrive", (data.getDropPod || []).filter(a => Number.isFinite(a.location?.x) && Number.isFinite(a.location?.y)).map(a => pt(a, { label: a.Name, tip: () => dropPodTip(a) })));
     const pickCol = COLLECTIBLES.find(c => c.name === ui.node);   // a collectible picked (vs a resource)
     const nodes = (data.getResourceNode || []).filter(n => !ui.node || pickCol || n.Name === ui.node);
     const nl = n => `${n.Name} · ${n.Purity}${n.NodeType !== "Node" ? " · " + n.NodeType : ""}${n.Exploited ? " · tapped" : ""}`;
@@ -208,10 +247,10 @@ const Progression = (() => {
     map.setPoints("tapped", nodes.filter(n => n.Exploited).map(n => pt(n, { label: nl(n), tip: () => nodeTip(n) })));
     // a resource picked from the list: its nodes drawn big with a ring (white = untapped, green = tapped), the rest fades
     // the picked thing is drawn big with a ring (resources: white = untapped, green = tapped; collectibles: their colour)
-    const BASE = { free: 3, tapped: 3.5, sloop: 4.5, sphere: 4, slug: 3 };
+    const BASE = { free: 3, tapped: 3.5, sloop: 4.5, sphere: 4, slug: 3, harddrive: 4.5 };
     for (const l of map.layers) if (l.key in BASE) l.size = BASE[l.key] * (ui.node && (pickCol ? l.key === COL_LAYER(pickCol.name) : l.key === "free" || l.key === "tapped") ? 1.8 : 1);
     map.setEmphasis(!ui.node ? null : pickCol
-      ? new Map([...(data.getArtifacts || []), ...(data.getPowerSlug || [])].filter(a => a.Name === pickCol.name).map(a => [a.ID, pickCol.color]))
+      ? new Map([...(data.getArtifacts || []), ...(data.getPowerSlug || []), ...(data.getDropPod || [])].filter(a => a.Name === pickCol.name).map(a => [a.ID, pickCol.color]))
       : new Map(nodes.map(n => [n.ID, n.Exploited ? "#5fcf80" : "#ffffff"])));
     // frame the map once the collectibles and nodes have loaded (players arrive first and would otherwise set the zoom)
     if (!framed && data.getArtifacts && data.getResourceNode) { framed = true; map.autoFit(() => ui.node ? map.fitEmphasis() : map.fit()); }
@@ -253,6 +292,7 @@ const Progression = (() => {
         { key: "sloop", group: "Collectibles", label: "Somersloops", color: "#e66767", size: 4.5, shape: "diamond" },
         { key: "sphere", group: "Collectibles", label: "Mercer Spheres", color: "#9085e9", size: 4, shape: "diamond" },
         { key: "slug", group: "Collectibles", label: "Power slugs", color: "#3987e5", size: 3, on: false },
+        { key: "harddrive", group: "Collectibles", label: "Hard Drives", color: "#f2c14e", size: 4.5, shape: "square" },
         { key: "free", group: "Resource nodes", label: "Untapped nodes", color: "#aab1bd", size: 3, shape: "square", on: false },
         { key: "tapped", group: "Resource nodes", label: "Tapped nodes", color: "#199e70", size: 3.5, shape: "square" },
       ],

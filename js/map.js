@@ -620,16 +620,17 @@ const RESOURCE_LAYERS = () => [
   { key: "sloop", group: "Collectibles", label: "Somersloops", color: "#e66767", size: 4.5, shape: "diamond" },
   { key: "sphere", group: "Collectibles", label: "Mercer Spheres", color: "#9085e9", size: 4, shape: "diamond" },
   { key: "slug", group: "Collectibles", label: "Power slugs", color: "#3987e5", size: 3 },
+  { key: "harddrive", group: "Collectibles", label: "Hard Drives", color: "#f2c14e", size: 4.5, shape: "square" },
   { key: "free", group: "Resource nodes", label: "Untapped nodes", color: "#aab1bd", size: 3, shape: "square" },
   { key: "tapped", group: "Resource nodes", label: "Tapped nodes", color: "#199e70", size: 3.5, shape: "square" },
 ];
 const ResSrc = {
   d: {}, maps: new Set(), tabs: new Set(), listeners: new Set(), timer: null, loaded: false,
-  owns: k => ["sloop", "sphere", "slug", "free", "tapped"].includes(k),
+  owns: k => ["sloop", "sphere", "slug", "harddrive", "free", "tapped"].includes(k),
   attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 120000); },
   async poll() {
-    const eps = ["getResourceNode", "getArtifacts", "getPowerSlug"], res = await Promise.allSettled(eps.map(e => getJSON(e)));
-    eps.forEach((e, i) => { if (res[i].status === "fulfilled") this.d[e] = res[i].value; });
+    const eps = ["getResourceNode", "getArtifacts", "getPowerSlug", "getDropPod"], res = await Promise.allSettled(eps.map(e => getJSON(e)));
+    eps.forEach((e, i) => { if (res[i].status === "fulfilled" && (e !== "getDropPod" || validDropPods(res[i].value))) this.d[e] = res[i].value; });
     this.loaded = true;
     for (const mv of this.maps) this.push(mv);
   },
@@ -640,6 +641,7 @@ const ResSrc = {
     mv.setShared("sloop", arts.filter(a => a.Name === "Somersloop").map(a => pt(a, { label: "Somersloop", tip: () => Progression.collectTip(a) })).filter(Boolean));
     mv.setShared("sphere", arts.filter(a => a.Name === "Mercer Sphere").map(a => pt(a, { label: "Mercer Sphere", tip: () => Progression.collectTip(a) })).filter(Boolean));
     mv.setShared("slug", (this.d.getPowerSlug || []).map(a => pt(a, { label: a.Name, color: col(a.Name), tip: () => Progression.collectTip(a) })).filter(Boolean));
+    mv.setShared("harddrive", remainingDropPods(this.d.getDropPod).filter(a => Number.isFinite(a.location?.x) && Number.isFinite(a.location?.y)).map(a => pt(a, { label: "Hard Drive", tip: () => dropPodTip(a) })).filter(Boolean));
     mv.setShared("free", nodes.filter(n => !n.Exploited).map(n => pt(n, { label: nl(n), color: n.Purity === "Pure" ? "#f2f2f2" : n.Purity === "Normal" ? "#aab1bd" : "#6b7380", tip: () => Progression.nodeTip(n) })).filter(Boolean));
     mv.setShared("tapped", nodes.filter(n => n.Exploited).map(n => pt(n, { label: nl(n), tip: () => Progression.nodeTip(n) })).filter(Boolean));
   },
