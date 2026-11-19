@@ -33,7 +33,7 @@ const Pop = {
   // the one-line "what's wrong" box right under the title of anything with a problem
   why: (cls, html) => `<div class="mp-why ${cls}">${html}</div>`,
   // how far short of the full rate: "−15/min (33%)"
-  short: (cur, max, unit = "/min") => max > 0 ? ` <small>−${fmtRate(Math.max(0, max - cur))}${unit.startsWith("/") ? "" : " "}${unit.trim()} (${pct(Math.max(0, max - cur) / max * 100)})</small>` : "",
+  short: (cur, max, unit = "/min") => max > 0 ? ` <small>Short −${fmtRate(Math.max(0, max - cur))}${unit.startsWith("/") ? "" : " "}${unit.trim()} (${pct(Math.max(0, max - cur) / max * 100)})</small>` : "",
   // no power: not wired up, or the grid's fuse blew (with what the grid wants vs what it can make)
   powerWhy(pi) {
     if (!pi) return "";

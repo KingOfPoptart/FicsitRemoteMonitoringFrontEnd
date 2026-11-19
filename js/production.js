@@ -58,6 +58,7 @@ const Production = (() => {
       mw: m.PowerInfo?.PowerConsumed || 0, maxMw: m.PowerInfo?.MaxPowerConsumed || 0, circuit: m.PowerInfo?.CircuitGroupID, circuitId: m.PowerInfo?.CircuitID,
       fuse: !!m.PowerInfo?.FuseTriggered, inv: { in: m.InputInventory || [], out: m.OutputInventory || (extractor ? m.production : []) || [] }, loc: m.location };
     o.status = machineStatus({ ...m, eff }, m.production);
+    if (o.status === "partial" && outputs.length === 1 && stuckOn(o)?.kind === "full") o.status = "full";
     if (o.status !== "running" && o.status !== "partial") o.eff = m.IsConfigured && !m.IsPaused ? eff : 0;
     return o;
   }
