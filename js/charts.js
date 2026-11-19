@@ -444,7 +444,7 @@ class MultiSelect {
     // noun "" (a column whose values aren't things, e.g. ranges): "All" / "2 selected", or the one value itself
     const one = n === 1 && !this.noun ? this.options().find(o => o.value === this.selected()[0]) : null;
     this.btn.innerHTML = `<span>${!this.noun ? (n ? (one ? one.label.replace(/<[^>]+>/g, "").trim() : `${n} selected`) : "All")
-      : n ? `${n} ${n === 1 ? this.noun.replace(/s$/, "") : this.noun}` : `All ${this.noun}`}</span>`;
+      : n ? `${n} ${n === 1 ? this.noun.replace(/ies$/, "y").replace(/ses$/, "s").replace(/s$/, "") : this.noun}` : `All ${this.noun}`}</span>`;
     this.btn.classList.toggle("f-active", n > 0);
     if (this.pop.classList.contains("open")) this.renderList();
   }
