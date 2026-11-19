@@ -8,7 +8,7 @@ const Production = (() => {
   // machine states, worst first; colours are status colours (each always shown with its label)
   const RUN_OK = 99;   // productivity (%) that counts as running fine; below it = "Running <99%"
   const M_STATUS = {
-    nopower: { label: "No power", color: "var(--bad)", title: "Fuse tripped or not connected to a grid" },
+    nopower: { label: "No power", color: "var(--bad)", title: "Fuse tripped, disconnected, or not receiving power" },
     starved: { label: "Starved", color: "var(--serious)", title: "Stopped: waiting for input" },
     full:    { label: "Output full", color: "var(--info)", title: "Stopped: output is backed up" },
     partial: { label: `Running <${RUN_OK}%`, color: "var(--warn)", title: `Running, but below ${RUN_OK}% productivity (input arrives too slowly or output backs up now and then)` },
@@ -42,7 +42,7 @@ const Production = (() => {
     if (!m.IsConfigured) return "norecipe";
     if (m.IsPaused) return "paused";
     // resource well extractors have no power plug: the pressurizer is what's powered
-    if (!/FrackingExtractor/.test(m.ClassName) && (m.PowerInfo?.FuseTriggered || m.PowerInfo?.CircuitID === -1)) return "nopower";
+    if (!/FrackingExtractor/.test(m.ClassName) && (m.PowerInfo?.FuseTriggered || m.PowerInfo?.CircuitID === -1 || (!m.IsProducing && m.PowerInfo?.MaxPowerConsumed > 0 && m.PowerInfo.PowerConsumed === 0))) return "nopower";
     if (m.IsProducing) return m.eff >= RUN_OK ? "running" : "partial";
     const out = (m.OutputInventory?.length ? m.OutputInventory : prod) || [];
     if (out.some(o => o.MaxAmount > 0 && o.Amount >= o.MaxAmount * 0.9)) return "full";
