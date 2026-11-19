@@ -34,19 +34,17 @@ const Power = (() => {
   }
   const grid = () => ui.grid === "all" || groups.length <= 1 ? (groups.length === 1 ? groups[0] : allGrids())
                    : groups.find(g => String(g.CircuitGroupID) === String(ui.grid)) || allGrids();
-  // A grid is named after what powers it, biggest share of its output first; types under 10% are counted as "+N".
-  // Then consumption / production: "Nuclear 200/2,000 MW", "Nuclear + Fuel +2 1,850/9,400 MW".
-  // No generators: "No generators · Train Station 151/151 MW" (its most common consumer). If nothing is producing,
-  // the types are ordered by capacity instead.
+  // A grid is named after its connected generator capacity, biggest share first; types under 10% are counted as "+N".
+  // Then consumption / production: "Nuclear (200/2,000 MW)", "Nuclear+Fuel+2 (1,850/9,400 MW)".
+  // No generators: "No generators · Train Station (151/151 MW)" (its most common consumer).
   const short = n => n.replace(/-Powered Generator| Generator| Power Plant| Burner$/, "");
   function genMix(g) {
     const gs = gens.filter(x => onGrid(x.pi, g)), share = new Map();
-    const running = gs.some(x => x.out > 0), val = x => running ? x.out : x.cap;
-    for (const x of gs) share.set(short(x.type), (share.get(short(x.type)) || 0) + val(x));
+    for (const x of gs) share.set(short(x.type), (share.get(short(x.type)) || 0) + x.cap);
     const total = [...share.values()].reduce((a, b) => a + b, 0);
     const sorted = [...share].sort((a, b) => b[1] - a[1]);
     const main = sorted.filter(([, v], i) => i === 0 || (total && v / total >= 0.1)).map(([k]) => k);
-    return { types: sorted.length, label: main.join(" + ") + (sorted.length > main.length ? ` +${sorted.length - main.length}` : "") };
+    return { types: sorted.length, label: main.join("+") + (sorted.length > main.length ? `+${sorted.length - main.length}` : "") };
   }
   function baseName(g) {
     const mix = genMix(g);
@@ -72,18 +70,19 @@ const Power = (() => {
   const mwPair = g => `${fmtNum(g.PowerConsumed)}/${fmtNum(capOf(g))} MW`;   // used / max
   // grids with generators first (biggest first), grids without any always last
   function sortGroups() {
-    groups.sort((a, b) => (hasGens(b) - hasGens(a)) || capOf(b) - capOf(a) || a.CircuitGroupID - b.CircuitGroupID);
+    groups.sort((a, b) => (hasGens(b) - hasGens(a)) || maxOf(b) - maxOf(a) || a.CircuitGroupID - b.CircuitGroupID);
   }
   // numbered only if two grids would otherwise read exactly the same
-  // grids that would share a name are numbered ("Coal 1", "Coal 2") in grid-ID order, whatever their power,
+  // grids that would share a name are numbered ("Coal #1", "Coal #2") in grid-ID order, whatever their power,
   // so the numbers don't swap as output changes; a unique name ("Nuclear") gets none
   function gridLabel(g) {
     if (g.all) return "All grids";
-    if (groups.length <= 1) return "Main grid";
+    if (groups.length === 0) return "Grid";
+    if (groups.length === 1) return "Main grid";
     const base = baseName(g), same = groups.filter(x => baseName(x) === base).sort((a, b) => a.CircuitGroupID - b.CircuitGroupID);
-    return same.length > 1 ? `${base} ${same.indexOf(g) + 1}` : base;
+    return same.length > 1 ? `${base} #${same.indexOf(g) + 1}` : base;
   }
-  const gridName = g => `${gridLabel(g)} ${mwPair(g)}`;
+  const gridName = g => `${gridLabel(g)} (${mwPair(g)})`;
 
   const onGrid = (pi, g) => pi && g && (g.all ? pi.CircuitID >= 0 : pi.CircuitGroupID === g.CircuitGroupID);
   // a switch / pole / line belongs to the selected grid if any of its circuits is one of the grid's
@@ -278,7 +277,7 @@ const Power = (() => {
   function renderGrids() {
     $("wGridGroup").style.display = groups.length > 1 ? "" : "none";   // one grid: nothing to choose
     const all = allGrids();
-    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: `All grids <span class="n">${mwPair(all)}</span>`, title: "present consumption / present capacity" },
+    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: `All grids <span class="n">(${mwPair(all)})</span>`, title: "present consumption / present capacity" },
       ...groups.map(g => ({ v: String(g.CircuitGroupID), label: `${g.FuseTriggered ? "⚠ " : ""}${esc(gridName(g))}`,
         title: "present consumption / present capacity" }))], o => o.v === String(grid().CircuitGroupID)));
   }
@@ -570,10 +569,18 @@ const Power = (() => {
       const j = e.target.closest("[data-jump]");
       if (j) { const t = $(j.dataset.jump); t.scrollIntoView({ behavior: "smooth", block: "start" }); t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash"); return; }
       const sb = e.target.closest("[data-g]");
-      if (sb && sb.dataset.g === "grid") { ui.grid = sb.dataset.v; saveUi(); render(); renderCharts(); map.draw(); map.fit(); return; }
-      if (sb && sb.dataset.g === "range") { ui.range = +sb.dataset.v; saveUi(); render(); pollHistory(); }
+      if (sb && sb.dataset.g === "grid") { selectGrid(sb.dataset.v); return; }
+      if (sb && sb.dataset.g === "range") { selectRange(+sb.dataset.v); }
     });
     $("wUnitClear").addEventListener("click", () => unitTable.clearFilters());
+  }
+
+  function selectGrid(grid) {
+    ui.grid = grid; saveUi(); render(); renderCharts(); map?.draw(); map?.fit(); 
+  }
+
+  function selectRange(range) {
+    ui.range = range; saveUi(); render(); pollHistory();
   }
 
   return {
@@ -588,5 +595,7 @@ const Power = (() => {
       histTimer = histTimer || every(pollHistory, 5000);
     },
     hide() { [timer, detailTimer, histTimer, netTimer].forEach(stopPoll); timer = detailTimer = histTimer = netTimer = null; },
+    gridLabel,
+    selectGrid,
   };
 })();

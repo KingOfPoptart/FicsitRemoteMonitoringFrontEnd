@@ -62,18 +62,18 @@ const Overview = (() => {
 
   // ---- what needs attention, worst first -----------------------------------------------------
   function attention() {
-    const out = [], add = (level, text, tab) => out.push({ level, text, tab });
+    const out = [], add = (level, text, tab, powergrid) => out.push({ level, text, tab, powergrid });
     if (stale) {   // the game server isn't answering: everything below is from the last state it reported
       const t = new Date(stale.since), today = t.toDateString() === new Date().toDateString();
       add("bad", `Game server is offline (since ${today ? t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : t.toLocaleString()}) — showing the last state it reported`, null);
     }
     for (const g of d.getPower || []) {
-      const name = (d.getPower.length > 1 ? `Grid ${g.CircuitGroupID}: ` : "");
-      if (g.FuseTriggered) add("bad", `${name}fuse tripped — the grid is off`, "power");
+      const name = Power.gridLabel(g).replace(/(\bgrid)?$/i, suffix => suffix || " grid");
+      if (g.FuseTriggered) add("bad", `${name} fuse tripped — the grid is off`, "power", g.CircuitGroupID);
       else if (!g.PowerCapacity && g.PowerProduction > 0) continue;   // capacity not reported (no-power-cost world): no overload alarms
-      else if (g.PowerConsumed > g.PowerCapacity) add("bad", `${name}using ${fmtNum(g.PowerConsumed)} MW, more than the ${fmtNum(g.PowerCapacity)} MW present capacity${g.BatteryCapacity ? ` — batteries at ${pct(g.BatteryPercent)}` : ""}`, "power");
-      else if (g.PowerConsumed > g.PowerCapacity * 0.9) add("warn", `${name}using ${pct(g.PowerConsumed / g.PowerCapacity * 100)} of present capacity`, "power");
-      if (g.PowerMaxConsumed > g.PowerCapacity) add("warn", `${name}max consumption of ${fmtNum(g.PowerMaxConsumed)} MW is over present capacity of ${fmtNum(g.PowerCapacity)} MW — a fuse could trip if everything runs at once`, "power");
+      else if (g.PowerConsumed > g.PowerCapacity) add("bad", `${name} using ${fmtNum(g.PowerConsumed)} MW, more than the ${fmtNum(g.PowerCapacity)} MW present capacity${g.BatteryCapacity ? ` — batteries at ${pct(g.BatteryPercent)}` : ""}`, "power", g.CircuitGroupID);
+      else if (g.PowerConsumed > g.PowerCapacity * 0.9) add("warn", `${name} using ${pct(g.PowerConsumed / g.PowerCapacity * 100)} of present capacity`, "power", g.CircuitGroupID);
+      if (g.PowerMaxConsumed > g.PowerCapacity) add("warn", `${name} max consumption of ${fmtNum(g.PowerMaxConsumed)} MW is over present capacity of ${fmtNum(g.PowerCapacity)} MW — a fuse could trip if everything runs at once`, "power", g.CircuitGroupID);
     }
     if (prod) {
       const gens = prod.gens || [];
@@ -126,7 +126,7 @@ const Overview = (() => {
     const items = attention();
     const ICON = { bad: "⛔", warn: "⚠", ok: "✓", info: "ℹ" };
     // no tab: the "server offline" item, which flashes the connection light in the header instead of opening a tab
-    const html = items.length ? items.map(a => a.tab ? `<a class="attn ${a.level}" href="#${a.tab}"><span class="ai">${ICON[a.level]}</span><span>${esc(a.text)}</span><span class="go">${a.tab} →</span></a>`
+    const html = items.length ? items.map(a => a.tab ? `<a class="attn ${a.level}" href="#${a.tab}"${a.powergrid ? ` data-powergrid="${esc(a.powergrid)}"` : ""}><span class="ai">${ICON[a.level]}</span><span>${esc(a.text)}</span><span class="go">${a.tab} →</span></a>`
         : `<a class="attn ${a.level}" href="#" data-flash-dot title="Show the connection light"><span class="ai">${ICON[a.level]}</span><span>${esc(a.text)}</span><span class="go">status ↗</span></a>`).join("")
       : `<p class="muted">All good — nothing needs attention.</p>`;
     if ($("ovAttn").dataset.html !== html) { $("ovAttn").innerHTML = html; $("ovAttn").dataset.html = html; }   // only when it changes: rebuilding it swallowed clicks
@@ -229,6 +229,10 @@ const Overview = (() => {
         </div>
       </div>
       <section class="card map-panel ov-world"><div id="ovMap"></div></section>`;
+    root.addEventListener("click", e => {
+      const pg = e.target.closest("a[data-powergrid]");
+      if (pg) Power.selectGrid(pg.dataset.powergrid);
+    });
     chart = new LineChart($("ovChart"), { height: 140, unit: "MW", fill: true });
     map = new MapView($("ovMap"), {
       // the whole world: every kind of thing is in the Layers menu; on to start with: the factory, transport, the power
