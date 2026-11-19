@@ -1169,10 +1169,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_body(200, json.dumps(data, separators=(",", ":")).encode())
         if path == "/update/status":
             return self.send_body(200, json.dumps(updater.status(self.is_local())).encode())
+        if re.fullmatch(r"/img/icons/[a-z0-9-]+\.png", path):
+            if not (ROOT / path.lstrip("/")).is_file():
+                return self.send_icon_fallback()
+            return super().do_GET()
         if (path in ("/", "/index.html", "/items.json", "/map.avif") or re.fullmatch(r"/js/[a-z0-9-]+\.js", path)
                 or re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path)):
             return super().do_GET()
         self.send_error(404)
+
+    def send_icon_fallback(self):
+        body = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="#8993a4" fill-opacity=".12" stroke="#8993a4" stroke-width="1.5"/><text x="16" y="24" fill="#8993a4" font-family="Arial,sans-serif" font-size="23" font-weight="600" text-anchor="middle">?</text></svg>'
+        self._icon_fallback = True
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def is_local(self):
         return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
@@ -1221,6 +1234,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         if getattr(self, "_status", 200) >= 400:   # never let the browser cache an error (e.g. an icon fetched later)
+            self.send_header("Cache-Control", "no-store")
+        elif getattr(self, "_icon_fallback", False):
             self.send_header("Cache-Control", "no-store")
         elif self.path.startswith(("/map.avif", "/img/")):
             self.send_header("Cache-Control", "max-age=86400")
