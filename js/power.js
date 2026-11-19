@@ -77,10 +77,13 @@ const Power = (() => {
   // so the numbers don't swap as output changes; a unique name ("Nuclear") gets none
   function gridLabel(g) {
     if (g.all) return "All grids";
+    if (groups.length === 0) groups = PowerNet.grids || [];
+    if (usage.length === 0) usage = PowerNet.usage || [];
+    if (gens.length === 0) gens = PowerNet.generators?.map(fromGen) || [];
     if (groups.length === 0) return "Grid";
     if (groups.length === 1) return "Main grid";
     const base = baseName(g), same = groups.filter(x => baseName(x) === base).sort((a, b) => a.CircuitGroupID - b.CircuitGroupID);
-    return same.length > 1 ? `${base} #${same.indexOf(g) + 1}` : base;
+    return same.length > 1 ? `${base} #${same.findIndex(x => x.CircuitGroupID == g.CircuitGroupID) + 1}` : base;
   }
   const gridName = g => `${gridLabel(g)} (${mwPair(g)})`;
 
@@ -534,7 +537,7 @@ const Power = (() => {
         { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, on: false },
       ],
       fade: p => p.circuits ? !grid().all && !inGrid(p.circuits) : false,   // other grids fade
-      fitTo: () => grid().all ? [] : map.all(true).filter(p => p.circuits && inGrid(p.circuits)).map(p => p.ip),
+      fitTo: () => grid().all ? [] : map?.all(true).filter(p => p.circuits && inGrid(p.circuits)).map(p => p.ip),
       tooltip: p => { if (p.layer === "switches") { const r = switchRows().find(x => x.id === p.id); if (r) return switchPop(r); }
         return `<div class="row"><span>${esc(p.label)}</span></div>`; },
       onHover: p => {

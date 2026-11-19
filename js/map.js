@@ -308,7 +308,7 @@ const powerLayers = keep => [
 ];
 const POWER_KEYS = new Set(["wires", "poles", "outlets", "towers", "switches", "pstorage"]);
 const PowerNet = {
-  wires: [], poles: [], switches: [], storage: [], things: [], groupOf: new Map(), maps: new Set(), listeners: new Set(), timer: null,
+  wires: [], poles: [], switches: [], storage: [], things: [], usage: [], generators: [], groupOf: new Map(), maps: new Set(), listeners: new Set(), timer: null,
   tabs: new Set(), loaded: false, owns: k => POWER_KEYS.has(k),
   attach(mv) { this.maps.add(mv); if (this.loaded) this.push(mv); runSource(this, 30000); },
   need() { this.tabs.add(activeTab); runSource(this, 30000); },   // the Power tab's tables use the switches and poles
@@ -316,6 +316,8 @@ const PowerNet = {
     const [c, p, s, u, g, w] = await Promise.allSettled(["getCables", "getPowerPoles", "getSwitches", "getPowerUsage", "getGenerators", "getPower"].map(e => getJSON(e)));
     const ok = r => r.status === "fulfilled" ? r.value : null;
     const usage = ok(u) || [], gens = ok(g) || [], poles = ok(p) || [];   // getPowerPoles needs the newer FRM build
+    this.usage = ok(u) || this.usage || [];
+    this.generators = ok(g) || this.generators || [];
     this.grids = ok(w) || this.grids || []; this.loaded = true;
     this.groupOf = new Map((ok(w) || []).flatMap(gr => (gr.AssociatedCircuits || []).map(c => [c, gr.CircuitGroupID])));
     this.poles = poles.map(x => ({ ...x, kind: /Tower/i.test(x.ClassName) ? "towers" : /Wall/i.test(x.ClassName) ? "outlets" : "poles", circuits: [x.CircuitID] }));
