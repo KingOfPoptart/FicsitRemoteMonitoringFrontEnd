@@ -214,9 +214,14 @@ const Power = (() => {
       Pop.grid(g.pi?.CircuitID) + Pop.where(raw.location);
   }
   // anything else that uses power
-  const usePop = u => { const pi = u.PowerInfo || {}, on = pi.PowerConsumed > 0.11;
-    return Pop.head(u.Name, { id: shortId(u.ID), sub: "uses power", status: pi.FuseTriggered ? "Fuse tripped" : pi.CircuitID < 0 ? "No grid" : on ? "Drawing power" : "Idle",
-                              color: pi.FuseTriggered || pi.CircuitID < 0 ? "var(--bad)" : on ? POWER_COLOR : "var(--muted)" }) + Pop.powerWhy(pi) +
+  const noPower = pi => {
+    const g = PowerNet.gridOf(pi?.CircuitID) || (PowerNet.grids || []).find(x => x.CircuitGroupID === pi?.CircuitGroupID);
+    return !!(pi?.CircuitID < 0 || pi?.FuseTriggered || g?.FuseTriggered ||
+      (g && pi.MaxPowerConsumed > 0 && pi.PowerConsumed === 0 && !g.PowerProduction && !g.PowerCapacity));
+  };
+  const usePop = u => { const pi = u.PowerInfo || {}, off = noPower(pi), on = pi.PowerConsumed > 0.11;
+    return Pop.head(u.Name, { id: shortId(u.ID), sub: "uses power", status: off ? "No power" : on ? "Drawing power" : "Idle",
+                              color: off ? "var(--bad)" : on ? POWER_COLOR : "var(--muted)" }) + Pop.powerWhy(pi) +
       Pop.sec("Power") + Pop.row("Drawing", Pop.mw(pi.PowerConsumed || 0, pi.MaxPowerConsumed)) + Pop.grid(pi.CircuitID) + Pop.where(u.location); };
 
   async function pollHistory() {
@@ -359,8 +364,11 @@ const Power = (() => {
     const pt = (u, extra) => u.location && { id: u.ID || u.id, x: u.location.x, y: u.location.y, ...extra };
     map.setPoints("gens", gens.filter(x => x.raw.location).map(x => pt(x.raw, { circuits: [x.pi?.CircuitID], color: G_STATUS[x.status].color, st: x.status,
       label: `${x.type} · ${G_STATUS[x.status].label} · ${fmtNum(x.out, 0)} MW`, tip: () => genPop(x.raw) })));
-    map.setPoints("use", usage.filter(u => u.PowerInfo?.MaxPowerConsumed > 0).map(u => pt(u, { circuits: [u.PowerInfo.CircuitID],
-      label: `${u.Name} · ${fmtNum(u.PowerInfo.PowerConsumed, 1)} MW (max ${fmtNum(u.PowerInfo.MaxPowerConsumed, 1)})`, tip: () => usePop(u) })).filter(Boolean));
+    map.setPoints("use", usage.filter(u => u.PowerInfo?.MaxPowerConsumed > 0).map(u => {
+      const off = noPower(u.PowerInfo);
+      return pt(u, { circuits: [u.PowerInfo.CircuitID], color: off ? "var(--bad)" : null, st: off ? "off" : "on",
+        label: `${u.Name} · ${fmtNum(u.PowerInfo.PowerConsumed, 1)} MW (max ${fmtNum(u.PowerInfo.MaxPowerConsumed, 1)})`, tip: () => usePop(u) });
+    }).filter(Boolean));
   }
 
   function renderCharts() {
@@ -518,7 +526,7 @@ const Power = (() => {
       storeKey: "pw.map2", layerMenu: true, world: { on: l => l.group === "Power network" }, layers: [
         // points and lines not on the selected grid fade (All grids: nothing fades), see fade below
         { key: "gens", group: "Power", label: "Generators", color: "var(--ok)", size: 5, shape: "diamond", legend: "gens" },
-        { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, on: false },
+        { key: "use", group: "Power", label: "Consumers", color: "#8c94a1", size: 2.5, legend: "consumers", on: true },
       ],
       fade: p => p.circuits ? !grid().all && !inGrid(p.circuits) : false,   // other grids fade
       fitTo: () => grid().all ? [] : map.all(true).filter(p => p.circuits && inGrid(p.circuits)).map(p => p.ip),

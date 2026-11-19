@@ -651,6 +651,7 @@ const LEGEND_SETS = {
   machines:  { name: "Machines", list: () => Production.M_STATUS },
   gens:      { name: "Generators", shape: "diamond", list: () => Power.G_STATUS },
   gensOnOff: { name: "Generators", shape: "diamond", list: () => ({ on: { label: "Running", color: "#e879f9" }, off: { label: "Not running", color: "var(--bad)" } }) },
+  consumers: { name: "Consumers", list: () => ({ on: { label: "Powered", color: "#8c94a1" }, off: { label: "No power", color: "var(--bad)" } }) },
   vehicles:  { name: "Vehicles", shape: "arrow", list: () => ({ moving: { label: "Moving", color: VEH_COLOR.moving }, docking: { label: "Docking", color: VEH_COLOR.docking },
                stopped: { label: "Stopped", color: VEH_COLOR.stopped }, driven: { label: "Driven", color: VEH_COLOR.driven }, error: { label: "Problem", color: VEH_COLOR.error } }) },
   sinks:     { name: "AWESOME Sinks", shape: "drain", list: () => ({ on: { label: "Powered", color: "#818cf8" }, off: { label: "No power", color: "var(--bad)" } }) },
