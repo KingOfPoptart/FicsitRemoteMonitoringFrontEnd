@@ -55,8 +55,19 @@ const Power = (() => {
       .reduce((a, u) => (a[u.Name] = (a[u.Name] || 0) + 1, a), {})).sort((a, b) => b[1] - a[1])[0];
     return `No generators${top ? ` · ${top[0]}` : ""}`;
   }
-  // a grid's max: FRM's capacity, or (when FRM reports 0, e.g. a no-power-cost world) its generators' capacity
+  // a grid's capacity: FRM's capacity, or (when FRM reports 0, e.g. a no-power-cost world) its generators' capacity
   const capOf = g => g.PowerCapacity || (g.all ? groups.reduce((a, x) => a + capOf(x), 0) : gens.filter(x => onGrid(x.pi, g)).reduce((a, x) => a + x.cap, 0));
+  const maxOf = g => {
+    if (g.all) return groups.reduce((a, x) => a + maxOf(x), 0);
+    const connected = gens.filter(x => onGrid(x.pi, g));
+    const base = connected.reduce((a, x) => a + (
+      /AlienPower/i.test(x.raw.ClassName || "") ? 500 : // We will compute theoretically maximum capacity instead of realtime capacity
+      /GeoThermal/i.test(x.raw.ClassName || "") ? x.raw.GeoMaxPower ?? x.cap :
+      x.cap), 0);
+    // Theoretically assume each connected APA is fueled for a grid boost of 30%.
+    const apas = connected.filter(x => /AlienPower/i.test(x.raw.ClassName || ""));
+    return base * (1 + apas.length * 0.3);
+  };
   const hasGens = g => gens.some(x => onGrid(x.pi, g));
   const mwPair = g => `${fmtNum(g.PowerConsumed)}/${fmtNum(capOf(g))} MW`;   // used / max
   // grids with generators first (biggest first), grids without any always last
@@ -234,9 +245,11 @@ const Power = (() => {
   // unknown only if neither FRM nor the generators give a capacity (e.g. a grid with no generators in such a world)
   const capUnknown = g => !capOf(g) && g.PowerProduction > 0 && !g.FuseTriggered;
   function renderTiles(g) {
-    const unk = capUnknown(g), cap = capOf(g);
+    const unk = capUnknown(g), cap = capOf(g), max = maxOf(g);
     const load = cap ? g.PowerConsumed / cap : 0;
     const loadColor = load > 1 ? "var(--bad)" : load > 0.9 ? "var(--warn)" : "var(--ok)";
+    const maxLoad = max ? g.PowerMaxConsumed / max : Infinity;
+    const maxLoadColor = maxLoad > 1 ? "var(--bad)" : maxLoad > 0.9 ? "var(--warn)" : "var(--ok)";
     const headroom = unk ? null : cap - g.PowerConsumed;
     const maxOver = !unk && g.PowerMaxConsumed > cap;
     const hasBatt = g.BatteryCapacity > 0;
@@ -246,10 +259,11 @@ const Power = (() => {
         <div class="t-sub">${unk ? "capacity not reported" : `${bar(load, loadColor)}${pct(load * 100)} of present capacity`}</div></div>
       <div class="tile click" data-jump="wGenCard" title="Show what's generating the power"><div class="t-label">Production</div><div class="t-val">${mw(g.PowerProduction)}</div><div class="t-sub">what generators put out now</div></div>
       <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Capacity</div><div class="t-val">${unk ? `<span class="muted">–</span>` : mw(cap)}</div><div class="t-sub">${unk ? "no generators, and FRM reports 0" : g.PowerCapacity ? "present capacity if every fuelled generator ran flat out" : "the generators' own capacity (FRM reports 0)"}</div></div>
-      <div class="tile click${maxOver ? " warn" : ""}" data-jump="wUseCard" title="Show max consumption by building type (lighter bars)"><div class="t-label">Max consumption</div><div class="t-val">${mw(g.PowerMaxConsumed)}</div>
-        <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - cap)} MW over present capacity if everything runs at once</span>` : unk ? "if every machine ran at once" : `if every machine ran at once — fits present capacity`}</div></div>
       <div class="tile click${headroom < 0 ? " bad" : ""}" data-jump="wChartCard" title="Show power over time"><div class="t-label">Headroom</div><div class="t-val">${headroom == null ? `<span class="muted">–</span>` : mw(headroom)}</div>
         <div class="t-sub">${headroom == null ? "unknown without capacity" : headroom >= 0 ? "present capacity − present consumption" : hasBatt && g.BatteryPercent > 0 ? `<span class="bad-text">⚠ over present capacity — batteries are covering it</span>` : `<span class="bad-text">⚠ over present capacity</span>`}</div></div>
+      <div class="tile click${maxOver ? " warn" : ""}" data-jump="wUseCard" title="Show max consumption by building type (lighter bars)"><div class="t-label">Max consumption</div><div class="t-val">${mw(g.PowerMaxConsumed)}</div>
+        <div class="t-sub">${bar(maxLoad, maxLoadColor)}${max ? `${pct(maxLoad * 100)} of` : "over"} max capacity${maxOver ? `<br><span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - cap)} MW over present capacity if everything runs at once</span>` : " if every machine ran at once"}</div></div>
+      <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Max capacity</div><div class="t-val">${mw(max)}</div><div class="t-sub">theoretical maximum capacity of every connected generator</div></div>
       <div class="tile click" data-jump="wChartCard" title="Show battery charge over time"><div class="t-label">Batteries</div>${hasBatt ? `<div class="t-val">${pct(g.BatteryPercent)} <small>of ${fmtNum(g.BatteryCapacity)} MWh</small></div>
         <div class="t-sub">${bar(g.BatteryPercent / 100, "var(--s3)")}${flow < -0.05 ? `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}` : g.BatteryPercent >= 99.95 ? "full" : flow < 0.05 ? "idle" : flow > 0 ? `charging ${fmtNum(flow, 1)} MW · full in ${esc(g.BatteryTimeFull)}` : `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}`}</div>`
         : `<div class="t-val muted">none</div><div class="t-sub">no Power Storage on this grid</div>`}</div>`;
