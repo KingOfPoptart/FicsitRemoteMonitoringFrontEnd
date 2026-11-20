@@ -12,7 +12,7 @@ const Power = (() => {
     lowfuel: { label: "Low fuel", color: "var(--serious)", title: "Fuel left, but not enough to keep running (supply too slow)" },
     nowater: { label: "No water", color: "var(--serious)", title: "Has fuel but too little water to run" },
     running: { label: "Running", color: "var(--ok)", title: "Producing power" },
-    standby: { label: "Standby", color: "var(--muted)", title: "Fuelled, but nothing on the grid needs its power" },
+    idle:    { label: "Idle", color: "var(--muted)", title: "Fuelled, but nothing on the grid needs its power" },
   };
   let groups = [], gens = [], usage = [], hist = null, timer = null, detailTimer = null, histTimer = null, netTimer = null, loaded = false;
   const ui = (() => { try { return { range: 60, grid: "all", gq: "", ...JSON.parse(localStorage.getItem("pw.ui2") || "{}") }; } catch { return { range: 60, grid: "all", gq: "" }; } })();
@@ -92,12 +92,12 @@ const Power = (() => {
   function genStatus(g) {
     if (g.PowerInfo?.FuseTriggered) return "fuse";
     if ((g.RegulatedDemandProd || 0) > 0 || /GeoThermal/i.test(g.ClassName)) return "running";
-    if (g.FuelResource === "None" || /AlienPower/i.test(g.ClassName)) return "standby";
+    if (g.FuelResource === "None" || /AlienPower/i.test(g.ClassName)) return "idle";
     const fuel = (g.FuelInventory || []).filter(f => f.Amount > 0 && energy(f.Name));
     if (!fuel.length) return "nofuel";
     const water = waterPct(g);
     if (water != null && water < 10) return "nowater";
-    return (g.DynamicProdCapacity || 0) > 0 ? "standby" : "lowfuel";
+    return (g.DynamicProdCapacity || 0) > 0 ? "idle" : "lowfuel";
   }
   let fuelOf = g => null;   // Production.fuelPicker over the last getGenerators answer
   let fuelScale = new Map();   // fuel -> averaged / right-now generator burn, from Production.snapshot
@@ -243,13 +243,13 @@ const Power = (() => {
     const flow = g.BatteryInput - g.BatteryOutput;
     $("wTiles").innerHTML = `
       <div class="tile click" data-jump="wUseCard" title="Show what's using the power"><div class="t-label">Consumption</div><div class="t-val">${mw(g.PowerConsumed)}</div>
-        <div class="t-sub">${unk ? "capacity not reported" : `${bar(load, loadColor)}${pct(load * 100)} of capacity`}</div></div>
+        <div class="t-sub">${unk ? "capacity not reported" : `${bar(load, loadColor)}${pct(load * 100)} of present capacity`}</div></div>
       <div class="tile click" data-jump="wGenCard" title="Show what's generating the power"><div class="t-label">Production</div><div class="t-val">${mw(g.PowerProduction)}</div><div class="t-sub">what generators put out now</div></div>
-      <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Capacity</div><div class="t-val">${unk ? `<span class="muted">–</span>` : mw(cap)}</div><div class="t-sub">${unk ? "no generators, and FRM reports 0" : g.PowerCapacity ? "if every fuelled generator ran flat out" : "the generators' own capacity (FRM reports 0)"}</div></div>
+      <div class="tile click" data-jump="wGensCard" title="Show every generator, with fuel and status"><div class="t-label">Capacity</div><div class="t-val">${unk ? `<span class="muted">–</span>` : mw(cap)}</div><div class="t-sub">${unk ? "no generators, and FRM reports 0" : g.PowerCapacity ? "present capacity if every fuelled generator ran flat out" : "the generators' own capacity (FRM reports 0)"}</div></div>
       <div class="tile click${maxOver ? " warn" : ""}" data-jump="wUseCard" title="Show max consumption by building type (lighter bars)"><div class="t-label">Max consumption</div><div class="t-val">${mw(g.PowerMaxConsumed)}</div>
-        <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - cap)} MW over capacity if everything runs at once</span>` : unk ? "if every machine ran at once" : "if every machine ran at once — fits"}</div></div>
+        <div class="t-sub">${maxOver ? `<span class="warn-text">⚠ ${fmtNum(g.PowerMaxConsumed - cap)} MW over present capacity if everything runs at once</span>` : unk ? "if every machine ran at once" : `if every machine ran at once — fits present capacity`}</div></div>
       <div class="tile click${headroom < 0 ? " bad" : ""}" data-jump="wChartCard" title="Show power over time"><div class="t-label">Headroom</div><div class="t-val">${headroom == null ? `<span class="muted">–</span>` : mw(headroom)}</div>
-        <div class="t-sub">${headroom == null ? "unknown without capacity" : headroom >= 0 ? "capacity − consumption" : hasBatt && g.BatteryPercent > 0 ? `<span class="bad-text">⚠ over capacity — batteries are covering it</span>` : `<span class="bad-text">⚠ over capacity</span>`}</div></div>
+        <div class="t-sub">${headroom == null ? "unknown without capacity" : headroom >= 0 ? "present capacity − present consumption" : hasBatt && g.BatteryPercent > 0 ? `<span class="bad-text">⚠ over present capacity — batteries are covering it</span>` : `<span class="bad-text">⚠ over present capacity</span>`}</div></div>
       <div class="tile click" data-jump="wChartCard" title="Show battery charge over time"><div class="t-label">Batteries</div>${hasBatt ? `<div class="t-val">${pct(g.BatteryPercent)} <small>of ${fmtNum(g.BatteryCapacity)} MWh</small></div>
         <div class="t-sub">${bar(g.BatteryPercent / 100, "var(--s3)")}${flow < -0.05 ? `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}` : g.BatteryPercent >= 99.95 ? "full" : flow < 0.05 ? "idle" : flow > 0 ? `charging ${fmtNum(flow, 1)} MW · full in ${esc(g.BatteryTimeFull)}` : `draining ${fmtNum(-flow, 1)} MW · empty in ${esc(g.BatteryTimeEmpty)}`}</div>`
         : `<div class="t-val muted">none</div><div class="t-sub">no Power Storage on this grid</div>`}</div>`;
@@ -258,15 +258,15 @@ const Power = (() => {
       (groups.length > 1 ? `<span class="stat"><b>${groups.length}</b>grids</span>` : "") +
       (groups.some(x => x.FuseTriggered) ? `<span class="stat" style="color:var(--bad)"><b>⚠</b>fuse tripped</span>` : "");
     $("wFuse").style.display = g.FuseTriggered ? "block" : "none";
-    $("wFuse").textContent = `⚠ ${g.all ? groups.filter(x => x.FuseTriggered).map(gridName).join(", ") : gridName(g)}: the fuse has tripped — everything on it is off. Reset it at any power pole or generator (and fix the overload first: consumption ${fmtNum(g.PowerConsumed)} MW vs capacity ${fmtNum(g.PowerCapacity)} MW).`;
+    $("wFuse").textContent = `⚠ ${g.all ? groups.filter(x => x.FuseTriggered).map(gridName).join(", ") : gridName(g)}: the fuse has tripped — everything on it is off. Reset it at any power pole or generator (and fix the overload first: consumption ${fmtNum(g.PowerConsumed)} MW vs present capacity ${fmtNum(g.PowerCapacity)} MW).`;
   }
 
   function renderGrids() {
     $("wGridGroup").style.display = groups.length > 1 ? "" : "none";   // one grid: nothing to choose
     const all = allGrids();
-    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: `All grids <span class="n">${mwPair(all)}</span>`, title: "used / max (generator capacity)" },
+    setSeg($("wGrids"), segControl("grid", [{ v: "all", label: `All grids <span class="n">${mwPair(all)}</span>`, title: "present consumption / present capacity" },
       ...groups.map(g => ({ v: String(g.CircuitGroupID), label: `${g.FuseTriggered ? "⚠ " : ""}${esc(gridName(g))}`,
-        title: "used / max (generator capacity)" }))], o => o.v === String(grid().CircuitGroupID)));
+        title: "present consumption / present capacity" }))], o => o.v === String(grid().CircuitGroupID)));
   }
 
   // ---- grid layout: start at the circuit with the generators and follow the switches outward

@@ -71,9 +71,9 @@ const Overview = (() => {
       const name = (d.getPower.length > 1 ? `Grid ${g.CircuitGroupID}: ` : "");
       if (g.FuseTriggered) add("bad", `${name}fuse tripped — the grid is off`, "power");
       else if (!g.PowerCapacity && g.PowerProduction > 0) continue;   // capacity not reported (no-power-cost world): no overload alarms
-      else if (g.PowerConsumed > g.PowerCapacity) add("bad", `${name}using ${fmtNum(g.PowerConsumed)} MW, more than the ${fmtNum(g.PowerCapacity)} MW capacity${g.BatteryCapacity ? ` — batteries at ${pct(g.BatteryPercent)}` : ""}`, "power");
-      else if (g.PowerConsumed > g.PowerCapacity * 0.9) add("warn", `${name}power is ${pct(g.PowerConsumed / g.PowerCapacity * 100)} of capacity`, "power");
-      if (g.PowerMaxConsumed > g.PowerCapacity) add("warn", `${name}max consumption ${fmtNum(g.PowerMaxConsumed)} MW is over capacity ${fmtNum(g.PowerCapacity)} MW — a fuse could trip if everything runs at once`, "power");
+      else if (g.PowerConsumed > g.PowerCapacity) add("bad", `${name}using ${fmtNum(g.PowerConsumed)} MW, more than the ${fmtNum(g.PowerCapacity)} MW present capacity${g.BatteryCapacity ? ` — batteries at ${pct(g.BatteryPercent)}` : ""}`, "power");
+      else if (g.PowerConsumed > g.PowerCapacity * 0.9) add("warn", `${name}using ${pct(g.PowerConsumed / g.PowerCapacity * 100)} of present capacity`, "power");
+      if (g.PowerMaxConsumed > g.PowerCapacity) add("warn", `${name}max consumption of ${fmtNum(g.PowerMaxConsumed)} MW is over present capacity of ${fmtNum(g.PowerCapacity)} MW — a fuse could trip if everything runs at once`, "power");
     }
     if (prod) {
       const gens = prod.gens || [];
@@ -139,7 +139,7 @@ const Overview = (() => {
     const gens = prod?.gens || [], gensOn = gens.filter(g => g.RegulatedDemandProd > 0).length;
     const maxOver = tot("PowerMaxConsumed") > tot("PowerCapacity");
     $("ovPower").innerHTML = gs.length ? `<div class="big">${fmtNum(tot("PowerConsumed"))} <small>/ ${fmtNum(tot("PowerCapacity"))} MW used</small></div>
-      <div class="t-sub">${bar(load, load > 1 ? "var(--bad)" : load > 0.9 ? "var(--warn)" : "var(--ok)")}${pct(load * 100)} of capacity${gs.length > 1 ? ` · ${gs.length} grids` : ""}</div>` : `<p class="muted">No grids.</p>`;
+      <div class="t-sub">${bar(load, load > 1 ? "var(--bad)" : load > 0.9 ? "var(--warn)" : "var(--ok)")}${pct(load * 100)} of present capacity${gs.length > 1 ? ` · ${gs.length} grids` : ""}</div>` : `<p class="muted">No grids.</p>`;
     $("ovPowerFigs").innerHTML = gs.length ? [
       ["Production", `${fmtNum(tot("PowerProduction"))} MW`],
       ["Max use", `<span class="${maxOver ? "warn-text" : ""}" title="Max consumption: if every machine ran at once">${fmtNum(tot("PowerMaxConsumed"))} MW</span>`],
