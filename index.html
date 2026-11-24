@@ -1234,6 +1234,13 @@ let rowResized = false;
 
 // hover popups: cargo lists its items (unless the row is clicked open); other cells show full text when clamped
 const cargoPop = $("cargoPop");
+let cargoPopHtml = null;
+function setCargoPopHtml(html) {
+  if (html !== cargoPopHtml) {
+    cargoPop.innerHTML = html;
+    cargoPopHtml = html;
+  }
+}
 function hideCargoPop() { cargoPop.style.display = "none"; }
 $("tbody").addEventListener("mousemove", e => {
   if (document.body.classList.contains("row-resizing")) return hideCargoPop();
@@ -1242,12 +1249,12 @@ $("tbody").addEventListener("mousemove", e => {
   if (td.classList.contains("cargo")) {
     const v = !tr.classList.contains("cargo-open") && vehicles.find(x => x.id === tr.dataset.id);
     if (!v || !v.items.length) return hideCargoPop();
-    cargoPop.innerHTML = `<div class="head">${esc(v.type)} ${esc(shortId(v.id))}${v.consist ? ` (${esc(v.consist)})` : ""} · ${(v.fill * 100).toFixed(0)}% full</div>` +
-      v.items.map(i => `<div class="row"><span>${esc(i.name)}</span><b>${i.unit ? Math.round(i.amount).toLocaleString() + " " + i.unit : "×" + i.amount.toLocaleString()}</b></div>`).join("");
+    setCargoPopHtml(`<div class="head">${esc(v.type)} ${esc(shortId(v.id))}${v.consist ? ` (${esc(v.consist)})` : ""} · ${(v.fill * 100).toFixed(0)}% full</div>` +
+      v.items.map(i => `<div class="row"><span>${esc(i.name)}</span><b>${i.unit ? Math.round(i.amount).toLocaleString() + " " + i.unit : "×" + i.amount.toLocaleString()}</b></div>`).join(""));
   } else {
     const cell = td.querySelector(".cell");
     if (!cell || (cell.scrollHeight <= cell.clientHeight + 1 && cell.scrollWidth <= cell.clientWidth + 1)) return hideCargoPop();
-    cargoPop.innerHTML = `<div class="row"><span>${esc(cell.textContent.trim())}</span></div>`;
+    setCargoPopHtml(`<div class="row"><span>${esc(cell.textContent.trim())}</span></div>`);
   }
   cargoPop.style.display = "block";
   const r = cargoPop.getBoundingClientRect();
@@ -1565,7 +1572,7 @@ function vehiclePop(v) {
     Pop.where(v.loc);
 }
 function showPopAt(html, x, y) {
-  cargoPop.innerHTML = html; cargoPop.style.display = "block";
+  setCargoPopHtml(html); cargoPop.style.display = "block";
   const r = cargoPop.getBoundingClientRect();
   cargoPop.style.left = Math.min(x + 14, innerWidth - r.width - 8) + "px";
   cargoPop.style.top = (y + 18 + r.height > innerHeight ? Math.max(8, y - r.height - 10) : y + 18) + "px";
@@ -1748,8 +1755,8 @@ document.addEventListener("mousemove", e => {
   const el = e.target.closest(CLIPPABLE);
   const clipped = el && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1);
   if (clipped && el.textContent.trim()) {
-    cargoPop.innerHTML = `<div class="row"><span>${esc(el.textContent.replace(/\s+/g, " ").trim())}</span></div>`;
-    cargoPop.dataset.clip = "1"; showPopAt(cargoPop.innerHTML, e.clientX, e.clientY);
+    const html = `<div class="row"><span>${esc(el.textContent.replace(/\s+/g, " ").trim())}</span></div>`;
+    cargoPop.dataset.clip = "1"; showPopAt(html, e.clientX, e.clientY);
   } else if (cargoPop.dataset.clip) { cargoPop.dataset.clip = ""; hideCargoPop(); }
 });
 
