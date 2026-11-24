@@ -53,6 +53,8 @@ To start it with Windows, make a shortcut in the Startup folder (Win+R → `shel
 
 `items.json` (every item in the game, with fuel energy values) is included. To regenerate it after a game update, run `python tools/generate_items.py --game-dir "<Satisfactory install>"`.
 
+`wiki-images.json` is bundled so missing images can redirect to the wiki even if assets are never downloaded. Every run of `fetch_assets.py` refreshes this index using the wiki API, including with `--skip-images`; restart the server to load the updated index.
+
 ### Troubleshooting
 - **"offline: FRM not answering"**: FRM's web server isn't running, or isn't at the address the monitor uses. Check step 1, and `--frm` if FRM runs on another machine. While the game server is down, the dashboard shows the last state it saw ("offline since …").
 - **No map background**: run step 4 (look for `map.avif` in the monitor's folder).

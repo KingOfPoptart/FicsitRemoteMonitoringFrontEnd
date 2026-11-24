@@ -64,6 +64,7 @@ LAST_SAVE_S = 300
 OFFLINE_RETRY_S = 5   # while FRM is down: check this often whether it's back (pages get the last answer at once)
 KEEP_S = 24 * 3600
 POWER_EVERY_S, PROD_EVERY_S, SAVE_EVERY_S = 5, 15, 60
+WIKI_IMAGES = json.loads((ROOT / "wiki-images.json").read_text(encoding="utf-8"))
 
 
 # ---- FRM access with a short cache ------------------------------------------------------------
@@ -1140,6 +1141,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if path.startswith("/api/"):
             return self.proxy(path[5:], query)
+        if re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path):
+            if not (ROOT / path.lstrip("/")).is_file():
+                url = WIKI_IMAGES.get(path)
+                if url:
+                    self.send_response(302)
+                    self.send_header("Location", url)
+                    self.end_headers()
+                    return
+                return self.send_icon_fallback()
+            return super().do_GET()
         if path == "/logistics":
             LOGI["bg" if "bg=1" in query else "fg"] = time.monotonic()
             if logistics_due():
@@ -1173,6 +1184,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 or re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path)):
             return super().do_GET()
         self.send_error(404)
+
+    def send_icon_fallback(self):
+        body = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="#8993a4" fill-opacity=".12" stroke="#8993a4" stroke-width="1.5"/><text x="16" y="24" fill="#8993a4" font-family="Arial,sans-serif" font-size="23" font-weight="600" text-anchor="middle">?</text></svg>'
+        self._icon_fallback = True
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def is_local(self):
         return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
@@ -1218,6 +1238,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def send_response(self, code, message=None):
         self._status = code
         super().send_response(code, message)
+
+    def send_header(self, keyword, value):
+        if keyword.lower() == "cache-control" and getattr(self, "_icon_fallback", False):
+            value = "no-store"
+        super().send_header(keyword, value)
 
     def end_headers(self):
         if getattr(self, "_status", 200) >= 400:   # never let the browser cache an error (e.g. an icon fetched later)
