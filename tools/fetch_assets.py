@@ -45,6 +45,24 @@ ICON_BUILDINGS = [
 ]
 # things a player can carry that items.json doesn't list (Inventory tab)
 ICON_EXTRA = ["FICSIT Coupon", "Hard Drive"]
+# Build-gun recipes shown in milestone tooltips that are not item descriptors.
+ICON_MILESTONES = [
+    "Block Signal", "Blueprint Designer Mk.1", "Blueprint Designer Mk.2", "Blueprint Designer Mk.3",
+    "Buffer Stop", "Conveyor Belt Mk.1", "Conveyor Belt Mk.2", "Conveyor Belt Mk.3", "Conveyor Belt Mk.4",
+    "Conveyor Belt Mk.5", "Conveyor Belt Mk.6", "Conveyor Lift Mk.1", "Conveyor Lift Mk.2", "Conveyor Lift Mk.3",
+    "Conveyor Lift Mk.4", "Conveyor Lift Mk.5", "Conveyor Lift Mk.6", "Conveyor Merger", "Conveyor Splitter",
+    "Conveyor Pole", "Drone", "Electric Locomotive", "Empty Platform With Catwalk", "Fluid Truck", "Fluid Truck Station",
+    "Freight Car", "Hypertube", "Hypertube Branch", "Hypertube Junction", "Hypertube Support", "Jump Pad",
+    "MAM", "Main Portal", "Path Signal", "Pipeline Mk.1", "Pipeline Mk.2", "Pipeline Support",
+    "Power Line", "Power Pole Mk.1", "Power Tower", "Power Tower Platform", "Railway", "Satellite Portal", "Stackable Conveyor Pole",
+    "Stackable Hypertube Support", "Stackable Pipeline Support", "Tractor", "Tractor Vehicle Path",
+    "Truck", "Truck Vehicle Path", "U-Jelly Landing Pad", "Universal Vehicle Path",
+]
+ICON_MILESTONE_ALIASES = {
+    f"{kind} ({height} m)": f"{kind} {height}m (FICSIT).png"
+    for kind, heights in (("Basic Wall", (1, 4)), ("Foundation", (1, 2, 4)), ("Ramp", (1, 2, 4)))
+    for height in heights
+}
 icon_slug = lambda name: re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")   # same rule as the page's iconSlug()
 
 
@@ -93,13 +111,44 @@ def download(wanted, size, label):
     print(f"{label}: {got} downloaded" + (f", not on the wiki: {', '.join(missing)}" if missing else ""))
 
 
+def icon_files():
+    items = [i["name"] for i in json.loads((ROOT / "items.json").read_text(encoding="utf-8"))]
+    icons = {f"{icon_slug(n)}.png": f"{n}.png" for n in items + ICON_BUILDINGS + ICON_EXTRA + ICON_MILESTONES}
+    icons.update({f"{icon_slug(n)}.png": filename for n, filename in ICON_MILESTONE_ALIASES.items()})
+    return icons
+
+
+def image_files():
+    images = {f"/img/{name}.png": filename for name, filename in VEHICLE_IMAGES.items()}
+    images.update({f"/img/icons/{name}": filename for name, filename in icon_files().items()})
+    return images
+
+
+def build_index(images):
+    urls = wiki_urls(sorted(set(images.values())))
+    missing = sorted(set(images.values()) - urls.keys())
+    if missing:
+        print(f"Not on the wiki: {', '.join(missing)}")
+    for url in urls.values():
+        parsed = urllib.parse.urlsplit(url)
+        if (not url.isascii() or parsed.scheme != "https" or parsed.netloc != "satisfactory.wiki.gg"
+                or not parsed.path.startswith("/images/") or any(ord(c) < 32 or ord(c) == 127 for c in url)):
+            raise ValueError(f"Unexpected wiki image URL: {url!r}")
+    return {path: urls[name] for path, name in sorted(images.items()) if name in urls}
+
+
+def refresh_wiki_images():
+    index = build_index(image_files())
+    (ROOT / "wiki-images.json").write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"wiki image index: {len(index)} URLs")
+
+
 def fetch_images():
     download({ROOT / "img" / f"{name}.png": f for name, f in VEHICLE_IMAGES.items()}, 96, "vehicle pictures")
 
 
 def fetch_icons():
-    items = [i["name"] for i in json.loads((ROOT / "items.json").read_text(encoding="utf-8"))]
-    download({ROOT / "img" / "icons" / f"{icon_slug(n)}.png": f"{n}.png" for n in items + ICON_BUILDINGS + ICON_EXTRA}, 64, "item/building icons")
+    download({ROOT / "img" / "icons" / name: filename for name, filename in icon_files().items()}, 64, "item/building icons")
 
 
 if __name__ == "__main__":
@@ -111,6 +160,7 @@ if __name__ == "__main__":
         copy_map(args.game_dir)
     else:
         print("map.avif: skipped (pass --game-dir to copy it from your FRM install)")
+    refresh_wiki_images()
     if not args.skip_images:
         fetch_images()
         fetch_icons()

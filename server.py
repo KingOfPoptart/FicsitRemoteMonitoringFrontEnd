@@ -64,6 +64,7 @@ LAST_SAVE_S = 300
 OFFLINE_RETRY_S = 5   # while FRM is down: check this often whether it's back (pages get the last answer at once)
 KEEP_S = 24 * 3600
 POWER_EVERY_S, PROD_EVERY_S, SAVE_EVERY_S = 5, 15, 60
+WIKI_IMAGES = json.loads((ROOT / "wiki-images.json").read_text(encoding="utf-8"))
 
 
 # ---- FRM access with a short cache ------------------------------------------------------------
@@ -1169,8 +1170,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_body(200, json.dumps(data, separators=(",", ":")).encode())
         if path == "/update/status":
             return self.send_body(200, json.dumps(updater.status(self.is_local())).encode())
-        if re.fullmatch(r"/img/icons/[a-z0-9-]+\.png", path):
+        if re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path):
             if not (ROOT / path.lstrip("/")).is_file():
+                url = WIKI_IMAGES.get(path)
+                if url:
+                    self.send_response(302)
+                    self.send_header("Location", url)
+                    self.end_headers()
+                    return
                 return self.send_icon_fallback()
             return super().do_GET()
         if (path in ("/", "/index.html", "/items.json", "/map.avif") or re.fullmatch(r"/js/[a-z0-9-]+\.js", path)
