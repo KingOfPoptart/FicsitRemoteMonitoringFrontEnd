@@ -1141,6 +1141,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if path.startswith("/api/"):
             return self.proxy(path[5:], query)
+        if re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path):
+            if not (ROOT / path.lstrip("/")).is_file():
+                url = WIKI_IMAGES.get(path)
+                if url:
+                    self.send_response(302)
+                    self.send_header("Location", url)
+                    self.end_headers()
+                    return
+                return self.send_icon_fallback()
+            return super().do_GET()
         if path == "/logistics":
             LOGI["bg" if "bg=1" in query else "fg"] = time.monotonic()
             if logistics_due():
@@ -1170,16 +1180,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_body(200, json.dumps(data, separators=(",", ":")).encode())
         if path == "/update/status":
             return self.send_body(200, json.dumps(updater.status(self.is_local())).encode())
-        if re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path):
-            if not (ROOT / path.lstrip("/")).is_file():
-                url = WIKI_IMAGES.get(path)
-                if url:
-                    self.send_response(302)
-                    self.send_header("Location", url)
-                    self.end_headers()
-                    return
-                return self.send_icon_fallback()
-            return super().do_GET()
         if (path in ("/", "/index.html", "/items.json", "/map.avif") or re.fullmatch(r"/js/[a-z0-9-]+\.js", path)
                 or re.fullmatch(r"/img/(icons/)?[a-z0-9-]+\.png", path)):
             return super().do_GET()
@@ -1239,10 +1239,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self._status = code
         super().send_response(code, message)
 
+    def send_header(self, keyword, value):
+        if keyword.lower() == "cache-control" and getattr(self, "_icon_fallback", False):
+            value = "no-store"
+        super().send_header(keyword, value)
+
     def end_headers(self):
         if getattr(self, "_status", 200) >= 400:   # never let the browser cache an error (e.g. an icon fetched later)
-            self.send_header("Cache-Control", "no-store")
-        elif getattr(self, "_icon_fallback", False):
             self.send_header("Cache-Control", "no-store")
         elif self.path.startswith(("/map.avif", "/img/")):
             self.send_header("Cache-Control", "max-age=86400")

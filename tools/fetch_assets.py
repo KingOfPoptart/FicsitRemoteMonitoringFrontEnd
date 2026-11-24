@@ -160,8 +160,10 @@ if __name__ == "__main__":
         copy_map(args.game_dir)
     else:
         print("map.avif: skipped (pass --game-dir to copy it from your FRM install)")
-    refresh_wiki_images()
     if not args.skip_images:
+        refresh_wiki_images()
         fetch_images()
         fetch_icons()
+    else:
+        refresh_wiki_images()
     sys.exit(0)
