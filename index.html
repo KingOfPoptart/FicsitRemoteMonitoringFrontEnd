@@ -1394,9 +1394,10 @@ function stationWhy(kind, s) {
   return "";
 }
 async function pollStatic() {
-  const [ts, rs, ps, rl] = await Promise.allSettled([getJSON("getTruckStation"), getJSON("getTrainStation"), getJSON("getVehiclePaths"), getJSON("getTrainRails")]);
+  const [ts, rs, ds, ps, rl] = await Promise.allSettled([getJSON("getTruckStation"), getJSON("getTrainStation"), getJSON("getDroneStation"), getJSON("getVehiclePaths"), getJSON("getTrainRails")]);
   if (ts.status === "fulfilled") truckStations = fixNames(ts.value);
   if (rs.status === "fulfilled") trainStations = fixNames(rs.value);
+  if (ds.status === "fulfilled") dronePorts = fixNames(ds.value);
   if (ps.status === "fulfilled") paths = ps.value.map(p => ({ cart: /FactoryCart/i.test(p.ClassName), pts: p.PathPoints || [] }));
   if (rl.status === "fulfilled") { rails = rl.value.map(r => ({ pts: r.SplineData?.length ? r.SplineData : [r.location0, r.location1].filter(Boolean) })); railNet = buildRailNet(rl.value); }
   renderLayerButtons();
